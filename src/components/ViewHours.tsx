@@ -3,11 +3,13 @@
 import { useMutation } from "@tanstack/react-query";
 import {
   endOfDay,
+  endOfMonth,
   endOfWeek,
   endOfYear,
   format,
   isWithinInterval,
   startOfDay,
+  startOfMonth,
   startOfWeek,
   startOfYear,
 } from "date-fns";
@@ -52,15 +54,26 @@ export default function ViewHours({ entries }: ViewHoursProps) {
   }, [entries]);
 
   const [timeframe, setTimeframe] = useState<
-    "year" | "week" | "all" | "custom"
+    "year" | "month" | "week" | "all" | "custom"
   >(defaultTimeframe);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
 
   // Editing state
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editClockIn, setEditClockIn] = useState("");
   const [editClockOut, setEditClockOut] = useState("");
+
+  const availableYears = useMemo(() => {
+    const years = new Set<number>();
+    years.add(new Date().getFullYear());
+    for (const e of entries) {
+      years.add(new Date(e.clock_in).getFullYear());
+    }
+    return Array.from(years).sort((a, b) => b - a);
+  }, [entries]);
 
   const deleteMutation = useMutation({
     mutationFn: deleteTimeEntryAction,
@@ -106,9 +119,19 @@ export default function ViewHours({ entries }: ViewHoursProps) {
           return false;
         }
       });
+    } else if (timeframe === "month") {
+      const start = startOfMonth(new Date(selectedYear, selectedMonth, 1));
+      const end = endOfMonth(new Date(selectedYear, selectedMonth, 1));
+      result = result.filter((e) => {
+        try {
+          return isWithinInterval(new Date(e.clock_in), { start, end });
+        } catch {
+          return false;
+        }
+      });
     } else if (timeframe === "year") {
-      const start = startOfYear(new Date());
-      const end = endOfYear(new Date());
+      const start = startOfYear(new Date(selectedYear, 0, 1));
+      const end = endOfYear(new Date(selectedYear, 0, 1));
       result = result.filter((e) => {
         try {
           return isWithinInterval(new Date(e.clock_in), { start, end });
@@ -130,7 +153,7 @@ export default function ViewHours({ entries }: ViewHoursProps) {
     }
 
     return result;
-  }, [entries, timeframe, startDate, endDate]);
+  }, [entries, timeframe, startDate, endDate, selectedYear, selectedMonth]);
 
   const chartData = useMemo(() => {
     // Group entries by date and calculate total hours
@@ -157,7 +180,7 @@ export default function ViewHours({ entries }: ViewHoursProps) {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div className="flex bg-zinc-100 dark:bg-zinc-900 p-1 rounded-lg overflow-x-auto max-w-full">
-          {(["week", "year", "custom", "all"] as const).map((t) => (
+          {(["week", "month", "year", "custom", "all"] as const).map((t) => (
             <button
               key={t}
               type="button"
@@ -190,13 +213,63 @@ export default function ViewHours({ entries }: ViewHoursProps) {
             />
           </div>
         )}
+
+        {timeframe === "month" && (
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <Calendar className="h-4 w-4 text-zinc-400" />
+            <select
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(Number(e.target.value))}
+              className="px-2 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg text-xs outline-none focus:ring-1 focus:ring-zinc-400"
+            >
+              {Array.from({ length: 12 }).map((_, i) => (
+                <option key={i} value={i}>
+                  {format(new Date(2025, i, 1), "MMMM")}
+                </option>
+              ))}
+            </select>
+            <select
+              value={selectedYear}
+              onChange={(e) => setSelectedYear(Number(e.target.value))}
+              className="px-2 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg text-xs outline-none focus:ring-1 focus:ring-zinc-400"
+            >
+              {availableYears.map((y) => (
+                <option key={y} value={y}>
+                  {y}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {timeframe === "year" && (
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <Calendar className="h-4 w-4 text-zinc-400" />
+            <select
+              value={selectedYear}
+              onChange={(e) => setSelectedYear(Number(e.target.value))}
+              className="px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg text-xs outline-none focus:ring-1 focus:ring-zinc-400"
+            >
+              {availableYears.map((y) => (
+                <option key={y} value={y}>
+                  {y}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <Card className="p-6 md:col-span-2">
           <div className="flex flex-col gap-1 mb-8">
             <h3 className="text-sm font-medium text-zinc-500">
-              Summary hours for {timeframe}
+              Summary hours for{" "}
+              {timeframe === "month"
+                ? `${format(new Date(selectedYear, selectedMonth, 1), "MMMM")} ${selectedYear}`
+                : timeframe === "year"
+                  ? selectedYear
+                  : timeframe}
             </h3>
             <div className="flex items-end gap-2">
               <span className="text-3xl font-black">
@@ -354,7 +427,7 @@ export default function ViewHours({ entries }: ViewHoursProps) {
                                 : "0.00"}
                               h
                             </span>
-                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="flex items-center gap-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
                               <button
                                 type="button"
                                 onClick={() => {
