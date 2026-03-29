@@ -156,7 +156,6 @@ export default function ViewHours({ entries }: ViewHoursProps) {
   }, [entries, timeframe, startDate, endDate, selectedYear, selectedMonth]);
 
   const chartData = useMemo(() => {
-    // Group entries by date and calculate total hours
     const dataMap: Record<string, number> = {};
 
     filteredEntries.forEach((e) => {
@@ -178,6 +177,7 @@ export default function ViewHours({ entries }: ViewHoursProps) {
 
   return (
     <div className="space-y-6">
+      {/* Controls Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div className="flex bg-zinc-100 dark:bg-zinc-900 p-1 rounded-lg overflow-x-auto max-w-full">
           {(["week", "month", "year", "custom", "all"] as const).map((t) => (
@@ -196,6 +196,7 @@ export default function ViewHours({ entries }: ViewHoursProps) {
           ))}
         </div>
 
+        {/* Dynamic Inputs Based on Timeframe */}
         {timeframe === "custom" && (
           <div className="flex items-center gap-2 w-full sm:w-auto">
             <input
@@ -260,7 +261,9 @@ export default function ViewHours({ entries }: ViewHoursProps) {
         )}
       </div>
 
+      {/* Content Grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Chart Section */}
         <Card className="p-6 md:col-span-2">
           <div className="flex flex-col gap-1 mb-8">
             <h3 className="text-sm font-medium text-zinc-500">
@@ -334,6 +337,7 @@ export default function ViewHours({ entries }: ViewHoursProps) {
           </div>
         </Card>
 
+        {/* Details Section */}
         <Card className="p-6 flex flex-col justify-between overflow-hidden relative">
           <div className="space-y-4">
             <h3 className="text-lg font-bold mb-6">Details</h3>
@@ -411,7 +415,7 @@ export default function ViewHours({ entries }: ViewHoursProps) {
                         </div>
                       </div>
                     ) : (
-                      <>
+                      <div className="flex flex-col gap-2">
                         <div className="flex justify-between items-center text-sm font-bold">
                           <span>
                             {format(new Date(entry.clock_in), "eeee, MMM d")}
@@ -472,7 +476,7 @@ export default function ViewHours({ entries }: ViewHoursProps) {
                             ? format(new Date(entry.clock_out), "hh:mm a")
                             : "..."}
                         </div>
-                      </>
+                      </div>
                     )}
                   </div>
                 ))
