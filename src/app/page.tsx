@@ -40,12 +40,14 @@ export default function Home() {
             />
           </Show>
           <Show when="signed-out">
-            <button
-              type="button"
-              className="px-4 py-2 bg-zinc-900 text-zinc-50 rounded-md hover:bg-zinc-800 transition-colors dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
-            >
-              Sign In
-            </button>
+            <SignInButton>
+              <button
+                type="button"
+                className="px-4 py-2 bg-zinc-900 text-zinc-50 rounded-md hover:bg-zinc-800 transition-colors dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+              >
+                Sign In
+              </button>
+            </SignInButton>
           </Show>
         </div>
       </header>
