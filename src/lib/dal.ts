@@ -1,5 +1,5 @@
-import { auth } from "@clerk/nextjs/server";
-import { err, errAsync, okAsync } from "neverthrow";
+import { auth, clerkClient } from "@clerk/nextjs/server";
+import { errAsync, okAsync } from "neverthrow";
 import { sql } from "./db";
 
 export type TimeEntry = {
@@ -17,30 +17,64 @@ export type SerializableResult<T, E> =
   | { error: E; ok: false };
 
 export async function getAuthSession() {
-  const { userId, orgId } = await auth();
+  const { userId, orgId, orgRole } = await auth();
   if (!userId || !orgId) {
     return errAsync({ reason: "Unauthorized or no organization selected" });
   }
-  return okAsync({ userId, orgId });
+  return okAsync({ userId, orgId, isAdmin: orgRole === "org:admin" });
 }
 
-export async function getTimeEntries(): Promise<
+export async function getOrgMembers() {
+  const { orgId, orgRole } = await auth();
+  if (!orgId || orgRole !== "org:admin") {
+    return [];
+  }
+
+  try {
+    const client = await clerkClient();
+    const members = await client.organizations.getOrganizationMembershipList({
+      organizationId: orgId,
+    });
+
+    return members.data.map((m) => ({
+      id: m.publicUserData?.userId || "",
+      name: m.publicUserData?.firstName 
+        ? `${m.publicUserData.firstName} ${m.publicUserData.lastName || ""}`.trim()
+        : m.publicUserData?.identifier || "Unknown Member",
+    }));
+  } catch (error) {
+    console.error("Error fetching members:", error);
+    return [];
+  }
+}
+
+export async function getTimeEntries(targetUserId?: string): Promise<
   SerializableResult<TimeEntry[], { reason: string }>
 > {
-  const { userId, orgId } = await auth.protect();
+  const { userId, orgId, orgRole } = await auth();
   if (!userId || !orgId) {
     return {
       error: { reason: "Unauthorized or no organization selected" },
       ok: false,
     };
   }
+
+  const queryUserId = targetUserId || userId;
+  const isAdmin = orgRole === "org:admin";
+
+  if (queryUserId !== userId && !isAdmin) {
+    return {
+      error: { reason: "Forbidden: You do not have permission to view these entries" },
+      ok: false,
+    };
+  }
+
   try {
     const rows = await sql`
                 SELECT * FROM time_entries 
-                WHERE user_id = ${userId} AND org_id = ${orgId}
+                WHERE user_id = ${queryUserId} AND org_id = ${orgId}
                 ORDER BY clock_in DESC
             `;
-    console.log("Hours: ", rows);
     return { value: rows as unknown as TimeEntry[], ok: true };
   } catch (error) {
     console.error("DB error: ", error);
@@ -49,7 +83,7 @@ export async function getTimeEntries(): Promise<
 }
 
 export async function clockIn() {
-  const { userId, orgId } = await auth.protect();
+  const { userId, orgId } = await auth();
   if (!userId || !orgId) {
     return errAsync({
       reason: "Unauthorized or no organization selected",
@@ -57,7 +91,6 @@ export async function clockIn() {
   }
 
   try {
-    // Check if already clocked in
     const activeEntry = await sql`
                 SELECT id FROM time_entries 
                 WHERE user_id = ${userId} AND org_id = ${orgId} AND clock_out IS NULL
@@ -82,7 +115,7 @@ export async function clockIn() {
 }
 
 export async function clockOut() {
-  const { userId, orgId } = await auth.protect();
+  const { userId, orgId } = await auth();
   if (!userId || !orgId) {
     return errAsync({
       reason: "Unauthorized or no organization selected",
@@ -108,21 +141,23 @@ export async function clockOut() {
 }
 
 export async function deleteTimeEntry(id: number) {
-  const { userId, orgId } = await auth.protect();
+  const { userId, orgId, orgRole } = await auth();
   if (!userId || !orgId) {
-    return errAsync({
-      reason: "Unauthorized or no organization selected",
-    } as const);
+    return errAsync({ reason: "Unauthorized" } as const);
   }
+  const isAdmin = orgRole === "org:admin";
+
   try {
     const [deleted] = await sql`
       DELETE FROM time_entries 
-      WHERE id = ${id} AND user_id = ${userId} AND org_id = ${orgId}
+      WHERE id = ${id} AND org_id = ${orgId}
+      AND (user_id = ${userId} OR ${isAdmin})
       RETURNING *
     `;
+    
     return deleted
       ? okAsync(deleted as unknown as TimeEntry)
-      : errAsync({ reason: "Entry not found" } as const);
+      : errAsync({ reason: "Entry not found or unauthorized" } as const);
   } catch (error) {
     console.error("Delete error: ", error);
     return errAsync({ reason: "Failed to delete entry" } as const);
@@ -134,26 +169,27 @@ export async function updateTimeEntry(
   clock_in: Date,
   clock_out: Date | null,
 ) {
-  const { userId, orgId } = await auth.protect();
+  const { userId, orgId, orgRole } = await auth();
   if (!userId || !orgId) {
-    return errAsync({
-      reason: "Unauthorized or no organization selected",
-    } as const);
+    return errAsync({ reason: "Unauthorized" } as const);
   }
+  const isAdmin = orgRole === "org:admin";
+
   try {
     const [updated] = await sql`
       UPDATE time_entries
       SET clock_in = ${clock_in},
           clock_out = ${clock_out},
           updated_at = NOW()
-      WHERE id = ${id} AND user_id = ${userId} AND org_id = ${orgId}
+      WHERE id = ${id} AND org_id = ${orgId}
+      AND (user_id = ${userId} OR ${isAdmin})
       RETURNING *
     `;
     return updated
       ? okAsync(updated as unknown as TimeEntry)
-      : errAsync({ reason: "Entry not found" } as const);
+      : errAsync({ reason: "Entry not found or unauthorized" } as const);
   } catch (error) {
     console.error("Update error: ", error);
-    return err({ reason: "Failed to update entry" } as const);
+    return errAsync({ reason: "Failed to update entry" } as const);
   }
 }

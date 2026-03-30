@@ -5,12 +5,32 @@ import {
   UserButton,
 } from "@clerk/nextjs";
 import { dark } from "@clerk/ui/themes";
+import Link from "next/link";
 import { Suspense } from "react";
 import DashboardTabs from "@/components/DashboardTabs";
-import { getTimeEntries } from "@/lib/dal";
-export default function Home() {
-  // We fetch without await, passing the promise to the child component
-  const timeEntriesPromise = getTimeEntries();
+import { getAuthSession, getOrgMembers, getTimeEntries } from "@/lib/dal";
+
+export default function Home(props: PageProps<"/">) {
+  // const { userId: targetUserId } = await props.searchParams;
+
+  const userIdPromise = props.searchParams.then((params) =>
+    Array.isArray(params.userId) ? params.userId[0] : params.userId,
+  );
+
+  const timeEntriesPromise = props.searchParams.then((params) =>
+    getTimeEntries(
+      Array.isArray(params.userId) ? params.userId[0] : params.userId,
+    ),
+  );
+
+  // Add the parentheses here:
+  const isAdminPromise = getAuthSession().then((result) => {
+    if (result.isOk()) {
+      return result.value.isAdmin;
+    }
+    return false; // Default to false if auth fails
+  });
+  const membersPromise = getOrgMembers();
 
   return (
     <main className="flex-1 flex flex-col max-w-5xl mx-auto w-full px-4 py-8">
@@ -21,12 +41,17 @@ export default function Home() {
             Efficient time tracking for professional teams.
           </p>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-6">
+          <Link
+            href="/plans"
+            className="text-sm font-medium text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+          >
+            Plans
+          </Link>
           <Show when="signed-in">
             <OrganizationSwitcher
               appearance={{
                 theme: dark,
-
                 elements: {
                   organizationSwitcherTrigger:
                     "py-1.5 px-3 border border-zinc-200 dark:border-zinc-800 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-900 transition-colors",
@@ -54,7 +79,12 @@ export default function Home() {
 
       <Show when="signed-in">
         <Suspense fallback={<DashboardSkeleton />}>
-          <DashboardTabs entriesPromise={timeEntriesPromise} />
+          <DashboardTabs
+            entriesPromise={timeEntriesPromise}
+            isAdminPromise={isAdminPromise}
+            membersPromise={membersPromise}
+            selectedUserIdPromise={userIdPromise}
+          />
         </Suspense>
       </Show>
 

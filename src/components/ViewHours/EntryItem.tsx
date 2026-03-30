@@ -7,14 +7,14 @@ import { useMutation } from "@tanstack/react-query";
 import { updateTimeEntryAction } from "@/lib/actions";
 import { toast } from "sonner";
 import type { TimeEntry } from "@/lib/dal";
-import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
+import { DeleteConfirmDialog } from "../DeleteConfirmDialog";
 
 interface EntryItemProps {
   entry: TimeEntry;
 }
 
 export function EntryItem({ entry }: EntryItemProps) {
-  const [isEditing, setIsEditing] = useState(false);
+ 
   const [editClockIn, setEditClockIn] = useState(
     format(new Date(entry.clock_in), "yyyy-MM-dd'T'HH:mm")
   );
@@ -37,14 +37,14 @@ export function EntryItem({ entry }: EntryItemProps) {
     onSuccess: (res) => {
       if (res.success) {
         toast.success("Entry updated");
-        setIsEditing(false);
+       
       } else if ("error" in res) {
         toast.error(res.error || "Failed to update");
       }
     },
   });
 
-  if (isEditing) {
+  if (updateMutation.isPending) {
     return (
       <div className="space-y-3 p-3 bg-zinc-50 dark:bg-zinc-900/50 rounded-xl border border-zinc-200 dark:border-zinc-800">
         <div className="grid grid-cols-2 gap-3">
@@ -81,8 +81,7 @@ export function EntryItem({ entry }: EntryItemProps) {
         </div>
         <div className="flex justify-end gap-2">
           <button
-            type="button"
-            onClick={() => setIsEditing(false)}
+            type="button"            
             className="p-1.5 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg text-zinc-500 transition-colors"
           >
             <X className="h-4 w-4" />
@@ -127,8 +126,7 @@ export function EntryItem({ entry }: EntryItemProps) {
           </span>
           <div className="flex items-center gap-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
             <button
-              type="button"
-              onClick={() => setIsEditing(true)}
+              type="button"              
               className="p-1 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
             >
               <Edit3 className="h-3.5 w-3.5" />

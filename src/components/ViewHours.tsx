@@ -1,6 +1,5 @@
 "use client";
 
-import { useMemo, useState } from "react";
 import {
   endOfDay,
   endOfMonth,
@@ -12,22 +11,43 @@ import {
   startOfWeek,
   startOfYear,
 } from "date-fns";
+import { use, useMemo, useState } from "react";
 import type { TimeEntry } from "@/lib/dal";
-import { TimeframeSelector, type TimeframeValue } from "./ViewHours/TimeframeSelector";
-import { HoursChart } from "./ViewHours/HoursChart";
 import { EntryList } from "./ViewHours/EntryList";
+import { HoursChart } from "./ViewHours/HoursChart";
+import {
+  TimeframeSelector,
+  type TimeframeValue,
+} from "./ViewHours/TimeframeSelector";
 
 interface ViewHoursProps {
   entries: TimeEntry[];
+  isAdminPromise?: Promise<boolean>;
+  membersPromise?: Promise<
+    {
+      id: string;
+      name: string;
+    }[]
+  >;
+  selectedUserIdPromise?: Promise<string | undefined>;
 }
 
-export default function ViewHours({ entries }: ViewHoursProps) {
+export default function ViewHours({
+  entries,
+  isAdminPromise,
+  membersPromise,
+  selectedUserIdPromise,
+}: ViewHoursProps) {
+  const isAdmin = use(isAdminPromise || Promise.resolve(false));
+  const members = use(membersPromise || Promise.resolve([]));
+  const selectedUserId = use(selectedUserIdPromise || Promise.resolve(""));
   // Determine default timeframe based on current data
   const defaultTimeframe = useMemo(() => {
     const start = startOfWeek(new Date(), { weekStartsOn: 1 });
     const end = endOfWeek(new Date(), { weekStartsOn: 1 });
     const hasEntriesInWeek = entries.some(
-      (e) => e.clock_out && isWithinInterval(new Date(e.clock_in), { start, end })
+      (e) =>
+        e.clock_out && isWithinInterval(new Date(e.clock_in), { start, end }),
     );
     return hasEntriesInWeek ? "week" : "all";
   }, [entries]);
@@ -113,6 +133,9 @@ export default function ViewHours({ entries }: ViewHoursProps) {
         selectedMonth={selectedMonth}
         setSelectedMonth={setSelectedMonth}
         availableYears={availableYears}
+        isAdmin={isAdmin}
+        members={members}
+        selectedUserId={selectedUserId}
       />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
