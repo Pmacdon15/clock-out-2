@@ -10,6 +10,8 @@ import { Suspense } from "react";
 import DashboardTabs from "@/components/DashboardTabs";
 import { getAuthSession, getOrgMembers, getTimeEntries } from "@/lib/dal";
 
+export const dynamic = "force-dynamic";
+
 export default function Home(props: PageProps<"/">) {
   // const { userId: targetUserId } = await props.searchParams;
 

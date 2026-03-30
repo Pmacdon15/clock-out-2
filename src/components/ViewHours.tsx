@@ -145,7 +145,7 @@ export default function ViewHours({
           selectedYear={selectedYear}
           selectedMonth={selectedMonth}
         />
-        <EntryList entries={filteredEntries} />
+        <EntryList entries={filteredEntries} isAdmin={isAdmin} />
       </div>
     </div>
   );

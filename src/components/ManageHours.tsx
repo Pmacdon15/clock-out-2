@@ -15,9 +15,10 @@ import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 
 interface ManageHoursProps {
   initialEntries: TimeEntry[];
+  isAdmin: boolean;
 }
 
-export default function ManageHours({ initialEntries = [] }: ManageHoursProps) {
+export default function ManageHours({ initialEntries = [], isAdmin }: ManageHoursProps) {
   const activeEntry = initialEntries?.find?.((e) => !e.clock_out);
   const [elapsedTime, setElapsedTime] = useState<string>("");
 
@@ -138,17 +139,19 @@ export default function ManageHours({ initialEntries = [] }: ManageHoursProps) {
                       }) // Simplified Duration
                     : "Active"}
                 </div>
-                <DeleteConfirmDialog 
-                  entryId={entry.id} 
-                  trigger={
-                    <button
-                      type="button"
-                      className="p-2 text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  }
-                />
+                {isAdmin && (
+                  <DeleteConfirmDialog 
+                    entryId={entry.id} 
+                    trigger={
+                      <button
+                        type="button"
+                        className="p-2 text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    }
+                  />
+                )}
               </div>
             </div>
           ))}

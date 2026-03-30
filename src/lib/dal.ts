@@ -151,7 +151,7 @@ export async function deleteTimeEntry(id: number) {
     const [deleted] = await sql`
       DELETE FROM time_entries 
       WHERE id = ${id} AND org_id = ${orgId}
-      AND (user_id = ${userId} OR ${isAdmin})
+      AND ${isAdmin}
       RETURNING *
     `;
     
@@ -182,7 +182,7 @@ export async function updateTimeEntry(
           clock_out = ${clock_out},
           updated_at = NOW()
       WHERE id = ${id} AND org_id = ${orgId}
-      AND (user_id = ${userId} OR ${isAdmin})
+      AND ${isAdmin}
       RETURNING *
     `;
     return updated

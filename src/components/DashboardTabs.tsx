@@ -38,6 +38,7 @@ export default function DashboardTabs({
   }
 
   const entries: TimeEntry[] = result?.value ?? [];
+  const isAdmin = use(isAdminPromise || Promise.resolve(false));
 
   return (
     <Tabs defaultValue="manage" className="space-y-8">
@@ -47,7 +48,7 @@ export default function DashboardTabs({
       </TabsList>
 
       <TabsContent value="manage" className="mt-0">
-        <ManageHours initialEntries={entries} />
+        <ManageHours initialEntries={entries} isAdmin={isAdmin} />
       </TabsContent>
 
       <TabsContent value="view" className="mt-0">
