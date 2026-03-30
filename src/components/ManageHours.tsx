@@ -8,16 +8,17 @@ import { toast } from "sonner";
 import {
   clockInAction,
   clockOutAction,
-  deleteTimeEntryAction,
 } from "@/lib/actions";
 import type { TimeEntry } from "@/lib/dal";
 import { Button, Card } from "./ui";
+import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 
 interface ManageHoursProps {
   initialEntries: TimeEntry[];
+  isAdmin: boolean;
 }
 
-export default function ManageHours({ initialEntries = [] }: ManageHoursProps) {
+export default function ManageHours({ initialEntries = [], isAdmin }: ManageHoursProps) {
   const activeEntry = initialEntries?.find?.((e) => !e.clock_out);
   const [elapsedTime, setElapsedTime] = useState<string>("");
 
@@ -55,13 +56,6 @@ export default function ManageHours({ initialEntries = [] }: ManageHoursProps) {
     },
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: deleteTimeEntryAction,
-    onSuccess: (res) => {
-      if (res.success) toast.success("Entry deleted");
-      else if ("error" in res) toast.error(res.error || "Failed to delete");
-    },
-  });
 
   return (
     <Card className="p-8 sm:p-12 mb-8 flex flex-col items-center justify-center text-center">
@@ -145,17 +139,19 @@ export default function ManageHours({ initialEntries = [] }: ManageHoursProps) {
                       }) // Simplified Duration
                     : "Active"}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (confirm("Delete this entry?")) {
-                      deleteMutation.mutate(entry.id);
+                {isAdmin && (
+                  <DeleteConfirmDialog 
+                    entryId={entry.id} 
+                    trigger={
+                      <button
+                        type="button"
+                        className="p-2 text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
                     }
-                  }}
-                  className="p-2 text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
+                  />
+                )}
               </div>
             </div>
           ))}

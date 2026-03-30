@@ -109,7 +109,7 @@ const AlertDialogAction = React.forwardRef<
     {...props}
     asChild
   >
-    <Button variant="destructive" {...(props as any)}>
+    <Button variant="destructive">
       {props.children}
     </Button>
   </AlertDialogPrimitive.Action>
@@ -126,7 +126,7 @@ const AlertDialogCancel = React.forwardRef<
     {...props}
     asChild
   >
-    <Button variant="outline" {...(props as any)}>
+    <Button variant="outline">
       {props.children}
     </Button>
   </AlertDialogPrimitive.Cancel>

@@ -7,13 +7,14 @@ import { useMutation } from "@tanstack/react-query";
 import { updateTimeEntryAction } from "@/lib/actions";
 import { toast } from "sonner";
 import type { TimeEntry } from "@/lib/dal";
-import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
+import { DeleteConfirmDialog } from "../DeleteConfirmDialog";
 
 interface EntryItemProps {
   entry: TimeEntry;
+  isAdmin: boolean;
 }
 
-export function EntryItem({ entry }: EntryItemProps) {
+export function EntryItem({ entry, isAdmin }: EntryItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editClockIn, setEditClockIn] = useState(
     format(new Date(entry.clock_in), "yyyy-MM-dd'T'HH:mm")
@@ -125,16 +126,18 @@ export function EntryItem({ entry }: EntryItemProps) {
               : "0.00"}
             h
           </span>
-          <div className="flex items-center gap-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
-            <button
-              type="button"
-              onClick={() => setIsEditing(true)}
-              className="p-1 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
-            >
-              <Edit3 className="h-3.5 w-3.5" />
-            </button>
-            <DeleteConfirmDialog entryId={entry.id} />
-          </div>
+          {isAdmin && (
+            <div className="flex items-center gap-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
+              <button
+                type="button"
+                onClick={() => setIsEditing(true)}
+                className="p-1 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+              >
+                <Edit3 className="h-3.5 w-3.5" />
+              </button>
+              <DeleteConfirmDialog entryId={entry.id} />
+            </div>
+          )}
         </div>
       </div>
       <div className="text-xs text-muted-foreground flex items-center gap-1.5 font-medium">

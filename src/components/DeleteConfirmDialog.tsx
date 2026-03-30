@@ -1,5 +1,10 @@
 "use client";
 
+import { useMutation } from "@tanstack/react-query";
+import { Trash2 } from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
+import { deleteTimeEntryAction } from "@/lib/actions";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -10,31 +15,37 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from "../ui/alert-dialog";
-import { Trash2 } from "lucide-react";
-import { useMutation } from "@tanstack/react-query";
-import { deleteTimeEntryAction } from "@/lib/actions";
-import { toast } from "sonner";
+} from "./ui/alert-dialog";
 
 interface DeleteConfirmDialogProps {
   entryId: number;
   trigger?: React.ReactNode;
 }
 
-export function DeleteConfirmDialog({ entryId, trigger }: DeleteConfirmDialogProps) {
+export function DeleteConfirmDialog({
+  entryId,
+  trigger,
+}: DeleteConfirmDialogProps) {
+  const [open, setOpen] = useState(false);
+
   const deleteMutation = useMutation({
     mutationFn: deleteTimeEntryAction,
     onSuccess: (res) => {
       if (res.success) {
         toast.success("Entry deleted");
+        setOpen(false); // Only close on success
       } else if ("error" in res) {
         toast.error(res.error || "Failed to delete");
       }
     },
   });
 
+  const handleDelete = async () => {
+    deleteMutation.mutate(entryId);
+  };
+
   return (
-    <AlertDialog>
+    <AlertDialog open={open} onOpenChange={setOpen}>
       <AlertDialogTrigger asChild>
         {trigger || (
           <button
@@ -49,17 +60,20 @@ export function DeleteConfirmDialog({ entryId, trigger }: DeleteConfirmDialogPro
         <AlertDialogHeader>
           <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
           <AlertDialogDescription>
-            This action cannot be undone. This will permanently delete this shift entry
-            from your records.
+            This action cannot be undone. This will permanently delete this
+            shift entry from your records.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={deleteMutation.isPending}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel disabled={deleteMutation.isPending}>
+            Cancel
+          </AlertDialogCancel>
           <AlertDialogAction
             disabled={deleteMutation.isPending}
-            onClick={() => deleteMutation.mutate(entryId)}
+            onClick={handleDelete}
+            className="bg-red-600 hover:bg-red-700 text-white"
           >
-            Delete
+            {deleteMutation.isPending ? "Deleting..." : "Delete"}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
