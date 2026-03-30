@@ -10,6 +10,9 @@ import {
   startOfMonth,
   startOfWeek,
   startOfYear,
+  subMonths,
+  subWeeks,
+  subYears,
 } from "date-fns";
 import { use, useMemo, useState } from "react";
 import type { TimeEntry } from "@/lib/dal";
@@ -120,6 +123,48 @@ export default function ViewHours({
     return result;
   }, [entries, timeframe, startDate, endDate, selectedYear, selectedMonth]);
 
+  // Calculate previous period total hours for comparison
+  const previousTotalHours = useMemo(() => {
+    let prevStart: Date;
+    let prevEnd: Date;
+
+    if (timeframe === "week") {
+      prevStart = subWeeks(startOfWeek(new Date(), { weekStartsOn: 1 }), 1);
+      prevEnd = subWeeks(endOfWeek(new Date(), { weekStartsOn: 1 }), 1);
+    } else if (timeframe === "month") {
+      const currentMonth = new Date(selectedYear, selectedMonth, 1);
+      prevStart = startOfMonth(subMonths(currentMonth, 1));
+      prevEnd = endOfMonth(subMonths(currentMonth, 1));
+    } else if (timeframe === "year") {
+      const currentYear = new Date(selectedYear, 0, 1);
+      prevStart = startOfYear(subYears(currentYear, 1));
+      prevEnd = endOfYear(subYears(currentYear, 1));
+    } else {
+      return 0; // No comparison for custom or all
+    }
+
+    return entries
+      .filter((e) => {
+        try {
+          return (
+            e.clock_out &&
+            isWithinInterval(new Date(e.clock_in), {
+              start: prevStart,
+              end: prevEnd,
+            })
+          );
+        } catch {
+          return false;
+        }
+      })
+      .reduce((acc, e) => {
+        const clockOutDate = e.clock_out ? new Date(e.clock_out) : null;
+        if (!clockOutDate) return acc;
+        const durationMs = clockOutDate.getTime() - new Date(e.clock_in).getTime();
+        return acc + durationMs / (1000 * 60 * 60);
+      }, 0);
+  }, [entries, timeframe, selectedYear, selectedMonth]);
+
   return (
     <div className="space-y-6 pb-20">
       <TimeframeSelector
@@ -146,6 +191,7 @@ export default function ViewHours({
           timeframe={timeframe}
           selectedYear={selectedYear}
           selectedMonth={selectedMonth}
+          previousTotalHours={previousTotalHours}
         />
         <EntryList entries={filteredEntries} isAdmin={isAdmin} />
       </div>

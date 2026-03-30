@@ -21,6 +21,7 @@ interface HoursChartProps {
   timeframe: string;
   selectedYear: number;
   selectedMonth: number;
+  previousTotalHours: number;
 }
 
 export function HoursChart({
@@ -28,6 +29,7 @@ export function HoursChart({
   timeframe,
   selectedYear,
   selectedMonth,
+  previousTotalHours,
 }: HoursChartProps) {
   const chartData = useMemo(() => {
     const dataMap: Record<string, number> = {};
@@ -67,6 +69,18 @@ export function HoursChart({
     return timeframe;
   }, [timeframe, selectedYear, selectedMonth]);
 
+  const percentage = useMemo(() => {
+    if (previousTotalHours === 0) return null;
+    return ((totalHours - previousTotalHours) / previousTotalHours) * 100;
+  }, [totalHours, previousTotalHours]);
+
+  const vsText = useMemo(() => {
+    if (timeframe === "week") return "vs last week";
+    if (timeframe === "month") return "vs last month";
+    if (timeframe === "year") return "vs last year";
+    return "";
+  }, [timeframe]);
+
   return (
     <Card className="p-6 md:col-span-2">
       <div className="flex flex-col gap-1 mb-8">
@@ -75,10 +89,18 @@ export function HoursChart({
         </h3>
         <div className="flex items-end gap-2">
           <span className="text-3xl font-black">{totalHours.toFixed(1)}h</span>
-          <span className="text-green-500 text-xs font-bold mb-1 flex items-center gap-0.5">
-            <TrendingUp className="h-3 w-3" />
-            12% vs last month
-          </span>
+          {percentage !== null && (
+            <span
+              className={`text-xs font-bold mb-1 flex items-center gap-0.5 ${
+                percentage >= 0 ? "text-green-500" : "text-red-500"
+              }`}
+            >
+              <TrendingUp
+                className={`h-3 w-3 ${percentage < 0 ? "rotate-180" : ""}`}
+              />
+              {Math.abs(percentage).toFixed(0)}% {vsText}
+            </span>
+          )}
         </div>
       </div>
 
