@@ -31,7 +31,7 @@ export default function Home(props: PageProps<"/">) {
 
   return (
     <main className="flex-1 flex flex-col max-w-5xl mx-auto w-full px-4 py-8">
-      <header className="flex flex-col items-center justify-between mb-12 border-b pb-6 gap-4 border-zinc-200 dark:border-zinc-800">
+      <header className="flex flex-col md:flex-row items-center justify-between mb-12 border-b pb-6 gap-4 border-zinc-200 dark:border-zinc-800">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Clock Out</h1>
           <p className="text-muted-foreground mt-1">
