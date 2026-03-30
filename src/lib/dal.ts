@@ -1,6 +1,7 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { errAsync, okAsync } from "neverthrow";
 import { sql } from "./db";
+import { isOverMemberShipLimit } from "./clerk";
 
 export type TimeEntry = {
   id: number;
@@ -38,7 +39,7 @@ export async function getOrgMembers() {
 
     return members.data.map((m) => ({
       id: m.publicUserData?.userId || "",
-      name: m.publicUserData?.firstName 
+      name: m.publicUserData?.firstName
         ? `${m.publicUserData.firstName} ${m.publicUserData.lastName || ""}`.trim()
         : m.publicUserData?.identifier || "Unknown Member",
     }));
@@ -48,9 +49,9 @@ export async function getOrgMembers() {
   }
 }
 
-export async function getTimeEntries(targetUserId?: string): Promise<
-  SerializableResult<TimeEntry[], { reason: string }>
-> {
+export async function getTimeEntries(
+  targetUserId?: string,
+): Promise<SerializableResult<TimeEntry[], { reason: string }>> {
   const { userId, orgId, orgRole } = await auth();
   if (!userId || !orgId) {
     return {
@@ -64,7 +65,9 @@ export async function getTimeEntries(targetUserId?: string): Promise<
 
   if (queryUserId !== userId && !isAdmin) {
     return {
-      error: { reason: "Forbidden: You do not have permission to view these entries" },
+      error: {
+        reason: "Forbidden: You do not have permission to view these entries",
+      },
       ok: false,
     };
   }
@@ -89,6 +92,12 @@ export async function clockIn() {
       reason: "Unauthorized or no organization selected",
     } as const);
   }
+
+  const isOverMemberShipLimitValue = await isOverMemberShipLimit(orgId);
+  if (isOverMemberShipLimitValue)
+    return errAsync({
+      reason: "Over organization membership limit.",
+    } as const);
 
   try {
     const activeEntry = await sql`
@@ -154,7 +163,7 @@ export async function deleteTimeEntry(id: number) {
       AND ${isAdmin}
       RETURNING *
     `;
-    
+
     return deleted
       ? okAsync(deleted as unknown as TimeEntry)
       : errAsync({ reason: "Entry not found or unauthorized" } as const);
