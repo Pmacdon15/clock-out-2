@@ -21,6 +21,7 @@ interface TimeframeSelectorProps {
   isAdmin?: boolean;
   members?: { id: string; name: string }[];
   selectedUserId?: string;
+  currentUserId?: string;
 }
 
 export function TimeframeSelector({
@@ -38,6 +39,7 @@ export function TimeframeSelector({
   isAdmin,
   members,
   selectedUserId,
+  currentUserId,
 }: TimeframeSelectorProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -73,15 +75,17 @@ export function TimeframeSelector({
               className="w-full sm:w-auto bg-transparent text-lg font-bold outline-none cursor-pointer text-white appearance-none pr-8"
             >
               <option value="" className="bg-zinc-900 text-white">My Own Hours (Self)</option>
-              {members.map((m) => (
-                <option 
-                  key={m.id} 
-                  value={m.id} 
-                  className="bg-zinc-900 text-white"
-                >
-                  {m.name}
-                </option>
-              ))}
+              {members
+                .filter((m) => m.id !== currentUserId)
+                .map((m) => (
+                  <option 
+                    key={m.id} 
+                    value={m.id} 
+                    className="bg-zinc-900 text-white"
+                  >
+                    {m.name}
+                  </option>
+                ))}
             </select>
           </div>
         </div>

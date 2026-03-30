@@ -9,7 +9,12 @@ import ViewHours from "./ViewHours";
 
 interface DashboardTabsProps {
   entriesPromise: Promise<SerializableResult<TimeEntry[], { reason: string }>>;
-  isAdminPromise?: Promise<boolean>;
+  isAdminPromise?: Promise<
+    SerializableResult<
+      { userId: string; orgId: string; isAdmin: boolean },
+      { reason: string }
+    >
+  >;
   membersPromise?: Promise<
     {
       id: string;
@@ -27,7 +32,6 @@ export default function DashboardTabs({
 }: DashboardTabsProps) {
   const result = use(entriesPromise);
 
-  // Handle errors if needed
   if (!result.ok) {
     return (
       <Card className="p-8 text-center text-red-500">
@@ -38,7 +42,10 @@ export default function DashboardTabs({
   }
 
   const entries: TimeEntry[] = result?.value ?? [];
-  const isAdmin = use(isAdminPromise || Promise.resolve(false));
+  const isAdminResult = isAdminPromise ? use(isAdminPromise) : undefined;
+
+  const isAdmin = isAdminResult?.ok ? isAdminResult.value.isAdmin : false;
+  const currentUserId = isAdminResult?.ok ? isAdminResult.value.userId : undefined;
 
   return (
     <Tabs defaultValue="manage" className="space-y-8">
@@ -48,7 +55,7 @@ export default function DashboardTabs({
       </TabsList>
 
       <TabsContent value="manage" className="mt-0">
-        <ManageHours initialEntries={entries} isAdmin={isAdmin} />
+        <ManageHours initialEntries={entries} isAdmin={isAdmin || false} />
       </TabsContent>
 
       <TabsContent value="view" className="mt-0">
@@ -56,8 +63,9 @@ export default function DashboardTabs({
           <ViewHours
             entries={entries}
             membersPromise={membersPromise}
-            isAdminPromise={isAdminPromise}
+            isAdmin={isAdmin}
             selectedUserIdPromise={selectedUserIdPromise}
+            currentUserId={currentUserId}
           />
         </Suspense>
       </TabsContent>

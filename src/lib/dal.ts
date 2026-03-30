@@ -17,12 +17,23 @@ export type SerializableResult<T, E> =
   | { value: T; ok: true }
   | { error: E; ok: false };
 
-export async function getAuthSession() {
+export async function getAuthSession(): Promise<
+  SerializableResult<
+    { userId: string; orgId: string; isAdmin: boolean },
+    { reason: string }
+  >
+> {
   const { userId, orgId, orgRole } = await auth();
   if (!userId || !orgId) {
-    return errAsync({ reason: "Unauthorized or no organization selected" });
+    return {
+      error: { reason: "Unauthorized or no organization selected" },
+      ok: false,
+    };
   }
-  return okAsync({ userId, orgId, isAdmin: orgRole === "org:admin" });
+  return {
+    value: { userId, orgId, isAdmin: orgRole === "org:admin" },
+    ok: true,
+  };
 }
 
 export async function getOrgMembers() {

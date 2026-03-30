@@ -26,12 +26,7 @@ export default function Home(props: PageProps<"/">) {
   );
 
   // Add the parentheses here:
-  const isAdminPromise = getAuthSession().then((result) => {
-    if (result.isOk()) {
-      return result.value.isAdmin;
-    }
-    return false; // Default to false if auth fails
-  });
+  const isAdminPromise = getAuthSession();
   const membersPromise = getOrgMembers();
 
   return (

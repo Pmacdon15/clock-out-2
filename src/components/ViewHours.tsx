@@ -22,7 +22,7 @@ import {
 
 interface ViewHoursProps {
   entries: TimeEntry[];
-  isAdminPromise?: Promise<boolean>;
+  isAdmin?: boolean;
   membersPromise?: Promise<
     {
       id: string;
@@ -30,15 +30,16 @@ interface ViewHoursProps {
     }[]
   >;
   selectedUserIdPromise?: Promise<string | undefined>;
+  currentUserId?: string;
 }
 
 export default function ViewHours({
   entries,
-  isAdminPromise,
+  isAdmin = false,
   membersPromise,
   selectedUserIdPromise,
+  currentUserId,
 }: ViewHoursProps) {
-  const isAdmin = use(isAdminPromise || Promise.resolve(false));
   const members = use(membersPromise || Promise.resolve([]));
   const selectedUserId = use(selectedUserIdPromise || Promise.resolve(""));
   // Determine default timeframe based on current data
@@ -136,6 +137,7 @@ export default function ViewHours({
         isAdmin={isAdmin}
         members={members}
         selectedUserId={selectedUserId}
+        currentUserId={currentUserId}
       />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
