@@ -19,7 +19,7 @@ export async function getAuthSession(): Promise<
     { reason: string }
   >
 > {
-  const { userId, orgId, orgRole } = await auth.protect();
+  const { userId, orgId, orgRole } = await auth();
   if (!userId || !orgId) {
     return {
       error: { reason: "Unauthorized or no organization selected" },
@@ -51,7 +51,7 @@ export async function getOrgMembers() {
 export async function getTimeEntries(
   targetUserId?: string,
 ): Promise<SerializableResult<TimeEntry[], { reason: string }>> {
-  const { userId, orgId, orgRole } = await auth.protect();
+  const { userId, orgId, orgRole } = await auth();
   if (!userId || !orgId) {
     return {
       error: { reason: "Unauthorized or no organization selected" },
