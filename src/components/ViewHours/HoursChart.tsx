@@ -104,8 +104,8 @@ export function HoursChart({
         </div>
       </div>
 
-      <div className="h-[300px] w-full mt-4">
-        <ResponsiveContainer width="100%" height="100%">
+      <div className="h-75 w-full mt-4">
+        <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
           <BarChart
             data={chartData}
             margin={{ top: 0, right: 0, left: -20, bottom: 0 }}

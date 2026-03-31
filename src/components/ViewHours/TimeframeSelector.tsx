@@ -1,8 +1,9 @@
 "use client";
 
-import { Calendar, Users } from "lucide-react";
 import { format } from "date-fns";
-import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import { Calendar, Users } from "lucide-react";
+import type { Route } from "next";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 export type TimeframeValue = "week" | "month" | "year" | "custom" | "all";
 
@@ -52,7 +53,7 @@ export function TimeframeSelector({
     } else {
       params.delete("userId");
     }
-    router.push(`${pathname}?${params.toString()}`);
+    router.push(`${pathname}?${params.toString()}` as Route);
   };
 
   return (
@@ -74,13 +75,15 @@ export function TimeframeSelector({
               onChange={(e) => handleMemberChange(e.target.value)}
               className="w-full sm:w-auto bg-transparent text-lg font-bold outline-none cursor-pointer text-white appearance-none pr-8"
             >
-              <option value="" className="bg-zinc-900 text-white">My Own Hours (Self)</option>
+              <option value="" className="bg-zinc-900 text-white">
+                My Own Hours (Self)
+              </option>
               {members
                 .filter((m) => m.id !== currentUserId)
                 .map((m) => (
-                  <option 
-                    key={m.id} 
-                    value={m.id} 
+                  <option
+                    key={m.id}
+                    value={m.id}
                     className="bg-zinc-900 text-white"
                   >
                     {m.name}

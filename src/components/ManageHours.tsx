@@ -5,20 +5,20 @@ import { formatDistanceToNow } from "date-fns";
 import { Clock, Loader2, Play, Square, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import {
-  clockInAction,
-  clockOutAction,
-} from "@/lib/actions";
+import { clockInAction, clockOutAction } from "@/lib/actions";
 import type { TimeEntry } from "@/lib/dal";
-import { Button, Card } from "./ui";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
+import { Button, Card } from "./ui";
 
 interface ManageHoursProps {
   initialEntries: TimeEntry[];
   isAdmin: boolean;
 }
 
-export default function ManageHours({ initialEntries = [], isAdmin }: ManageHoursProps) {
+export default function ManageHours({
+  initialEntries = [],
+  isAdmin,
+}: ManageHoursProps) {
   const activeEntry = initialEntries?.find?.((e) => !e.clock_out);
   const [elapsedTime, setElapsedTime] = useState<string>("");
 
@@ -55,7 +55,6 @@ export default function ManageHours({ initialEntries = [], isAdmin }: ManageHour
       else if ("error" in res) toast.error(res.error || "Failed to clock out");
     },
   });
-
 
   return (
     <Card className="p-8 sm:p-12 mb-8 flex flex-col items-center justify-center text-center">
@@ -140,8 +139,8 @@ export default function ManageHours({ initialEntries = [], isAdmin }: ManageHour
                     : "Active"}
                 </div>
                 {isAdmin && (
-                  <DeleteConfirmDialog 
-                    entryId={entry.id} 
+                  <DeleteConfirmDialog
+                    entryId={entry.id}
                     trigger={
                       <button
                         type="button"

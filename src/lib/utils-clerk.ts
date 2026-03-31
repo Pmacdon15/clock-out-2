@@ -21,3 +21,18 @@ export async function isOverMemberShipLimit(orgId: string) {
     return true;
   }
 }
+
+export async function getProcessedMembers(
+  orgId: string,
+  rawMembersArray: any[],
+) {
+  return rawMembersArray.map((m) => {
+    const userData = m.publicUserData;
+    return {
+      id: userData?.userId || "",
+      name: userData?.firstName
+        ? `${userData.firstName} ${userData.lastName || ""}`.trim()
+        : userData?.identifier || "Unknown Member",
+    };
+  });
+}
