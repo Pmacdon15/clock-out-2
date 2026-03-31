@@ -19,7 +19,7 @@ import {
 
 interface DeleteConfirmDialogProps {
   entryId: number;
-  setOptimisticEntries: (action: {
+  setOptimisticEntries?: (action: {
     type: "ADD" | "REMOVE";
     payload: any;
   }) => void;
@@ -46,13 +46,17 @@ export function DeleteConfirmDialog({
   });
 
   const handleDelete = async () => {
-    startTransition(() => {
-      setOptimisticEntries({
-        type: "REMOVE",
-        payload: entryId,
+    if (setOptimisticEntries) {
+      startTransition(() => {
+        setOptimisticEntries({
+          type: "REMOVE",
+          payload: entryId,
+        });
+        deleteMutation.mutate(entryId);
       });
+    } else {
       deleteMutation.mutate(entryId);
-    });
+    }
   };
 
   return (
