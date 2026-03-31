@@ -1,28 +1,36 @@
 "use client";
 
-import { useState } from "react";
+import { useMutation } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { Calendar, Check, Edit3, Loader2, X } from "lucide-react";
-import { useMutation } from "@tanstack/react-query";
-import { updateTimeEntryAction } from "@/lib/actions";
+import { startTransition, useState } from "react";
 import { toast } from "sonner";
+import { updateTimeEntryAction } from "@/lib/actions";
 import type { TimeEntry } from "@/lib/dal";
 import { DeleteConfirmDialog } from "../DeleteConfirmDialog";
 
 interface EntryItemProps {
   entry: TimeEntry;
   isAdmin: boolean;
+  setOptimisticEntries: (action: {
+    type: "ADD" | "REMOVE" | "UPDATE";
+    payload: any;
+  }) => void;
 }
 
-export function EntryItem({ entry, isAdmin }: EntryItemProps) {
+export function EntryItem({
+  entry,
+  isAdmin,
+  setOptimisticEntries,
+}: EntryItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editClockIn, setEditClockIn] = useState(
-    format(new Date(entry.clock_in), "yyyy-MM-dd'T'HH:mm")
+    format(new Date(entry.clock_in), "yyyy-MM-dd'T'HH:mm"),
   );
   const [editClockOut, setEditClockOut] = useState(
     entry.clock_out
       ? format(new Date(entry.clock_out), "yyyy-MM-dd'T'HH:mm")
-      : ""
+      : "",
   );
 
   const updateMutation = useMutation({
@@ -44,6 +52,25 @@ export function EntryItem({ entry, isAdmin }: EntryItemProps) {
       }
     },
   });
+
+  const handleUpdate = () => {
+    const updatedData = {
+      id: entry.id,
+      clock_in: new Date(editClockIn),
+      clock_out: editClockOut ? new Date(editClockOut) : null,
+      updated_at: new Date(),
+    };
+
+    startTransition(() => {
+      setOptimisticEntries({ type: "UPDATE", payload: updatedData });
+
+      updateMutation.mutate({
+        id: entry.id,
+        clock_in: editClockIn,
+        clock_out: editClockOut,
+      });
+    });
+  };
 
   if (isEditing) {
     return (
@@ -90,13 +117,7 @@ export function EntryItem({ entry, isAdmin }: EntryItemProps) {
           </button>
           <button
             type="button"
-            onClick={() =>
-              updateMutation.mutate({
-                id: entry.id,
-                clock_in: editClockIn,
-                clock_out: editClockOut,
-              })
-            }
+            onClick={handleUpdate}
             disabled={updateMutation.isPending}
             className="p-1.5 bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-950 rounded-lg hover:scale-105 transition-transform disabled:opacity-50"
           >
@@ -135,7 +156,10 @@ export function EntryItem({ entry, isAdmin }: EntryItemProps) {
               >
                 <Edit3 className="h-3.5 w-3.5" />
               </button>
-              <DeleteConfirmDialog entryId={entry.id} />
+              <DeleteConfirmDialog
+                entryId={entry.id}
+                setOptimisticEntries={setOptimisticEntries}
+              />
             </div>
           )}
         </div>
@@ -143,9 +167,7 @@ export function EntryItem({ entry, isAdmin }: EntryItemProps) {
       <div className="text-xs text-muted-foreground flex items-center gap-1.5 font-medium">
         <Calendar className="h-3 w-3" />
         {format(new Date(entry.clock_in), "hh:mm a")} -{" "}
-        {entry.clock_out
-          ? format(new Date(entry.clock_out), "hh:mm a")
-          : "..."}
+        {entry.clock_out ? format(new Date(entry.clock_out), "hh:mm a") : "..."}
       </div>
     </div>
   );

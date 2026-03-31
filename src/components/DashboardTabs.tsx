@@ -107,6 +107,7 @@ export default function DashboardTabs({
           fallback={<div className="p-8 text-center">Loading view...</div>}
         >
           <ViewHours
+            setOptimisticEntries={setOptimisticEntries}
             entries={entries}
             membersPromise={membersPromise}
             isAdmin={isAdmin}

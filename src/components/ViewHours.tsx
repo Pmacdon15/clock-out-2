@@ -11,9 +11,7 @@ import {
   startOfWeek,
   startOfYear,
   subMonths,
-  subWeeks,
   subYears,
-  addWeeks,
 } from "date-fns";
 import { use, useMemo, useState } from "react";
 import type { TimeEntry } from "@/lib/dal";
@@ -26,6 +24,10 @@ import {
 
 interface ViewHoursProps {
   entries: TimeEntry[];
+  setOptimisticEntries: (action: {
+    type: "ADD" | "REMOVE" | "UPDATE";
+    payload: any;
+  }) => void;
   isAdmin?: boolean;
   membersPromise?: Promise<
     {
@@ -39,6 +41,7 @@ interface ViewHoursProps {
 
 export default function ViewHours({
   entries,
+  setOptimisticEntries,
   isAdmin = false,
   membersPromise,
   selectedUserIdPromise,
@@ -97,7 +100,7 @@ export default function ViewHours({
         start = startOfDay(new Date(selectedYear, selectedMonth, 22));
         end = endOfMonth(new Date(selectedYear, selectedMonth, 1));
       }
-      
+
       result = result.filter((e) => {
         try {
           return isWithinInterval(new Date(e.clock_in), { start, end });
@@ -126,7 +129,6 @@ export default function ViewHours({
         }
       });
     } else if (timeframe === "custom" && startDate && endDate) {
-    
       const start = startOfDay(new Date(startDate + "T00:00:00"));
       const end = endOfDay(new Date(endDate + "T00:00:00"));
       result = result.filter((e) => {
@@ -140,7 +142,15 @@ export default function ViewHours({
     }
 
     return result;
-  }, [entries, timeframe, startDate, endDate, selectedYear, selectedMonth, selectedWeek]);
+  }, [
+    entries,
+    timeframe,
+    startDate,
+    endDate,
+    selectedYear,
+    selectedMonth,
+    selectedWeek,
+  ]);
 
   // Calculate previous period total hours for comparison
   const previousTotalHours = useMemo(() => {
@@ -149,7 +159,10 @@ export default function ViewHours({
 
     if (timeframe === "week") {
       // For comparison, we use the same week number from the previous month
-      const prevMonthDate = subMonths(new Date(selectedYear, selectedMonth, 1), 1);
+      const prevMonthDate = subMonths(
+        new Date(selectedYear, selectedMonth, 1),
+        1,
+      );
       const prevYear = prevMonthDate.getFullYear();
       const prevMonth = prevMonthDate.getMonth();
 
@@ -195,7 +208,8 @@ export default function ViewHours({
       .reduce((acc, e) => {
         const clockOutDate = e.clock_out ? new Date(e.clock_out) : null;
         if (!clockOutDate) return acc;
-        const durationMs = clockOutDate.getTime() - new Date(e.clock_in).getTime();
+        const durationMs =
+          clockOutDate.getTime() - new Date(e.clock_in).getTime();
         return acc + durationMs / (1000 * 60 * 60);
       }, 0);
   }, [entries, timeframe, selectedYear, selectedMonth, selectedWeek]);
@@ -230,7 +244,11 @@ export default function ViewHours({
           selectedMonth={selectedMonth}
           previousTotalHours={previousTotalHours}
         />
-        <EntryList entries={filteredEntries} isAdmin={isAdmin} />
+        <EntryList
+          entries={filteredEntries}
+          isAdmin={isAdmin}
+          setOptimisticEntries={setOptimisticEntries}
+        />
       </div>
     </div>
   );

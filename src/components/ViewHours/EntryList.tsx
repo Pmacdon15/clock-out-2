@@ -7,9 +7,17 @@ import { EntryItem } from "./EntryItem";
 interface EntryListProps {
   entries: TimeEntry[];
   isAdmin: boolean;
+  setOptimisticEntries: (action: {
+    type: "ADD" | "REMOVE" | "UPDATE";
+    payload: any;
+  }) => void;
 }
 
-export function EntryList({ entries, isAdmin }: EntryListProps) {
+export function EntryList({
+  entries,
+  isAdmin,
+  setOptimisticEntries,
+}: EntryListProps) {
   return (
     <Card className="p-6 flex flex-col justify-between overflow-hidden relative min-h-[400px]">
       <div className="space-y-4">
@@ -24,7 +32,7 @@ export function EntryList({ entries, isAdmin }: EntryListProps) {
             </div>
           ) : (
             entries.map((entry) => (
-              <EntryItem key={entry.id} entry={entry} isAdmin={isAdmin} />
+              <EntryItem key={entry.id} entry={entry} isAdmin={isAdmin} setOptimisticEntries={setOptimisticEntries} />
             ))
           )}
         </div>
