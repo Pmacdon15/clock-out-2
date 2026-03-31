@@ -1,7 +1,6 @@
 "use client";
 
 import { useMutation } from "@tanstack/react-query";
-import { formatDistanceToNow } from "date-fns";
 import { Clock, Loader2, Play, Square, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -9,6 +8,18 @@ import { clockInAction, clockOutAction } from "@/lib/actions";
 import type { TimeEntry } from "@/lib/dal";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 import { Button, Card } from "./ui";
+
+const formatDuration = (start: Date, end: Date = new Date()) => {
+  const diffMs = Math.abs(end.getTime() - start.getTime());
+  const totalMinutes = Math.floor(diffMs / (1000 * 60));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+  return `${minutes}m`;
+};
 
 interface ManageHoursProps {
   initialEntries: TimeEntry[];
@@ -26,16 +37,10 @@ export default function ManageHours({
     if (!activeEntry) return;
 
     const interval = setInterval(() => {
-      setElapsedTime(
-        formatDistanceToNow(new Date(activeEntry.clock_in), {
-          addSuffix: false,
-        }),
-      );
+      setElapsedTime(formatDuration(new Date(activeEntry.clock_in)));
     }, 1000);
 
-    setElapsedTime(
-      formatDistanceToNow(new Date(activeEntry.clock_in), { addSuffix: false }),
-    );
+    setElapsedTime(formatDuration(new Date(activeEntry.clock_in)));
 
     return () => clearInterval(interval);
   }, [activeEntry]);
@@ -133,9 +138,10 @@ export default function ManageHours({
               <div className="flex items-center gap-3">
                 <div className="text-sm font-mono font-bold bg-zinc-100 dark:bg-zinc-800 px-3 py-1 rounded-md">
                   {entry.clock_out
-                    ? formatDistanceToNow(new Date(entry.clock_in), {
-                        addSuffix: false,
-                      }) // Simplified Duration
+                    ? formatDuration(
+                        new Date(entry.clock_in),
+                        new Date(entry.clock_out),
+                      )
                     : "Active"}
                 </div>
                 {isAdmin && (
