@@ -18,6 +18,8 @@ interface TimeframeSelectorProps {
   setSelectedYear: (y: number) => void;
   selectedMonth: number;
   setSelectedMonth: (m: number) => void;
+  selectedWeek: number;
+  setSelectedWeek: (w: number) => void;
   availableYears: number[];
   isAdmin?: boolean;
   members?: { id: string; name: string }[];
@@ -36,6 +38,8 @@ export function TimeframeSelector({
   setSelectedYear,
   selectedMonth,
   setSelectedMonth,
+  selectedWeek,
+  setSelectedWeek,
   availableYears,
   isAdmin,
   members,
@@ -127,6 +131,48 @@ export function TimeframeSelector({
               onChange={(e) => setEndDate(e.target.value)}
               className="px-3 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg text-xs outline-none focus:ring-1 focus:ring-zinc-400"
             />
+          </div>
+        )}
+
+        {timeframe === "week" && (
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <Calendar className="h-4 w-4 text-zinc-400" />
+            <select
+              value={selectedWeek}
+              onChange={(e) => setSelectedWeek(Number(e.target.value))}
+              className="px-2 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg text-xs outline-none focus:ring-1 focus:ring-zinc-400"
+            >
+              {[1, 2, 3, 4].map((w) => (
+                <option key={w} value={w}>
+                  Week {w}
+                </option>
+              ))}
+            </select>
+            <select
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(Number(e.target.value))}
+              className="px-2 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg text-xs outline-none focus:ring-1 focus:ring-zinc-400"
+            >
+              {Array.from({ length: 12 }).map((_, i) => {
+                const monthName = format(new Date(2025, i, 1), "MMMM");
+                return (
+                  <option key={monthName} value={i}>
+                    {monthName}
+                  </option>
+                );
+              })}
+            </select>
+            <select
+              value={selectedYear}
+              onChange={(e) => setSelectedYear(Number(e.target.value))}
+              className="px-2 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg text-xs outline-none focus:ring-1 focus:ring-zinc-400"
+            >
+              {availableYears.map((y) => (
+                <option key={y} value={y}>
+                  {y}
+                </option>
+              ))}
+            </select>
           </div>
         )}
 

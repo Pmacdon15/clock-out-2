@@ -13,6 +13,7 @@ import {
   subMonths,
   subWeeks,
   subYears,
+  addWeeks,
 } from "date-fns";
 import { use, useMemo, useState } from "react";
 import type { TimeEntry } from "@/lib/dal";
@@ -62,6 +63,7 @@ export default function ViewHours({
   const [endDate, setEndDate] = useState("");
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
+  const [selectedWeek, setSelectedWeek] = useState(1);
 
   // Derive available years from entries
   const availableYears = useMemo(() => {
@@ -78,8 +80,11 @@ export default function ViewHours({
     let result = entries.filter((e) => e.clock_out); // Only completed shifts
 
     if (timeframe === "week") {
-      const start = startOfWeek(new Date(), { weekStartsOn: 1 });
-      const end = endOfWeek(new Date(), { weekStartsOn: 1 });
+      const firstDayOfMonth = new Date(selectedYear, selectedMonth, 1);
+      const firstMonday = startOfWeek(firstDayOfMonth, { weekStartsOn: 1 });
+      const start = addWeeks(firstMonday, selectedWeek - 1);
+      const end = endOfWeek(start, { weekStartsOn: 1 });
+      
       result = result.filter((e) => {
         try {
           return isWithinInterval(new Date(e.clock_in), { start, end });
@@ -121,7 +126,7 @@ export default function ViewHours({
     }
 
     return result;
-  }, [entries, timeframe, startDate, endDate, selectedYear, selectedMonth]);
+  }, [entries, timeframe, startDate, endDate, selectedYear, selectedMonth, selectedWeek]);
 
   // Calculate previous period total hours for comparison
   const previousTotalHours = useMemo(() => {
@@ -129,8 +134,12 @@ export default function ViewHours({
     let prevEnd: Date;
 
     if (timeframe === "week") {
-      prevStart = subWeeks(startOfWeek(new Date(), { weekStartsOn: 1 }), 1);
-      prevEnd = subWeeks(endOfWeek(new Date(), { weekStartsOn: 1 }), 1);
+      const firstDayOfMonth = new Date(selectedYear, selectedMonth, 1);
+      const firstMonday = startOfWeek(firstDayOfMonth, { weekStartsOn: 1 });
+      const currentWeekStart = addWeeks(firstMonday, selectedWeek - 1);
+      
+      prevStart = subWeeks(currentWeekStart, 1);
+      prevEnd = endOfWeek(prevStart, { weekStartsOn: 1 });
     } else if (timeframe === "month") {
       const currentMonth = new Date(selectedYear, selectedMonth, 1);
       prevStart = startOfMonth(subMonths(currentMonth, 1));
@@ -163,7 +172,7 @@ export default function ViewHours({
         const durationMs = clockOutDate.getTime() - new Date(e.clock_in).getTime();
         return acc + durationMs / (1000 * 60 * 60);
       }, 0);
-  }, [entries, timeframe, selectedYear, selectedMonth]);
+  }, [entries, timeframe, selectedYear, selectedMonth, selectedWeek]);
 
   return (
     <div className="space-y-6 pb-20">
@@ -179,6 +188,8 @@ export default function ViewHours({
         selectedMonth={selectedMonth}
         setSelectedMonth={setSelectedMonth}
         availableYears={availableYears}
+        selectedWeek={selectedWeek}
+        setSelectedWeek={setSelectedWeek}
         isAdmin={isAdmin}
         members={members}
         selectedUserId={selectedUserId}
