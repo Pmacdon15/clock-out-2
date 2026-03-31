@@ -1,5 +1,7 @@
 "use client";
 
+import { format, startOfDay } from "date-fns";
+import { TrendingUp } from "lucide-react";
 import { useMemo } from "react";
 import {
   Bar,
@@ -11,10 +13,8 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { format, parse } from "date-fns";
-import { TrendingUp } from "lucide-react";
-import { Card } from "../ui";
 import type { TimeEntry } from "@/lib/dal";
+import { Card } from "../ui";
 
 interface HoursChartProps {
   filteredEntries: TimeEntry[];
@@ -32,31 +32,40 @@ export function HoursChart({
   previousTotalHours,
 }: HoursChartProps) {
   const chartData = useMemo(() => {
-    const dataMap: Record<string, number> = {};
+    // We use a Map keyed by the start of the day to ensure
+    // chronological grouping regardless of the year.
+    const dataMap: Record<string, { hours: number; date: Date }> = {};
 
     filteredEntries.forEach((e) => {
-      const dateStr = format(new Date(e.clock_in), "MMM dd");
+      const clockIn = new Date(e.clock_in);
+      const dayKey = startOfDay(clockIn).toISOString();
+
       const durationMs = e.clock_out
-        ? new Date(e.clock_out).getTime() - new Date(e.clock_in).getTime()
+        ? new Date(e.clock_out).getTime() - clockIn.getTime()
         : 0;
       const hours = durationMs / (1000 * 60 * 60);
-      dataMap[dateStr] = (dataMap[dateStr] || 0) + hours;
+
+      if (!dataMap[dayKey]) {
+        dataMap[dayKey] = { hours: 0, date: clockIn };
+      }
+      dataMap[dayKey].hours += hours;
     });
 
-    // Sort chronologically (Past -> Present) so most recent is on the right
-    return Object.entries(dataMap)
-      .map(([name, hours]) => ({
-        name,
-        hours: parseFloat(hours.toFixed(2)),
-        // Helper date for sorting
-        sortDate: parse(name, "MMM dd", new Date(selectedYear, selectedMonth, 1)),
-      }))
-      .sort((a, b) => a.sortDate.getTime() - b.sortDate.getTime());
-  }, [filteredEntries, selectedYear, selectedMonth]);
+    // Sort by the actual timestamp so Nov 2025 comes before Jan 2026
+    return Object.values(dataMap)
+      .sort((a, b) => a.date.getTime() - b.date.getTime())
+      .map((val) => ({
+        // Label for the X-Axis
+        name: format(val.date, "MMM dd"),
+        hours: parseFloat(val.hours.toFixed(2)),
+        // Tooltip can show year if needed
+        fullLabel: format(val.date, "MMM dd, yyyy"),
+      }));
+  }, [filteredEntries]);
 
   const totalHours = useMemo(
     () => chartData.reduce((acc, curr) => acc + curr.hours, 0),
-    [chartData]
+    [chartData],
   );
 
   const summaryText = useMemo(() => {
@@ -105,7 +114,7 @@ export function HoursChart({
       </div>
 
       <div className="h-[300px] w-full mt-4">
-        <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
+        <ResponsiveContainer width="100%" height="100%">
           <BarChart
             data={chartData}
             margin={{ top: 0, right: 0, left: -20, bottom: 0 }}
@@ -137,6 +146,11 @@ export function HoursChart({
                 color: "#fff",
               }}
               itemStyle={{ color: "#fff" }}
+              labelStyle={{ fontWeight: "bold", marginBottom: "4px" }}
+              // Optional: use the fullDate with year in the tooltip
+              labelFormatter={(value, payload) =>
+                payload[0]?.payload.fullLabel || value
+              }
             />
             <Bar
               dataKey="hours"
@@ -144,8 +158,11 @@ export function HoursChart({
               radius={[4, 4, 0, 0]}
               barSize={32}
             >
-              {chartData.map((d) => (
-                <Cell key={d.name} className="fill-zinc-900 dark:fill-zinc-50" />
+              {chartData.map((d, _index) => (
+                <Cell
+                  key={`cell-${JSON.stringify(d)}`}
+                  className="fill-zinc-900 dark:fill-zinc-50"
+                />
               ))}
             </Bar>
           </BarChart>
