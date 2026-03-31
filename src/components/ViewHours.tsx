@@ -80,10 +80,23 @@ export default function ViewHours({
     let result = entries.filter((e) => e.clock_out); // Only completed shifts
 
     if (timeframe === "week") {
-      const firstDayOfMonth = new Date(selectedYear, selectedMonth, 1);
-      const firstMonday = startOfWeek(firstDayOfMonth, { weekStartsOn: 1 });
-      const start = addWeeks(firstMonday, selectedWeek - 1);
-      const end = endOfWeek(start, { weekStartsOn: 1 });
+      let start: Date;
+      let end: Date;
+
+      if (selectedWeek === 1) {
+        start = startOfDay(new Date(selectedYear, selectedMonth, 1));
+        end = endOfDay(new Date(selectedYear, selectedMonth, 7));
+      } else if (selectedWeek === 2) {
+        start = startOfDay(new Date(selectedYear, selectedMonth, 8));
+        end = endOfDay(new Date(selectedYear, selectedMonth, 14));
+      } else if (selectedWeek === 3) {
+        start = startOfDay(new Date(selectedYear, selectedMonth, 15));
+        end = endOfDay(new Date(selectedYear, selectedMonth, 21));
+      } else {
+        // Week 4: 22nd to end of month
+        start = startOfDay(new Date(selectedYear, selectedMonth, 22));
+        end = endOfMonth(new Date(selectedYear, selectedMonth, 1));
+      }
       
       result = result.filter((e) => {
         try {
@@ -134,12 +147,24 @@ export default function ViewHours({
     let prevEnd: Date;
 
     if (timeframe === "week") {
-      const firstDayOfMonth = new Date(selectedYear, selectedMonth, 1);
-      const firstMonday = startOfWeek(firstDayOfMonth, { weekStartsOn: 1 });
-      const currentWeekStart = addWeeks(firstMonday, selectedWeek - 1);
-      
-      prevStart = subWeeks(currentWeekStart, 1);
-      prevEnd = endOfWeek(prevStart, { weekStartsOn: 1 });
+      // For comparison, we use the same week number from the previous month
+      const prevMonthDate = subMonths(new Date(selectedYear, selectedMonth, 1), 1);
+      const prevYear = prevMonthDate.getFullYear();
+      const prevMonth = prevMonthDate.getMonth();
+
+      if (selectedWeek === 1) {
+        prevStart = startOfDay(new Date(prevYear, prevMonth, 1));
+        prevEnd = endOfDay(new Date(prevYear, prevMonth, 7));
+      } else if (selectedWeek === 2) {
+        prevStart = startOfDay(new Date(prevYear, prevMonth, 8));
+        prevEnd = endOfDay(new Date(prevYear, prevMonth, 14));
+      } else if (selectedWeek === 3) {
+        prevStart = startOfDay(new Date(prevYear, prevMonth, 15));
+        prevEnd = endOfDay(new Date(prevYear, prevMonth, 21));
+      } else {
+        prevStart = startOfDay(new Date(prevYear, prevMonth, 22));
+        prevEnd = endOfMonth(new Date(prevYear, prevMonth, 1));
+      }
     } else if (timeframe === "month") {
       const currentMonth = new Date(selectedYear, selectedMonth, 1);
       prevStart = startOfMonth(subMonths(currentMonth, 1));

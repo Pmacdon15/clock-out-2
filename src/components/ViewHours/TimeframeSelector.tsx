@@ -1,6 +1,6 @@
 "use client";
 
-import { format } from "date-fns";
+import { format, endOfMonth } from "date-fns";
 import { Calendar, Users } from "lucide-react";
 import type { Route } from "next";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -142,11 +142,10 @@ export function TimeframeSelector({
               onChange={(e) => setSelectedWeek(Number(e.target.value))}
               className="px-2 py-1.5 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg text-xs outline-none focus:ring-1 focus:ring-zinc-400"
             >
-              {[1, 2, 3, 4].map((w) => (
-                <option key={w} value={w}>
-                  Week {w}
-                </option>
-              ))}
+              <option value={1}>Week 1 (1-7)</option>
+              <option value={2}>Week 2 (8-14)</option>
+              <option value={3}>Week 3 (15-21)</option>
+              <option value={4}>Week 4 (22-{format(endOfMonth(new Date(selectedYear, selectedMonth, 1)), "d")})</option>
             </select>
             <select
               value={selectedMonth}
