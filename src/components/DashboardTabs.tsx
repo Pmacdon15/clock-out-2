@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, use } from "react";
+import { Suspense, use, useOptimistic } from "react";
 import type { SerializableResult, TimeEntry } from "@/lib/dal";
 import ManageHours from "./ManageHours";
 import { Card } from "./ui";
@@ -32,6 +32,42 @@ export default function DashboardTabs({
 }: DashboardTabsProps) {
   const result = use(entriesPromise);
 
+  const [optimisticResult, setOptimisticEntries] = useOptimistic(
+    result.ok ? result : { value: [] as TimeEntry[], ok: true as const },
+    (
+      state: SerializableResult<TimeEntry[], { reason: string }>,
+      action: { type: "ADD" | "REMOVE" | "UPDATE"; payload: any },
+    ) => {
+      if (!state.ok) return state;
+
+      switch (action.type) {
+        case "ADD":
+          return {
+            ...state,
+            value: [...(state.value || []), action.payload],
+          };
+        case "REMOVE":
+          return {
+            ...state,
+            value: (state.value || []).filter(
+              (entry) => entry.id !== action.payload,
+            ),
+          };
+        case "UPDATE":
+          return {
+            ...state,
+            value: (state.value || []).map((entry) =>
+              entry.id === action.payload.id
+                ? { ...entry, ...action.payload }
+                : entry,
+            ),
+          };
+        default:
+          return state;
+      }
+    },
+  );
+
   if (!result.ok) {
     return (
       <Card className="p-8 text-center text-red-500">
@@ -41,11 +77,15 @@ export default function DashboardTabs({
     );
   }
 
-  const entries: TimeEntry[] = result?.value ?? [];
-  const isAdminResult = isAdminPromise ? use(isAdminPromise) : undefined;
+  const entries: TimeEntry[] = optimisticResult.ok
+    ? optimisticResult.value
+    : [];
 
+  const isAdminResult = isAdminPromise ? use(isAdminPromise) : undefined;
   const isAdmin = isAdminResult?.ok ? isAdminResult.value.isAdmin : false;
-  const currentUserId = isAdminResult?.ok ? isAdminResult.value.userId : undefined;
+  const currentUserId = isAdminResult?.ok
+    ? isAdminResult.value.userId
+    : undefined;
 
   return (
     <Tabs defaultValue="manage" className="space-y-8">
@@ -55,11 +95,17 @@ export default function DashboardTabs({
       </TabsList>
 
       <TabsContent value="manage" className="mt-0">
-        <ManageHours initialEntries={entries} isAdmin={isAdmin || false} />
+        <ManageHours
+          initialEntries={entries}
+          isAdmin={isAdmin}
+          setOptimisticEntries={setOptimisticEntries}
+        />
       </TabsContent>
 
       <TabsContent value="view" className="mt-0">
-        <Suspense>
+        <Suspense
+          fallback={<div className="p-8 text-center">Loading view...</div>}
+        >
           <ViewHours
             entries={entries}
             membersPromise={membersPromise}

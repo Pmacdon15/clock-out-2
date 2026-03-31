@@ -2,7 +2,7 @@
 
 import { useMutation } from "@tanstack/react-query";
 import { Trash2 } from "lucide-react";
-import { useState } from "react";
+import { startTransition, useState } from "react";
 import { toast } from "sonner";
 import { deleteTimeEntryAction } from "@/lib/actions";
 import {
@@ -19,11 +19,16 @@ import {
 
 interface DeleteConfirmDialogProps {
   entryId: number;
+  setOptimisticEntries: (action: {
+    type: "ADD" | "REMOVE";
+    payload: any;
+  }) => void;
   trigger?: React.ReactNode;
 }
 
 export function DeleteConfirmDialog({
   entryId,
+  setOptimisticEntries,
   trigger,
 }: DeleteConfirmDialogProps) {
   const [open, setOpen] = useState(false);
@@ -41,7 +46,13 @@ export function DeleteConfirmDialog({
   });
 
   const handleDelete = async () => {
-    deleteMutation.mutate(entryId);
+    startTransition(() => {
+      setOptimisticEntries({
+        type: "REMOVE",
+        payload: entryId,
+      });
+      deleteMutation.mutate(entryId);
+    });
   };
 
   return (

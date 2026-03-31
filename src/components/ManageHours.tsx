@@ -2,7 +2,7 @@
 
 import { useMutation } from "@tanstack/react-query";
 import { Clock, Loader2, Play, Square, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { startTransition, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { clockInAction, clockOutAction } from "@/lib/actions";
 import type { TimeEntry } from "@/lib/dal";
@@ -24,11 +24,16 @@ const formatDuration = (start: Date, end: Date = new Date()) => {
 interface ManageHoursProps {
   initialEntries: TimeEntry[];
   isAdmin: boolean;
+  setOptimisticEntries: (action: {
+    type: "ADD" | "REMOVE" | "UPDATE";
+    payload: any;
+  }) => void;
 }
 
 export default function ManageHours({
   initialEntries = [],
   isAdmin,
+  setOptimisticEntries,
 }: ManageHoursProps) {
   const activeEntry = initialEntries?.find?.((e) => !e.clock_out);
   const [elapsedTime, setElapsedTime] = useState<string>("");
@@ -61,6 +66,45 @@ export default function ManageHours({
     },
   });
 
+  const handleClockIn = () => {
+    const now = new Date();
+
+    const tempEntry: TimeEntry = {
+      id: Math.random(),
+      user_id: "current",
+      org_id: "current",
+      clock_in: now,
+      clock_out: null,
+      created_at: now,
+      updated_at: now,
+    };
+
+    startTransition(() => {
+      setOptimisticEntries({ type: "ADD", payload: tempEntry });
+      clockInMutation.mutate();
+    });
+  };
+
+  const handleClockOut = () => {
+    if (!activeEntry) return;
+
+    const now = new Date();
+
+    startTransition(() => {
+      // This updates the specific entry in the list to have a clock_out time
+      setOptimisticEntries({
+        type: "UPDATE",
+        payload: {
+          id: activeEntry.id,
+          clock_out: now,
+          updated_at: now,
+        },
+      });
+
+      clockOutMutation.mutate();
+    });
+  };
+
   return (
     <Card className="p-8 sm:p-12 mb-8 flex flex-col items-center justify-center text-center">
       {activeEntry ? (
@@ -80,7 +124,7 @@ export default function ManageHours({
             Started at {new Date(activeEntry.clock_in).toLocaleTimeString()}
           </p>
           <Button
-            onClick={() => clockOutMutation.mutate()}
+            onClick={handleClockOut}
             disabled={clockOutMutation.isPending}
             variant="destructive"
             className="w-full max-w-sm h-16 text-lg font-bold gap-3 rounded-2xl"
@@ -102,7 +146,7 @@ export default function ManageHours({
             Ready to start your shift?
           </div>
           <Button
-            onClick={() => clockInMutation.mutate()}
+            onClick={handleClockIn}
             disabled={clockInMutation.isPending}
             className="w-full max-w-sm h-16 text-lg font-bold gap-3 rounded-2xl"
           >
@@ -146,6 +190,7 @@ export default function ManageHours({
                 </div>
                 {isAdmin && (
                   <DeleteConfirmDialog
+                    setOptimisticEntries={setOptimisticEntries}
                     entryId={entry.id}
                     trigger={
                       <button
