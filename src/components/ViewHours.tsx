@@ -126,8 +126,9 @@ export default function ViewHours({
         }
       });
     } else if (timeframe === "custom" && startDate && endDate) {
-      const start = startOfDay(new Date(startDate));
-      const end = endOfDay(new Date(endDate));
+    
+      const start = startOfDay(new Date(startDate + "T00:00:00"));
+      const end = endOfDay(new Date(endDate + "T00:00:00"));
       result = result.filter((e) => {
         try {
           const d = new Date(e.clock_in);
