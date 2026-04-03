@@ -66,8 +66,10 @@ export function EntryItem({
 
       updateMutation.mutate({
         id: entry.id,
-        clock_in: editClockIn,
-        clock_out: editClockOut,
+        clock_in: new Date(editClockIn).toISOString(),
+        clock_out: editClockOut
+          ? new Date(editClockOut).toISOString()
+          : "",
       });
     });
   };
