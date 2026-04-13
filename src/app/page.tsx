@@ -9,6 +9,26 @@ export default function Home(props: PageProps<"/">) {
     Array.isArray(params.userId) ? params.userId[0] : params.userId,
   );
 
+   const defaultTabPromise = props.searchParams.then((params) =>
+    Array.isArray(params.defaultTab) ? params.defaultTab[0] : params.defaultTab,
+  );
+
+  const selectedWeekPromise = props.searchParams.then((params) =>
+    Array.isArray(params.week) ? params.week[0] : params.week,
+  );
+
+  const selectedMonthPromise = props.searchParams.then((params) =>
+    Array.isArray(params.month) ? params.month[0] : params.month,
+  );
+
+  const selectedYearPromise = props.searchParams.then((params) =>
+    Array.isArray(params.year) ? params.year[0] : params.year,
+  );
+
+  const timeframePromise = props.searchParams.then((params) =>
+    Array.isArray(params.timeframe) ? params.timeframe[0] : params.timeframe,
+  );
+
   const timeEntriesPromise = props.searchParams.then((params) =>
     getTimeEntries(
       Array.isArray(params.userId) ? params.userId[0] : params.userId,
@@ -26,10 +46,15 @@ export default function Home(props: PageProps<"/">) {
         <Show when="signed-in">
           <Suspense fallback={<DashboardSkeleton />}>
             <DashboardTabs
+              defaultTabPromise={defaultTabPromise}
               entriesPromise={timeEntriesPromise}
               isAdminPromise={isAdminPromise}
               membersPromise={membersPromise}
               selectedUserIdPromise={userIdPromise}
+              selectedWeekPromise={selectedWeekPromise}
+              selectedMonthPromise={selectedMonthPromise}
+              selectedYearPromise={selectedYearPromise}
+              timeframePromise={timeframePromise}
             />
           </Suspense>
         </Show>

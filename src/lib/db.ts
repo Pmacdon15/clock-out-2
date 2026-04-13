@@ -85,3 +85,19 @@ export async function dbUpdateTimeEntry(
     `;
   return updated as unknown as TimeEntry | undefined;
 }
+
+export async function dbGetTimeEntriesForPeriod(
+  userId: string,
+  orgId: string,
+  startDate: Date,
+  endDate: Date,
+) {
+  const rows = await sql`
+        SELECT * FROM time_entries 
+        WHERE user_id = ${userId} AND org_id = ${orgId}
+        AND clock_in >= ${startDate} AND clock_in < ${endDate}
+        ORDER BY clock_in ASC
+    `;
+  return rows as unknown as TimeEntry[];
+}
+

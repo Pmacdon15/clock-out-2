@@ -36,6 +36,10 @@ interface ViewHoursProps {
     }[]
   >;
   selectedUserIdPromise?: Promise<string | undefined>;
+  selectedWeekPromise?: Promise<string | undefined>;
+  selectedMonthPromise?: Promise<string | undefined>;
+  selectedYearPromise?: Promise<string | undefined>;
+  timeframePromise?: Promise<string | undefined>;
   currentUserId?: string;
 }
 
@@ -45,12 +49,25 @@ export default function ViewHours({
   isAdmin = false,
   membersPromise,
   selectedUserIdPromise,
+  selectedWeekPromise,
+  selectedMonthPromise,
+  selectedYearPromise,
+  timeframePromise,
   currentUserId,
 }: ViewHoursProps) {
   const members = use(membersPromise || Promise.resolve([]));
   const selectedUserId = use(selectedUserIdPromise || Promise.resolve(""));
+  
+  const initialWeekParsed = use(selectedWeekPromise || Promise.resolve(undefined));
+  const initialMonthParsed = use(selectedMonthPromise || Promise.resolve(undefined));
+  const initialYearParsed = use(selectedYearPromise || Promise.resolve(undefined));
+  const initialTimeframeParsed = use(timeframePromise || Promise.resolve(undefined));
+
   // Determine default timeframe based on current data
-  const defaultTimeframe = useMemo(() => {
+  const defaultTimeframeValue = useMemo(() => {
+    if (initialTimeframeParsed === "week" || initialTimeframeParsed === "month" || initialTimeframeParsed === "year" || initialTimeframeParsed === "all" || initialTimeframeParsed === "custom") {
+        return initialTimeframeParsed as TimeframeValue;
+    }
     const start = startOfWeek(new Date(), { weekStartsOn: 1 });
     const end = endOfWeek(new Date(), { weekStartsOn: 1 });
     const hasEntriesInWeek = entries.some(
@@ -58,15 +75,15 @@ export default function ViewHours({
         e.clock_out && isWithinInterval(new Date(e.clock_in), { start, end }),
     );
     return hasEntriesInWeek ? "week" : "all";
-  }, [entries]);
+  }, [entries, initialTimeframeParsed]);
 
   // View state
-  const [timeframe, setTimeframe] = useState<TimeframeValue>(defaultTimeframe);
+  const [timeframe, setTimeframe] = useState<TimeframeValue>(defaultTimeframeValue);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
-  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
-  const [selectedWeek, setSelectedWeek] = useState(1);
+  const [selectedYear, setSelectedYear] = useState(initialYearParsed ? parseInt(initialYearParsed) : new Date().getFullYear());
+  const [selectedMonth, setSelectedMonth] = useState(initialMonthParsed ? parseInt(initialMonthParsed) : new Date().getMonth());
+  const [selectedWeek, setSelectedWeek] = useState(initialWeekParsed ? parseInt(initialWeekParsed) : 1);
 
   // Derive available years from entries
   const availableYears = useMemo(() => {

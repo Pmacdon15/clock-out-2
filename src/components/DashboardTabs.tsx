@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import ViewHours from "./ViewHours";
 
 interface DashboardTabsProps {
+  defaultTabPromise: Promise<string | undefined>
   entriesPromise: Promise<SerializableResult<TimeEntry[], { reason: string }>>;
   isAdminPromise?: Promise<
     SerializableResult<
@@ -22,15 +23,29 @@ interface DashboardTabsProps {
     }[]
   >;
   selectedUserIdPromise?: Promise<string | undefined>;
+  selectedWeekPromise?: Promise<string | undefined>;
+  selectedMonthPromise?: Promise<string | undefined>;
+  selectedYearPromise?: Promise<string | undefined>;
+  timeframePromise?: Promise<string | undefined>;
 }
-
+type TabType = 'manage' | 'view';
 export default function DashboardTabs({
+  defaultTabPromise,
   entriesPromise,
   isAdminPromise,
   membersPromise,
   selectedUserIdPromise,
+  selectedWeekPromise,
+  selectedMonthPromise,
+  selectedYearPromise,
+  timeframePromise,
 }: DashboardTabsProps) {
   const result = use(entriesPromise);
+  const defaultTabResult = use(defaultTabPromise)
+ const defaultTab: TabType = defaultTabResult === 'view' 
+  ? 'view' 
+  : 'manage';
+
 
   const [optimisticResult, setOptimisticEntries] = useOptimistic(
     result.ok ? result : { value: [] as TimeEntry[], ok: true as const },
@@ -88,7 +103,7 @@ export default function DashboardTabs({
     : undefined;
 
   return (
-    <Tabs defaultValue="manage" className="space-y-8">
+    <Tabs defaultValue={defaultTab} className="space-y-8">
       <TabsList>
         <TabsTrigger value="manage">Manage Hours</TabsTrigger>
         <TabsTrigger value="view">View Hours</TabsTrigger>
@@ -112,6 +127,10 @@ export default function DashboardTabs({
             membersPromise={membersPromise}
             isAdmin={isAdmin}
             selectedUserIdPromise={selectedUserIdPromise}
+            selectedWeekPromise={selectedWeekPromise}
+            selectedMonthPromise={selectedMonthPromise}
+            selectedYearPromise={selectedYearPromise}
+            timeframePromise={timeframePromise}
             currentUserId={currentUserId}
           />
         </Suspense>

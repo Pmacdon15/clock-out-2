@@ -66,7 +66,7 @@ export default function ManageHours({
     },
   });
 
-  const handleClockIn = () => {
+   const handleClockIn = () => {
     const now = new Date();
 
     const tempEntry: TimeEntry = {
@@ -161,7 +161,10 @@ export default function ManageHours({
       )}
 
       <div className="mt-12 w-full text-left">
-        <h3 className="text-lg font-bold mb-4">Recent Activity</h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-bold">Recent Activity</h3>
+       
+        </div>
         <div className="space-y-3">
           {initialEntries.slice(0, 5).map((entry) => (
             <div
