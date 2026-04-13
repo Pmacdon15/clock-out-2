@@ -7,6 +7,9 @@ import {
   deleteTimeEntry as dalDeleteTimeEntry,
   updateTimeEntry as dalUpdateTimeEntry,
 } from "./dal";
+import { auth } from "@clerk/nextjs/server";
+import { sendWeeklyReports } from "./reports";
+import { startOfDay, subDays } from "date-fns";
 
 export async function clockInAction() {
   const result = await dalClockIn();
@@ -71,3 +74,22 @@ export async function updateTimeEntryAction(
     },
   );
 }
+
+export async function sendCurrentWeekReportAction() { 
+  const { userId, orgId, orgRole } = await auth.protect();
+  if (!userId || !orgId) {
+    return { success: false, error: "Unauthorized" };
+  }
+  const isAdmin = orgRole === "org:admin";
+  if (!isAdmin) {
+    return { success: false, error: "Only admins can test reports" };
+  }
+  
+ 
+  const endDate = new Date();
+  const startDate = startOfDay(subDays(endDate, 7));
+  
+  await sendWeeklyReports(startDate, endDate, orgId);
+  return { success: true };
+}
+

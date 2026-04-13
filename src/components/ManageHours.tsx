@@ -4,7 +4,7 @@ import { useMutation } from "@tanstack/react-query";
 import { Clock, Loader2, Play, Square, Trash2 } from "lucide-react";
 import { startTransition, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { clockInAction, clockOutAction } from "@/lib/actions";
+import { clockInAction, clockOutAction, sendCurrentWeekReportAction } from "@/lib/actions";
 import type { TimeEntry } from "@/lib/dal";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 import { Button, Card } from "./ui";
@@ -65,6 +65,24 @@ export default function ManageHours({
       else if ("error" in res) toast.error(res.error || "Failed to clock out");
     },
   });
+
+  const [isSendingReport, setIsSendingReport] = useState(false);
+  const handleCurrentWeekReport = async () => {
+    setIsSendingReport(true);
+    toast.loading("Sending current week's report...");
+    try {
+      const res = await sendCurrentWeekReportAction();
+      toast.dismiss();
+      if (res.success) toast.success("Current week's report sent to admins!");
+      else toast.error(res.error || "Failed to send report");
+    } catch (e) {
+      const err = e as Error;
+      toast.dismiss();
+      toast.error(err.message || "Unknown error");
+    } finally {
+      setIsSendingReport(false);
+    }
+  };
 
   const handleClockIn = () => {
     const now = new Date();
@@ -161,7 +179,20 @@ export default function ManageHours({
       )}
 
       <div className="mt-12 w-full text-left">
-        <h3 className="text-lg font-bold mb-4">Recent Activity</h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-bold">Recent Activity</h3>
+          {/* {isAdmin && (
+            <Button 
+              variant="default" 
+              size="sm" 
+              onClick={handleCurrentWeekReport}
+              disabled={isSendingReport}
+            >
+              {isSendingReport ? <Loader2 className="animate-spin h-4 w-4 mr-2" /> : null}
+              Send Current Week's Report
+            </Button>
+          )} */}
+        </div>
         <div className="space-y-3">
           {initialEntries.slice(0, 5).map((entry) => (
             <div
