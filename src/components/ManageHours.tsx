@@ -181,7 +181,7 @@ export default function ManageHours({
       <div className="mt-12 w-full text-left">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-bold">Recent Activity</h3>
-          {/* {isAdmin && (
+          {isAdmin && (
             <Button 
               variant="default" 
               size="sm" 
@@ -191,7 +191,7 @@ export default function ManageHours({
               {isSendingReport ? <Loader2 className="animate-spin h-4 w-4 mr-2" /> : null}
               Send Current Week's Report
             </Button>
-          )} */}
+          )}
         </div>
         <div className="space-y-3">
           {initialEntries.slice(0, 5).map((entry) => (

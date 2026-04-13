@@ -19,7 +19,7 @@ export async function GET(request: Request) {
   }
 
   // Calculate the reporting period for the run.
-  // The schedule is "0 0 1,8,16,24 * *".
+  // The schedule is "0 6 1,8,16,24 * *".
   // This means if it runs on the 8th, it should ideally process 1st to 7th.
   // If it runs on 16th, process 8th to 15th.
   
