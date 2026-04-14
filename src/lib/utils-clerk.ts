@@ -1,38 +1,39 @@
-import { clerkClient } from "@clerk/nextjs/server";
+import { clerkClient } from '@clerk/nextjs/server'
 
 export async function isOverMemberShipLimit(orgId: string) {
-  try {
-    const client = await clerkClient();
+	try {
+		const client = await clerkClient()
 
-    const { data } = await client.organizations.getOrganizationMembershipList({
-      organizationId: orgId,
-    });
+		const { data } =
+			await client.organizations.getOrganizationMembershipList({
+				organizationId: orgId,
+			})
 
-    if (data.length === 0) return false;
+		if (data.length === 0) return false
 
-    const maxAllowed = data[0]?.organization?.maxAllowedMemberships ?? 0;
-    const currentCount = data[0]?.organization?.membersCount ?? 0;
+		const maxAllowed = data[0]?.organization?.maxAllowedMemberships ?? 0
+		const currentCount = data[0]?.organization?.membersCount ?? 0
 
-    console.log(`Max: ${maxAllowed}, Current: ${currentCount}`);
+		console.log(`Max: ${maxAllowed}, Current: ${currentCount}`)
 
-    return currentCount > maxAllowed;
-  } catch (error) {
-    console.error("Error getting membership status:", error);
-    return true;
-  }
+		return currentCount > maxAllowed
+	} catch (error) {
+		console.error('Error getting membership status:', error)
+		return true
+	}
 }
 
 export async function getProcessedMembers(
-  orgId: string,
-  rawMembersArray: any[],
+	_orgId: string,
+	rawMembersArray: any[],
 ) {
-  return rawMembersArray.map((m) => {
-    const userData = m.publicUserData;
-    return {
-      id: userData?.userId || "",
-      name: userData?.firstName
-        ? `${userData.firstName} ${userData.lastName || ""}`.trim()
-        : userData?.identifier || "Unknown Member",
-    };
-  });
+	return rawMembersArray.map((m) => {
+		const userData = m.publicUserData
+		return {
+			id: userData?.userId || '',
+			name: userData?.firstName
+				? `${userData.firstName} ${userData.lastName || ''}`.trim()
+				: userData?.identifier || 'Unknown Member',
+		}
+	})
 }

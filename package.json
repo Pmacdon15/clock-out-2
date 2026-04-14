@@ -1,51 +1,53 @@
 {
-  "name": "clock-out",
-  "version": "0.1.0",
-  "private": true,
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "biome check",
-    "format": "biome format --write"
-  },
-  "dependencies": {
-    "@clerk/nextjs": "^7.0.12",
-    "@clerk/ui": "^1.5.0",
-    "@neondatabase/serverless": "^1.0.2",
-    "@radix-ui/react-alert-dialog": "^1.1.15",
-    "@react-email/components": "^1.0.12",
-    "@tanstack/react-query": "^5.99.0",
-    "@vercel/analytics": "^2.0.1",
-    "clsx": "^2.1.1",
-    "date-fns": "^4.1.0",
-    "lucide-react": "^1.8.0",
-    "neverthrow": "^8.2.0",
-    "next": "16.2.3",
-    "react": "19.2.5",
-    "react-dom": "19.2.5",
-    "recharts": "^3.8.1",
-    "resend": "^6.10.0",
-    "sonner": "^2.0.7",
-    "tailwind-merge": "^3.5.0",
-    "vercel": "^50.44.0"
-  },
-  "devDependencies": {
-    "@biomejs/biome": "^2.4.11",
-    "@tailwindcss/postcss": "^4.2.2",
-    "@types/node": "^25.6.0",
-    "@types/react": "^19.2.14",
-    "@types/react-dom": "^19.2.3",
-    "babel-plugin-react-compiler": "1.0.0",
-    "tailwindcss": "^4.2.2",
-    "typescript": "^6.0.2"
-  },
-  "ignoreScripts": [
-    "sharp",
-    "unrs-resolver"
-  ],
-  "trustedDependencies": [
-    "sharp",
-    "unrs-resolver"
-  ]
+	"name": "clock-out",
+	"version": "0.1.0",
+	"private": true,
+	"scripts": {
+		"dev": "next dev",
+		"build": "next build",
+		"start": "next start",
+		"lint": "biome check --write --unsafe",
+		"format": "biome format --write",
+		"postbuild": "next-sitemap"
+	},
+	"dependencies": {
+		"@clerk/nextjs": "^7.0.12",
+		"@clerk/ui": "^1.5.0",
+		"@neondatabase/serverless": "^1.0.2",
+		"@radix-ui/react-alert-dialog": "^1.1.15",
+		"@react-email/components": "^1.0.12",
+		"@tanstack/react-query": "^5.99.0",
+		"@vercel/analytics": "^2.0.1",
+		"clsx": "^2.1.1",
+		"date-fns": "^4.1.0",
+		"lucide-react": "^1.8.0",
+		"neverthrow": "^8.2.0",
+		"next": "16.2.3",
+		"next-sitemap": "^4.2.3",
+		"react": "19.2.5",
+		"react-dom": "19.2.5",
+		"recharts": "^3.8.1",
+		"resend": "^6.10.0",
+		"sonner": "^2.0.7",
+		"tailwind-merge": "^3.5.0",
+		"vercel": "^50.44.0"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.4.11",
+		"@tailwindcss/postcss": "^4.2.2",
+		"@types/node": "^25.6.0",
+		"@types/react": "^19.2.14",
+		"@types/react-dom": "^19.2.3",
+		"babel-plugin-react-compiler": "1.0.0",
+		"tailwindcss": "^4.2.2",
+		"typescript": "^6.0.2"
+	},
+	"ignoreScripts": [
+		"sharp",
+		"unrs-resolver"
+	],
+	"trustedDependencies": [
+		"sharp",
+		"unrs-resolver"
+	]
 }
