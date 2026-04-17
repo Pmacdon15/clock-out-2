@@ -37,7 +37,8 @@ export async function getAuthSession(): Promise<
 	// const _organization = await client.organizations.getOrganization({
 	// 	organizationId: orgId,
 	// })
-	const isPaidPlan = !has({ plan: 'free' })
+	const isPaidPlan = !has({ plan: 'free_org' })
+	// console.log("isPaidPlan: ", isPaidPlan)
 
 	return {
 		value: { userId, orgId, isAdmin: orgRole === 'org:admin', isPaidPlan },
