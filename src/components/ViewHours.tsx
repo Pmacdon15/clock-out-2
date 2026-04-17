@@ -211,25 +211,29 @@ export default function ViewHours({
 		let prevEnd: Date
 
 		if (timeframe === 'week') {
-			// For comparison, we use the same week number from the previous month
-			const prevMonthDate = subMonths(
-				new Date(selectedYear, selectedMonth, 1),
-				1,
-			)
-			const prevYear = prevMonthDate.getFullYear()
-			const prevMonth = prevMonthDate.getMonth()
+			// For comparison, we use the immediate previous week
+			let prevYear = selectedYear
+			let prevMonth = selectedMonth
+			let prevWeek = selectedWeek - 1
 
-			if (selectedWeek === 1) {
+			if (prevWeek === 0) {
+				const prevMonthDate = subMonths(new Date(selectedYear, selectedMonth, 1), 1)
+				prevYear = prevMonthDate.getFullYear()
+				prevMonth = prevMonthDate.getMonth()
+				prevWeek = 4 // Compare Week 1 to Week 4 of previous month
+			}
+
+			if (prevWeek === 1) {
 				prevStart = startOfDay(new Date(prevYear, prevMonth, 1))
 				prevEnd = endOfDay(new Date(prevYear, prevMonth, 7))
-			} else if (selectedWeek === 2) {
+			} else if (prevWeek === 2) {
 				prevStart = startOfDay(new Date(prevYear, prevMonth, 8))
-				prevEnd = endOfDay(new Date(prevYear, prevMonth, 14))
-			} else if (selectedWeek === 3) {
-				prevStart = startOfDay(new Date(prevYear, prevMonth, 15))
-				prevEnd = endOfDay(new Date(prevYear, prevMonth, 21))
+				prevEnd = endOfDay(new Date(prevYear, prevMonth, 15))
+			} else if (prevWeek === 3) {
+				prevStart = startOfDay(new Date(prevYear, prevMonth, 16))
+				prevEnd = endOfDay(new Date(prevYear, prevMonth, 23))
 			} else {
-				prevStart = startOfDay(new Date(prevYear, prevMonth, 22))
+				prevStart = startOfDay(new Date(prevYear, prevMonth, 24))
 				prevEnd = endOfMonth(new Date(prevYear, prevMonth, 1))
 			}
 		} else if (timeframe === 'month') {
@@ -294,6 +298,7 @@ export default function ViewHours({
 					filteredEntries={filteredEntries}
 					previousTotalHours={previousTotalHours}
 					selectedMonth={selectedMonth}
+					selectedWeek={selectedWeek}
 					selectedYear={selectedYear}
 					timeframe={timeframe}
 				/>

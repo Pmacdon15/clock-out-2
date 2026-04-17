@@ -21,6 +21,7 @@ interface HoursChartProps {
 	timeframe: string
 	selectedYear: number
 	selectedMonth: number
+	selectedWeek: number
 	previousTotalHours: number
 }
 
@@ -29,6 +30,7 @@ export function HoursChart({
 	timeframe,
 	selectedYear,
 	selectedMonth,
+	selectedWeek,
 	previousTotalHours,
 }: HoursChartProps) {
 	const chartData = useMemo(() => {
@@ -69,6 +71,13 @@ export function HoursChart({
 	)
 
 	const summaryText = useMemo(() => {
+		if (timeframe === 'week') {
+			const monthName = format(
+				new Date(selectedYear, selectedMonth, 1),
+				'MMMM',
+			)
+			return `Week ${selectedWeek} - ${monthName} ${selectedYear}`
+		}
 		if (timeframe === 'month') {
 			return `${format(new Date(selectedYear, selectedMonth, 1), 'MMMM')} ${selectedYear}`
 		}
@@ -76,7 +85,7 @@ export function HoursChart({
 			return `${selectedYear}`
 		}
 		return timeframe
-	}, [timeframe, selectedYear, selectedMonth])
+	}, [timeframe, selectedYear, selectedMonth, selectedWeek])
 
 	const percentage = useMemo(() => {
 		if (previousTotalHours === 0) return null
@@ -84,9 +93,9 @@ export function HoursChart({
 	}, [totalHours, previousTotalHours])
 
 	const vsText = useMemo(() => {
-		if (timeframe === 'week') return 'vs last week'
-		if (timeframe === 'month') return 'vs last month'
-		if (timeframe === 'year') return 'vs last year'
+		if (timeframe === 'week') return 'than last week'
+		if (timeframe === 'month') return 'than last month'
+		if (timeframe === 'year') return 'than last year'
 		return ''
 	}, [timeframe])
 
@@ -111,7 +120,8 @@ export function HoursChart({
 							<TrendingUp
 								className={`h-3 w-3 ${percentage < 0 ? 'rotate-180' : ''}`}
 							/>
-							{Math.abs(percentage).toFixed(0)}% {vsText}
+							{Math.abs(percentage).toFixed(0)}%{' '}
+							{percentage >= 0 ? 'more' : 'less'} {vsText}
 						</span>
 					)}
 				</div>
