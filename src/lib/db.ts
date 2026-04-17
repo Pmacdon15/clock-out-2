@@ -1,16 +1,12 @@
 import { neon } from '@neondatabase/serverless'
 import { cacheLife, cacheTag } from 'next/cache'
-import type { TimeEntry } from './types'
+import type { OrgSettingsData, TimeEntry } from './types'
 
 if (!process.env.DATABASE_URL) {
 	throw new Error('DATABASE_URL is not defined')
 }
 
 export const sql = neon(process.env.DATABASE_URL)
-
-/**
- * SQL-related functions moved from dal.ts
- */
 
 export async function dbGetTimeEntries(userId: string, orgId: string) {
 	'use cache'
@@ -56,12 +52,11 @@ export async function dbClockOut(userId: string, orgId: string) {
 export async function dbDeleteTimeEntry(
 	id: number,
 	orgId: string,
-	isAdmin: boolean,
+	// isAdmin: boolean,
 ) {
 	const [deleted] = await sql`
       DELETE FROM time_entries 
-      WHERE id = ${id} AND org_id = ${orgId}
-      AND ${isAdmin}
+      WHERE id = ${id} AND org_id = ${orgId}     
       RETURNING *
     `
 	return deleted as unknown as TimeEntry | undefined
@@ -100,3 +95,43 @@ export async function dbGetTimeEntriesForPeriod(
     `
 	return rows as unknown as TimeEntry[]
 }
+
+export async function dbGetOrgSettings(orgId: string) {
+	'use cache'
+	cacheTag(`settings-${orgId}`)
+	cacheLife('hours')
+	const [settings] = await sql`
+		SELECT * FROM org_settings WHERE org_id = ${orgId}
+	`
+	return settings as OrgSettingsData | undefined
+}
+
+export async function dbUpdateOrgSettings(
+	orgId: string,
+	frequency: string,
+	day: string | null,
+	interval: number,
+) {
+	const [updated] = await sql`
+		INSERT INTO org_settings (org_id, report_frequency, report_day, report_interval, updated_at)
+		VALUES (${orgId}, ${frequency}, ${day}, ${interval}, NOW())
+		ON CONFLICT (org_id) 
+		DO UPDATE SET 
+            report_frequency = ${frequency}, 
+            report_day = ${day}, 
+            report_interval = ${interval}, 
+            updated_at = NOW()
+		RETURNING *
+	`
+	return updated
+}
+
+// export async function dbInitSchema() {
+// 	await sql`
+// 		CREATE TABLE IF NOT EXISTS org_settings (
+// 			org_id TEXT PRIMARY KEY,
+// 			report_frequency TEXT NOT NULL DEFAULT 'weekly',
+// 			updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+// 		);
+// 	`
+// }

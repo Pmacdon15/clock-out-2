@@ -8,6 +8,7 @@ import {
 	clockOut as dalClockOut,
 	deleteTimeEntry as dalDeleteTimeEntry,
 	updateTimeEntry as dalUpdateTimeEntry,
+	updateOrgSettingsDal,
 } from './dal'
 import { sendWeeklyReports } from './reports'
 
@@ -90,4 +91,22 @@ export async function sendCurrentWeekReportAction() {
 
 	await sendWeeklyReports(startDate, endDate, orgId)
 	return { success: true }
+}
+
+export async function updateOrgSettingAction(
+	frequency: string,
+	day: string | null = null,
+	interval: number = 1,
+) {
+	const result = await updateOrgSettingsDal(frequency, day, interval)
+
+	return result.match(
+		(entry) => {
+			updateTag(`settings-${entry.org_id}`)
+			return { success: true, data: entry }
+		},
+		(err) => {
+			return { success: false, error: err.reason }
+		},
+	)
 }
