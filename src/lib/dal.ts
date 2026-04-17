@@ -5,7 +5,9 @@ import {
 	dbClockIn,
 	dbClockOut,
 	dbDeleteTimeEntry,
+	dbGetOrgSettings,
 	dbGetTimeEntries,
+	dbUpdateOrgSettings,
 	dbUpdateTimeEntry,
 } from './db'
 import type { SerializableResult, TimeEntry } from './types'
@@ -15,19 +17,30 @@ export type { SerializableResult, TimeEntry }
 
 export async function getAuthSession(): Promise<
 	SerializableResult<
-		{ userId: string; orgId: string; isAdmin: boolean },
+		{
+			userId: string
+			orgId: string
+			isAdmin: boolean
+			isPaidPlan: boolean
+		},
 		{ reason: string }
 	>
 > {
-	const { userId, orgId, orgRole } = await auth()
+	const { userId, orgId, orgRole, has } = await auth()
 	if (!userId || !orgId) {
 		return {
 			error: { reason: 'Unauthorized or no organization selected' },
 			ok: false,
 		}
 	}
+	// const client = await clerkClient()
+	// const _organization = await client.organizations.getOrganization({
+	// 	organizationId: orgId,
+	// })
+	const isPaidPlan = !has({ plan: 'free' })
+
 	return {
-		value: { userId, orgId, isAdmin: orgRole === 'org:admin' },
+		value: { userId, orgId, isAdmin: orgRole === 'org:admin', isPaidPlan },
 		ok: true,
 	}
 }
@@ -133,13 +146,13 @@ export async function clockOut() {
 
 export async function deleteTimeEntry(id: number) {
 	const { userId, orgId, orgRole } = await auth.protect()
-	if (!userId || !orgId) {
+	const isAdmin = orgRole === 'org:admin'
+	if (!userId || !orgId || !isAdmin) {
 		return errAsync({ reason: 'Unauthorized' } as const)
 	}
-	const isAdmin = orgRole === 'org:admin'
 
 	try {
-		const deleted = await dbDeleteTimeEntry(id, orgId, isAdmin)
+		const deleted = await dbDeleteTimeEntry(id, orgId)
 
 		return deleted
 			? okAsync(deleted)
@@ -176,5 +189,63 @@ export async function updateTimeEntry(
 	} catch (error) {
 		console.error('Update error: ', error)
 		return errAsync({ reason: 'Failed to update entry' } as const)
+	}
+}
+
+export async function getOrgSettings() {
+	const { orgId, orgRole } = await auth.protect()
+	const isAdmin = orgRole === 'org:admin'
+
+	if (!isAdmin) {
+		return { error: { reason: 'Only admins can view settings' }, ok: false }
+	}
+
+	try {
+		const settings = await dbGetOrgSettings(orgId as string)
+		return {
+			value: settings || {
+				org_id: orgId as string,
+				report_frequency: 'weekly',
+				report_day: null,
+				report_interval: 1,
+			},
+			ok: true,
+		}
+	} catch (error) {
+		console.error('Get settings error: ', error)
+		return { error: { reason: 'Failed to fetch settings' }, ok: false }
+	}
+}
+
+export async function updateOrgSettingsDal(
+	frequency: string,
+	day: string | null = null,
+	interval: number = 1,
+) {
+	const { userId, orgId, orgRole, has } = await auth.protect()
+	const isAdmin = orgRole === 'org:admin'
+	if (!userId || !orgId || !isAdmin) {
+		return errAsync({ reason: 'Unauthorized' } as const)
+	}
+
+	const isPaidPlan = !has({ plan: 'free' })
+
+	if (!isPaidPlan) {
+		return errAsync({
+			reason: 'Reports settings are only available on paid plans',
+		} as const)
+	}
+
+	try {
+		const updated = await dbUpdateOrgSettings(
+			orgId,
+			frequency,
+			day,
+			interval,
+		)
+		return okAsync(updated)
+	} catch (error) {
+		console.error('Update settings error: ', error)
+		return errAsync({ reason: 'Failed to update settings' } as const)
 	}
 }

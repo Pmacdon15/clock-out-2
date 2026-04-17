@@ -3,6 +3,7 @@
 import { Suspense, use, useOptimistic } from 'react'
 import type { SerializableResult, TimeEntry } from '@/lib/dal'
 import ManageHours from './ManageHours'
+import OrgSettings from './OrgSettings'
 import { Card } from './ui'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
 import ViewHours from './ViewHours'
@@ -10,9 +11,37 @@ import ViewHours from './ViewHours'
 interface DashboardTabsProps {
 	defaultTabPromise: Promise<string | undefined>
 	entriesPromise: Promise<SerializableResult<TimeEntry[], { reason: string }>>
+	orgSettingsPromise: Promise<
+		| {
+				error: {
+					reason: string
+				}
+				ok: boolean
+				value?: undefined
+		  }
+		| {
+				value:
+					| {
+							org_id: string
+							report_frequency: string
+							updated_at: Date
+					  }
+					| {
+							org_id: string
+							report_frequency: string
+					  }
+				ok: boolean
+				error?: undefined
+		  }
+	>
 	isAdminPromise?: Promise<
 		SerializableResult<
-			{ userId: string; orgId: string; isAdmin: boolean },
+			{
+				userId: string
+				orgId: string
+				isAdmin: boolean
+				isPaidPlan: boolean
+			},
 			{ reason: string }
 		>
 	>
@@ -28,9 +57,10 @@ interface DashboardTabsProps {
 	selectedYearPromise?: Promise<string | undefined>
 	timeframePromise?: Promise<string | undefined>
 }
-type TabType = 'manage' | 'view'
+type TabType = 'manage' | 'view' | 'settings'
 export default function DashboardTabs({
 	defaultTabPromise,
+	orgSettingsPromise,
 	entriesPromise,
 	isAdminPromise,
 	membersPromise,
@@ -42,7 +72,12 @@ export default function DashboardTabs({
 }: DashboardTabsProps) {
 	const result = use(entriesPromise)
 	const defaultTabResult = use(defaultTabPromise)
-	const defaultTab: TabType = defaultTabResult === 'view' ? 'view' : 'manage'
+	const defaultTab: TabType =
+		defaultTabResult === 'view'
+			? 'view'
+			: defaultTabResult === 'settings'
+				? 'settings'
+				: 'manage'
 
 	const [optimisticResult, setOptimisticEntries] = useOptimistic(
 		result.ok ? result : { value: [] as TimeEntry[], ok: true as const },
@@ -95,6 +130,9 @@ export default function DashboardTabs({
 
 	const isAdminResult = isAdminPromise ? use(isAdminPromise) : undefined
 	const isAdmin = isAdminResult?.ok ? isAdminResult.value.isAdmin : false
+	const isPaidPlan = isAdminResult?.ok
+		? isAdminResult.value.isPaidPlan
+		: false
 	const currentUserId = isAdminResult?.ok
 		? isAdminResult.value.userId
 		: undefined
@@ -104,6 +142,9 @@ export default function DashboardTabs({
 			<TabsList>
 				<TabsTrigger value="manage">Manage Hours</TabsTrigger>
 				<TabsTrigger value="view">View Hours</TabsTrigger>
+				{isAdmin && isPaidPlan && (
+					<TabsTrigger value="settings">Settings</TabsTrigger>
+				)}
 			</TabsList>
 
 			<TabsContent className="mt-0" value="manage">
@@ -134,6 +175,17 @@ export default function DashboardTabs({
 					/>
 				</Suspense>
 			</TabsContent>
+
+			{isAdmin && isPaidPlan && (
+				<TabsContent className="mt-0" value="settings">
+					<Suspense>
+						<OrgSettings
+							isPaidPlan={isPaidPlan}
+							orgSettingsPromise={orgSettingsPromise}
+						/>
+					</Suspense>
+				</TabsContent>
+			)}
 		</Tabs>
 	)
 }
