@@ -1,7 +1,11 @@
 'use client'
 
 import { Suspense, use, useOptimistic } from 'react'
-import type { SerializableResult, TimeEntry } from '@/lib/dal'
+import type {
+	OrgSettingsData,
+	SerializableResult,
+	TimeEntry,
+} from '@/lib/types'
 import ManageHours from './ManageHours'
 import OrgSettings from './OrgSettings'
 import { Card } from './ui'
@@ -12,27 +16,7 @@ interface DashboardTabsProps {
 	defaultTabPromise: Promise<string | undefined>
 	entriesPromise: Promise<SerializableResult<TimeEntry[], { reason: string }>>
 	orgSettingsPromise: Promise<
-		| {
-				error: {
-					reason: string
-				}
-				ok: boolean
-				value?: undefined
-		  }
-		| {
-				value:
-					| {
-							org_id: string
-							report_frequency: string
-							updated_at: Date
-					  }
-					| {
-							org_id: string
-							report_frequency: string
-					  }
-				ok: boolean
-				error?: undefined
-		  }
+		SerializableResult<OrgSettingsData, { reason: string }>
 	>
 	isAdminPromise?: Promise<
 		SerializableResult<

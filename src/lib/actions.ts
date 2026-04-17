@@ -102,7 +102,7 @@ export async function updateOrgSettingAction(
 
 	return result.match(
 		(entry) => {
-			// updateTag(`time-entries-${entry.user_id}-${entry.org_id}`)
+			updateTag(`settings-${entry.org_id}`)
 			return { success: true, data: entry }
 		},
 		(err) => {

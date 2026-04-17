@@ -11,3 +11,11 @@ export type TimeEntry = {
 export type SerializableResult<T, E> =
 	| { value: T; ok: true }
 	| { error: E; ok: false }
+
+export type OrgSettingsData = {
+	org_id: string
+	report_frequency: string
+	updated_at?: Date
+	report_day?: string | null
+	report_interval?: number | null
+}

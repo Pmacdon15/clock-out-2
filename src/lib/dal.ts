@@ -10,7 +10,7 @@ import {
 	dbUpdateOrgSettings,
 	dbUpdateTimeEntry,
 } from './db'
-import type { SerializableResult, TimeEntry } from './types'
+import type { OrgSettingsData, SerializableResult, TimeEntry } from './types'
 import { getProcessedMembers, isOverMemberShipLimit } from './utils-clerk'
 
 export type { SerializableResult, TimeEntry }
@@ -192,7 +192,9 @@ export async function updateTimeEntry(
 	}
 }
 
-export async function getOrgSettings() {
+export async function getOrgSettings(): Promise<
+	SerializableResult<OrgSettingsData, { reason: string }>
+> {
 	const { orgId, orgRole } = await auth.protect()
 	const isAdmin = orgRole === 'org:admin'
 

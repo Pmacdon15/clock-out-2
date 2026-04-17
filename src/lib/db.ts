@@ -1,6 +1,6 @@
 import { neon } from '@neondatabase/serverless'
 import { cacheLife, cacheTag } from 'next/cache'
-import type { TimeEntry } from './types'
+import type { OrgSettingsData, TimeEntry } from './types'
 
 if (!process.env.DATABASE_URL) {
 	throw new Error('DATABASE_URL is not defined')
@@ -97,18 +97,13 @@ export async function dbGetTimeEntriesForPeriod(
 }
 
 export async function dbGetOrgSettings(orgId: string) {
+	'use cache'
+	cacheTag(`settings-${orgId}`)
+	cacheLife('hours')
 	const [settings] = await sql`
 		SELECT * FROM org_settings WHERE org_id = ${orgId}
 	`
-	return settings as
-		| {
-				org_id: string
-				report_frequency: string
-				report_day: string | null
-				report_interval: number
-				updated_at: Date
-		  }
-		| undefined
+	return settings as OrgSettingsData | undefined
 }
 
 export async function dbUpdateOrgSettings(

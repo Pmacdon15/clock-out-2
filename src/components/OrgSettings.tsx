@@ -3,35 +3,17 @@
 import { useMutation } from '@tanstack/react-query'
 import { Calendar, Check, Loader2, Settings } from 'lucide-react'
 import Link from 'next/link'
-import { use, useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { startTransition, use, useOptimistic, useState } from 'react'
 import { toast } from 'sonner'
 import { updateOrgSettingAction } from '@/lib/actions'
+import type { OrgSettingsData, SerializableResult } from '@/lib/types'
 import { Button, Card } from './ui'
 
 interface OrgSettingsProps {
-    orgSettingsPromise: Promise<{
-        error: { reason: string };
-        ok: boolean;
-        value?: undefined;
-    } | {
-        value: {
-            org_id: string;
-            report_frequency: string;
-            updated_at: Date;           
-            report_day?: string | null;
-            report_interval?: number | null;
-        } | {
-            org_id: string;
-            report_frequency: string;
-            // Add these lines here too:
-            report_day?: string | null;
-            report_interval?: number | null;
-        };
-        ok: boolean;
-        error?: undefined;
-    }>
-    isPaidPlan: boolean
+	orgSettingsPromise: Promise<
+		SerializableResult<OrgSettingsData, { reason: string }>
+	>
+	isPaidPlan: boolean
 }
 
 const DAYS = [
@@ -48,35 +30,42 @@ export default function OrgSettings({
 	isPaidPlan,
 	orgSettingsPromise,
 }: OrgSettingsProps) {
-	const settingsResult = use(orgSettingsPromise || Promise.resolve(undefined))
-	const router = useRouter()
+	const settingsResult = use(orgSettingsPromise)
+	const [optimisticSettings, setOptimisticSettings] = useOptimistic(
+		settingsResult?.ok ? settingsResult.value : null,
+		(state: OrgSettingsData | null, next: Partial<OrgSettingsData>) => {
+			if (!state) return state
+			return { ...state, ...next }
+		},
+	)
+	const initialData = optimisticSettings
 
-	const [frequency, setFrequency] = useState<string>('weekly')
-	const [reportDay, setReportDay] = useState<string>('Monday')
-	const [reportInterval, setReportInterval] = useState<number>(1)
-	const [isInitialized, setIsInitialized] = useState(false)
+	const [frequency, setFrequency] = useState<string>(
+		initialData?.report_frequency || 'weekly',
+	)
+	const [reportDay, setReportDay] = useState<string>(
+		initialData?.report_day || 'Monday',
+	)
+	const [reportInterval, setReportInterval] = useState<number>(
+		initialData?.report_interval || 1,
+	)
 
-	// Initialize state from promise
-	useEffect(() => {
-		if (settingsResult?.ok && settingsResult.value && !isInitialized) {
-			setFrequency(settingsResult.value.report_frequency)
-			setReportDay(settingsResult.value.report_day || 'Monday')
-			setReportInterval(settingsResult.value.report_interval || 1)
-			setIsInitialized(true)
-		}
-	}, [settingsResult, isInitialized])
-	const updateMutation = useMutation<
-		{ success: boolean; data?: any; error?: string },
-		Error,
-		{ freq: string; day: string | null; interval: number }
-	>({
-		mutationFn: ({ freq, day, interval }) =>
-			updateOrgSettingAction(freq, day, interval),
+	const { mutate, isPending } = useMutation({
+		mutationFn: ({
+			freq,
+			day,
+			interval,
+		}: {
+			freq: string
+			day: string | null
+			interval: number
+		}) => {
+			return updateOrgSettingAction(freq, day, interval)
+		},
 		onSuccess: (res) => {
 			if (res.success) {
 				toast.success('Settings updated')
-				router.refresh()
-			} else {
+			} else if ('error' in res) {
 				toast.error(res.error || 'Update failed')
 			}
 		},
@@ -119,10 +108,10 @@ export default function OrgSettings({
 	]
 
 	const hasChanged =
-		frequency !== settingsResult?.value?.report_frequency ||
+		frequency !== initialData?.report_frequency ||
 		(frequency === 'custom' &&
-			(reportDay !== settingsResult?.value?.report_day ||
-				reportInterval !== settingsResult?.value?.report_interval))
+			(reportDay !== initialData?.report_day ||
+				reportInterval !== initialData?.report_interval))
 
 	return (
 		<Card className="p-8">
@@ -169,13 +158,12 @@ export default function OrgSettings({
 										<Check className="h-4 w-4" />
 									</div>
 								)}
-								{settingsResult?.ok &&
-									settingsResult.value?.report_frequency ===
-										option.id && (
-										<span className="rounded-full bg-zinc-100 px-2 py-0.5 font-medium text-[10px] text-zinc-500 uppercase dark:bg-zinc-800">
-											Current
-										</span>
-									)}
+								{initialData?.report_frequency ===
+									option.id && (
+									<span className="rounded-full bg-zinc-100 px-2 py-0.5 font-medium text-[10px] text-zinc-500 uppercase dark:bg-zinc-800">
+										Current
+									</span>
+								)}
 							</div>
 						</button>
 
@@ -233,17 +221,29 @@ export default function OrgSettings({
 			<div className="mt-8 flex justify-end">
 				<Button
 					className="h-12 px-8 font-bold"
-					disabled={updateMutation.isPending || !hasChanged}
-					onClick={() =>
-						updateMutation.mutate({
-							freq: frequency,
-							day: frequency === 'custom' ? reportDay : null,
-							interval:
-								frequency === 'custom' ? reportInterval : 1,
+					disabled={isPending || !hasChanged}
+					onClick={() => {
+						const freq = frequency
+						const day = frequency === 'custom' ? reportDay : null
+						const interval =
+							frequency === 'custom' ? reportInterval : 1
+
+						startTransition(async () => {
+							setOptimisticSettings({
+								report_frequency: freq,
+								report_day: day,
+								report_interval: interval,
+							})
+
+							await mutate({
+								freq,
+								day,
+								interval,
+							})
 						})
-					}
+					}}
 				>
-					{updateMutation.isPending && (
+					{isPending && (
 						<Loader2 className="mr-2 h-4 w-4 animate-spin" />
 					)}
 					Save Changes
