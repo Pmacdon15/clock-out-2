@@ -67,7 +67,7 @@ export function TimeframeSelector({
 					<div className="absolute top-0 right-0 p-3 opacity-10">
 						<Users className="h-20 w-20 text-white" />
 					</div>
-					<div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl border border-zinc-700 bg-zinc-800">
+					<div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-zinc-700 bg-zinc-800">
 						<Users className="h-5 w-5 text-white" />
 					</div>
 					<div className="relative z-10 flex-1">
@@ -147,10 +147,10 @@ export function TimeframeSelector({
 							value={selectedWeek}
 						>
 							<option value={1}>Week 1 (1-7)</option>
-							<option value={2}>Week 2 (8-14)</option>
-							<option value={3}>Week 3 (15-21)</option>
+							<option value={2}>Week 2 (8-15)</option>
+							<option value={3}>Week 3 (16-23)</option>
 							<option value={4}>
-								Week 4 (22-
+								Week 4 (24-
 								{format(
 									endOfMonth(
 										new Date(

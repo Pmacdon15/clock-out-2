@@ -135,13 +135,13 @@ export default function ViewHours({
 				end = endOfDay(new Date(selectedYear, selectedMonth, 7))
 			} else if (selectedWeek === 2) {
 				start = startOfDay(new Date(selectedYear, selectedMonth, 8))
-				end = endOfDay(new Date(selectedYear, selectedMonth, 14))
+				end = endOfDay(new Date(selectedYear, selectedMonth, 15))
 			} else if (selectedWeek === 3) {
-				start = startOfDay(new Date(selectedYear, selectedMonth, 15))
-				end = endOfDay(new Date(selectedYear, selectedMonth, 21))
+				start = startOfDay(new Date(selectedYear, selectedMonth, 16))
+				end = endOfDay(new Date(selectedYear, selectedMonth, 23))
 			} else {
 				// Week 4: 22nd to end of month
-				start = startOfDay(new Date(selectedYear, selectedMonth, 22))
+				start = startOfDay(new Date(selectedYear, selectedMonth, 24))
 				end = endOfMonth(new Date(selectedYear, selectedMonth, 1))
 			}
 
