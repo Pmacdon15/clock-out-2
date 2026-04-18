@@ -54,7 +54,7 @@ export async function GET(request: Request) {
 				startDate = new Date(
 					prevMonth.getFullYear(),
 					prevMonth.getMonth(),
-					24,
+					24, 
 				)
 			} else if (dayOfMonth === 8) {
 				shouldSend = true

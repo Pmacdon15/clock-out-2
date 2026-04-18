@@ -74,7 +74,7 @@ export default function PrivacyPage() {
 							<strong>Neon:</strong> For hosted database storage.
 						</li>
 						<li>
-							<strong>Resend:</strong> For sending automated email
+							<strong>AWS SES:</strong> For sending automated email
 							reports.
 						</li>
 						<li>

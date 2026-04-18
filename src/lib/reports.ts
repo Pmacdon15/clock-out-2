@@ -1,10 +1,13 @@
 import { clerkClient } from '@clerk/nextjs/server'
 import { format } from 'date-fns'
-import { Resend } from 'resend'
+import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses'
+import { render } from '@react-email/render'
 import { WeeklyReportEmail } from '@/components/emails/WeeklyReportEmail'
 import { dbGetTimeEntriesForPeriod } from './db'
 
-const resend = new Resend(process.env.RESEND_API_KEY)
+const sesClient = new SESClient({
+	region: process.env.AWS_REGION || 'us-east-1',
+})
 
 function formatDuration(ms: number) {
 	const totalMinutes = Math.floor(ms / (1000 * 60))
@@ -19,8 +22,10 @@ export async function sendWeeklyReports(
 	endDate: Date,
 	targetOrgId?: string,
 ) {
-	if (!process.env.RESEND_API_KEY) {
-		console.warn('RESEND_API_KEY is not defined. Skipping email sending.')
+	const hasAwsCreds =
+		process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY
+	if (!hasAwsCreds) {
+		console.warn('AWS credentials are not defined. Skipping email sending.')
 		return false
 	}
 
@@ -201,11 +206,8 @@ export async function sendWeeklyReports(
 					`[Reports] Sending email for ${userName} to admins: ${adminEmails.join(', ')}`,
 				)
 				try {
-					const { error, data } = await resend.emails.send({
-						from: 'Clock Out <weekly-hours@resend.dev>',
-						to: adminEmails,
-						subject: `Weekly Hours Report for ${userName}`,
-						react: WeeklyReportEmail({
+					const emailHtml = await render(
+						WeeklyReportEmail({
 							userName,
 							totalHours: totalHoursString,
 							periodStart: periodStartStr,
@@ -220,19 +222,31 @@ export async function sendWeeklyReports(
 							year: startDate.getFullYear().toString(),
 							breakdown: breakdown,
 						}),
+					)
+
+					const command = new SendEmailCommand({
+						Destination: {
+							ToAddresses: adminEmails,
+						},
+						Message: {
+							Body: {
+								Html: {
+									Charset: 'UTF-8',
+									Data: emailHtml,
+								},
+							},
+							Subject: {
+								Charset: 'UTF-8',
+								Data: `Weekly Hours Report for ${userName}`,
+							},
+						},
+						Source:
+							process.env.SES_FROM_EMAIL ||
+							'Clock Out <no-reply@clockout.patmac.ca>',
 					})
 
-					if (error) {
-						console.error(
-							`[Reports] Resend Error for ${userName}:`,
-							error,
-						)
-					} else {
-						console.log(
-							`[Reports] Resend Success for ${userName}:`,
-							data,
-						)
-					}
+					const data = await sesClient.send(command)
+					console.log(`[Reports] SES Success for ${userName}:`, data)
 				} catch (error) {
 					console.error(
 						`[Reports] Catch Error sending email for ${userName}:`,
