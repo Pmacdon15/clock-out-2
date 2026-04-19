@@ -227,6 +227,8 @@ export async function updateOrgSettingsDal(
 ) {
 	const { userId, orgId, orgRole, has } = await auth.protect()
 	const isAdmin = orgRole === 'org:admin'
+	// const hasReporting = has({ feature: 'reporting' })
+	
 	if (!userId || !orgId || !isAdmin) {
 		return errAsync({ reason: 'Unauthorized' } as const)
 	}

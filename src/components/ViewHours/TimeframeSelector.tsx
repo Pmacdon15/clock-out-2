@@ -24,7 +24,7 @@ interface TimeframeSelectorProps {
 	isAdmin?: boolean
 	members?: { id: string; name: string }[]
 	selectedUserId?: string
-	currentUserId?: string
+	currentUserId?: string | null | undefined
 }
 
 export function TimeframeSelector({

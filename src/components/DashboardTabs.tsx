@@ -1,5 +1,6 @@
 'use client'
 
+import { useAuth } from '@clerk/nextjs'
 import { Suspense, use, useOptimistic } from 'react'
 import type {
 	OrgSettingsData,
@@ -18,17 +19,6 @@ interface DashboardTabsProps {
 	orgSettingsPromise: Promise<
 		SerializableResult<OrgSettingsData, { reason: string }>
 	>
-	isAdminPromise?: Promise<
-		SerializableResult<
-			{
-				userId: string
-				orgId: string
-				isAdmin: boolean
-				isPaidPlan: boolean
-			},
-			{ reason: string }
-		>
-	>
 	membersPromise?: Promise<
 		{
 			id: string
@@ -46,7 +36,6 @@ export default function DashboardTabs({
 	defaultTabPromise,
 	orgSettingsPromise,
 	entriesPromise,
-	isAdminPromise,
 	membersPromise,
 	selectedUserIdPromise,
 	selectedWeekPromise,
@@ -54,6 +43,7 @@ export default function DashboardTabs({
 	selectedYearPromise,
 	timeframePromise,
 }: DashboardTabsProps) {
+	const { has, userId } = useAuth()
 	const result = use(entriesPromise)
 	const defaultTabResult = use(defaultTabPromise)
 	const defaultTab: TabType =
@@ -112,21 +102,16 @@ export default function DashboardTabs({
 		? optimisticResult.value
 		: []
 
-	const isAdminResult = isAdminPromise ? use(isAdminPromise) : undefined
-	const isAdmin = isAdminResult?.ok ? isAdminResult.value.isAdmin : false
-	const isPaidPlan = isAdminResult?.ok
-		? isAdminResult.value.isPaidPlan
-		: false
-	const currentUserId = isAdminResult?.ok
-		? isAdminResult.value.userId
-		: undefined
+	
+	const hasReporting = has({ feature: 'reporting' })
+	const isAdmin = has({ role: 'org:admin' })
 
 	return (
 		<Tabs className="space-y-8" defaultValue={defaultTab}>
 			<TabsList>
 				<TabsTrigger value="manage">Manage Hours</TabsTrigger>
 				<TabsTrigger value="view">View Hours</TabsTrigger>
-				{isAdmin && isPaidPlan && (
+				{isAdmin && hasReporting && (
 					<TabsTrigger value="settings">Settings</TabsTrigger>
 				)}
 			</TabsList>
@@ -146,7 +131,7 @@ export default function DashboardTabs({
 					}
 				>
 					<ViewHours
-						currentUserId={currentUserId}
+						currentUserId={userId}
 						entries={entries}
 						isAdmin={isAdmin}
 						membersPromise={membersPromise}
@@ -160,11 +145,11 @@ export default function DashboardTabs({
 				</Suspense>
 			</TabsContent>
 
-			{isAdmin && isPaidPlan && (
+			{isAdmin && hasReporting && (
 				<TabsContent className="mt-0" value="settings">
 					<Suspense>
 						<OrgSettings
-							isPaidPlan={isPaidPlan}
+							hasReporting={hasReporting}
 							orgSettingsPromise={orgSettingsPromise}
 						/>
 					</Suspense>

@@ -40,7 +40,7 @@ interface ViewHoursProps {
 	selectedMonthPromise?: Promise<string | undefined>
 	selectedYearPromise?: Promise<string | undefined>
 	timeframePromise?: Promise<string | undefined>
-	currentUserId?: string
+	currentUserId?: string | null | undefined
 }
 
 export default function ViewHours({
@@ -217,7 +217,10 @@ export default function ViewHours({
 			let prevWeek = selectedWeek - 1
 
 			if (prevWeek === 0) {
-				const prevMonthDate = subMonths(new Date(selectedYear, selectedMonth, 1), 1)
+				const prevMonthDate = subMonths(
+					new Date(selectedYear, selectedMonth, 1),
+					1,
+				)
 				prevYear = prevMonthDate.getFullYear()
 				prevMonth = prevMonthDate.getMonth()
 				prevWeek = 4 // Compare Week 1 to Week 4 of previous month

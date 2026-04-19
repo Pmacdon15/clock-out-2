@@ -13,7 +13,7 @@ interface OrgSettingsProps {
 	orgSettingsPromise: Promise<
 		SerializableResult<OrgSettingsData, { reason: string }>
 	>
-	isPaidPlan: boolean
+	hasReporting: boolean
 }
 
 const DAYS = [
@@ -27,7 +27,7 @@ const DAYS = [
 ]
 
 export default function OrgSettings({
-	isPaidPlan,
+	hasReporting,
 	orgSettingsPromise,
 }: OrgSettingsProps) {
 	const settingsResult = use(orgSettingsPromise)
@@ -71,7 +71,7 @@ export default function OrgSettings({
 		},
 	})
 
-	if (!isPaidPlan) {
+	if (!hasReporting) {
 		return (
 			<Card className="p-8 text-center">
 				<div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-zinc-100 dark:bg-zinc-800">

@@ -1,13 +1,9 @@
 import { Show, SignInButton } from '@clerk/nextjs'
+import { auth } from '@clerk/nextjs/server'
 import { Suspense } from 'react'
 import DashboardTabs from '@/components/DashboardTabs'
 import MainPageHeader from '@/components/headers/main-page-header'
-import {
-	getAuthSession,
-	getOrgMembers,
-	getOrgSettings,
-	getTimeEntries,
-} from '@/lib/dal'
+import { getOrgMembers, getOrgSettings, getTimeEntries } from '@/lib/dal'
 
 export default function Home(props: PageProps<'/'>) {
 	const userIdPromise = props.searchParams.then((params) =>
@@ -44,8 +40,7 @@ export default function Home(props: PageProps<'/'>) {
 		),
 	)
 
-	// Add the parentheses here:
-	const isAdminPromise = getAuthSession()
+	
 	const membersPromise = getOrgMembers()
 	const orgSettingsPromise = getOrgSettings()
 
@@ -55,10 +50,9 @@ export default function Home(props: PageProps<'/'>) {
 			<Suspense>
 				<Show when="signed-in">
 					<Suspense fallback={<DashboardSkeleton />}>
-						<DashboardTabs
+						<DashboardTabs							
 							defaultTabPromise={defaultTabPromise}
 							entriesPromise={timeEntriesPromise}
-							isAdminPromise={isAdminPromise}
 							membersPromise={membersPromise}
 							orgSettingsPromise={orgSettingsPromise}
 							selectedMonthPromise={selectedMonthPromise}

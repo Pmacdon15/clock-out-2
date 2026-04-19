@@ -7,7 +7,6 @@ import { sendWeeklyReports } from '@/lib/reports'
 export async function GET(request: Request) {
 	const authHeader = request.headers.get('authorization')
 
-	// Protect route strictly with CRON_SECRET from Vercel
 	if (process.env.CRON_SECRET) {
 		if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
 			return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -32,9 +31,26 @@ export async function GET(request: Request) {
 
 	for (const org of allOrgs) {
 		const orgId = org.id
-		// Skip free plans
-		const isFreePlan = (org.maxAllowedMemberships || 0) <= 1
-		if (isFreePlan) continue
+
+		// Check for reporting feature in subscriptions
+		let hasReportingFeature = false
+		try {
+			const subscription =
+				await client.billing.getOrganizationBillingSubscription(orgId)
+			hasReportingFeature = subscription.subscriptionItems.some(
+				(item: any) =>
+					item.plan?.features?.some(
+						(f: any) => f.slug === 'reporting',
+					),
+			)
+		} catch (error) {
+			// If no billing or error, assume no feature
+			console.log(
+				`[Cron] No billing/subscription for ${org.name} (${orgId})`,
+			)
+		}
+
+		if (!hasReportingFeature) continue
 
 		const settings = await dbGetOrgSettings(orgId)
 		const frequency = settings?.report_frequency || 'weekly'

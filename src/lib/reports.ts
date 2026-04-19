@@ -51,14 +51,22 @@ export async function sendWeeklyReports(
 	for (const org of allOrgs) {
 		const orgId = org.id
 
-		// Check if the organization is on a paid plan
-		// In this app, paid plans have > 1 max allowed memberships
-		//TODO: change this if other plans lose this feature or it is changes but for now this saves time
-		const isFreePlan = (org.maxAllowedMemberships || 0) <= 1
+		// Check for reporting feature in subscriptions
+		let hasReportingFeature = false
+		try {
+			// @ts-ignore - Clerk Billing is in Beta and types might not be fully updated yet
+			const subscription = await client.billing.getOrganizationBillingSubscription(orgId)
+			hasReportingFeature = subscription.subscriptionItems.some((item: any) =>
+				item.plan?.features?.some((f: any) => f.slug === 'reporting'),
+			)
+		} catch (error) {
+			// If no billing or error, assume no feature
+			console.log(`[Reports] No billing/subscription for ${org.name} (${orgId})`)
+		}
 
-		if (isFreePlan) {
+		if (!hasReportingFeature) {
 			console.log(
-				`[Reports] Organization ${org.name} (${orgId}) is on the Free plan. Skipping reports.`,
+				`[Reports] Organization ${org.name} (${orgId}) does not have the 'reporting' feature. Skipping reports.`,
 			)
 			continue
 		}
