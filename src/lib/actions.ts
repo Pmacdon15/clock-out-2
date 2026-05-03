@@ -32,6 +32,7 @@ export async function clockOutAction() {
 	return result.match(
 		(entry) => {
 			updateTag(`time-entries-${entry.user_id}-${entry.org_id}`)
+			updateTag(`org-time-entries-${entry.org_id}`)
 			return { success: true, data: entry }
 		},
 		(err) => {
@@ -46,6 +47,7 @@ export async function deleteTimeEntryAction(id: number) {
 	return result.match(
 		(entry) => {
 			updateTag(`time-entries-${entry.user_id}-${entry.org_id}`)
+			updateTag(`org-time-entries-${entry.org_id}`)
 			return { success: true }
 		},
 		(err) => {
@@ -68,6 +70,7 @@ export async function updateTimeEntryAction(
 	return result.match(
 		(entry) => {
 			updateTag(`time-entries-${entry.user_id}-${entry.org_id}`)
+			updateTag(`org-time-entries-${entry.org_id}`)
 			return { success: true, data: entry }
 		},
 		(err) => {

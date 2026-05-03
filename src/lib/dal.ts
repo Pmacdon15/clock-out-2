@@ -5,6 +5,7 @@ import {
 	dbClockIn,
 	dbClockOut,
 	dbDeleteTimeEntry,
+	dbGetOrgTimeEntries,
 	dbGetReportingSettings,
 	dbGetSettings,
 	dbGetTimeEntries,
@@ -88,6 +89,31 @@ export async function getTimeEntries(
 
 	try {
 		const rows = await dbGetTimeEntries(queryUserId, orgId)
+		return { value: rows, ok: true }
+	} catch (error) {
+		console.error('DB error: ', error)
+		return { error: { reason: 'Unknown DB error' }, ok: false }
+	}
+}
+
+export async function getOrgTimeEntries(): Promise<
+	SerializableResult<TimeEntry[], { reason: string }>
+> {
+	const { userId, orgId, orgRole, has } = await auth()
+	const hasOrgStats = has({ feature: 'org_stats' })
+	const isAdmin = orgRole === 'org:admin'
+
+	if (!userId || !orgId || !isAdmin || !hasOrgStats) {
+		return {
+			error: {
+				reason: 'Unauthorized or feature not available for your organization',
+			},
+			ok: false,
+		}
+	}
+
+	try {
+		const rows = await dbGetOrgTimeEntries(orgId)
 		return { value: rows, ok: true }
 	} catch (error) {
 		console.error('DB error: ', error)

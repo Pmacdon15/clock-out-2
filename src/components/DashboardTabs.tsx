@@ -9,6 +9,7 @@ import type {
 } from '@/lib/types'
 import ManageHours from './ManageHours'
 import OrgSettings from './OrgSettings'
+import OrgStatsView from './OrgStats/OrgStatsView'
 import { Card } from './ui'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
 import ViewHours from './ViewHours'
@@ -18,6 +19,9 @@ interface DashboardTabsProps {
 	entriesPromise: Promise<SerializableResult<TimeEntry[], { reason: string }>>
 	orgSettingsPromise: Promise<
 		SerializableResult<OrgSettingsData, { reason: string }>
+	>
+	orgTimeEntriesPromise: Promise<
+		SerializableResult<TimeEntry[], { reason: string }>
 	>
 	membersPromise?: Promise<
 		{
@@ -31,11 +35,13 @@ interface DashboardTabsProps {
 	selectedYearPromise?: Promise<string | undefined>
 	timeframePromise?: Promise<string | undefined>
 }
-type TabType = 'manage' | 'view' | 'settings'
+type TabType = 'manage' | 'view' | 'settings' | 'stats'
+
 export default function DashboardTabs({
 	defaultTabPromise,
 	orgSettingsPromise,
 	entriesPromise,
+	orgTimeEntriesPromise,
 	membersPromise,
 	selectedUserIdPromise,
 	selectedWeekPromise,
@@ -51,7 +57,9 @@ export default function DashboardTabs({
 			? 'view'
 			: defaultTabResult === 'settings'
 				? 'settings'
-				: 'manage'
+				: defaultTabResult === 'stats'
+					? 'stats'
+					: 'manage'
 
 	const [optimisticResult, setOptimisticEntries] = useOptimistic(
 		result.ok ? result : { value: [] as TimeEntry[], ok: true as const },
@@ -102,15 +110,18 @@ export default function DashboardTabs({
 		? optimisticResult.value
 		: []
 
-	
 	const hasReporting = has({ feature: 'reporting' })
+	const hasOrgStats = has({ feature: 'org_stats' })
 	const isAdmin = has({ role: 'org:admin' })
 
 	return (
 		<Tabs className="space-y-8" defaultValue={defaultTab}>
 			<TabsList>
-				<TabsTrigger value="manage">Manage Hours</TabsTrigger>
-				<TabsTrigger value="view">View Hours</TabsTrigger>
+				<TabsTrigger value="manage">Time Clock</TabsTrigger>
+				<TabsTrigger value="view">Hours</TabsTrigger>
+				{isAdmin && hasOrgStats && (
+					<TabsTrigger value="stats">Stats</TabsTrigger>
+				)}
 				{isAdmin && hasReporting && (
 					<TabsTrigger value="settings">Settings</TabsTrigger>
 				)}
@@ -145,6 +156,25 @@ export default function DashboardTabs({
 				</Suspense>
 			</TabsContent>
 
+			{isAdmin && hasOrgStats && (
+				<TabsContent className="mt-0" value="stats">
+					<Suspense
+						fallback={
+							<div className="p-8 text-center">Loading stats...</div>
+						}
+					>
+						<OrgStatsWrapper
+							membersPromise={membersPromise!}
+							orgTimeEntriesPromise={orgTimeEntriesPromise}
+							selectedMonthPromise={selectedMonthPromise}
+							selectedWeekPromise={selectedWeekPromise}
+							selectedYearPromise={selectedYearPromise}
+							timeframePromise={timeframePromise}
+						/>
+					</Suspense>
+				</TabsContent>
+			)}
+
 			{isAdmin && hasReporting && (
 				<TabsContent className="mt-0" value="settings">
 					<Suspense>
@@ -156,5 +186,42 @@ export default function DashboardTabs({
 				</TabsContent>
 			)}
 		</Tabs>
+	)
+}
+
+function OrgStatsWrapper({
+	orgTimeEntriesPromise,
+	membersPromise,
+	selectedWeekPromise,
+	selectedMonthPromise,
+	selectedYearPromise,
+	timeframePromise,
+}: {
+	orgTimeEntriesPromise: Promise<SerializableResult<TimeEntry[], { reason: string }>>
+	membersPromise: Promise<{ id: string; name: string }[]>
+	selectedWeekPromise?: Promise<string | undefined>
+	selectedMonthPromise?: Promise<string | undefined>
+	selectedYearPromise?: Promise<string | undefined>
+	timeframePromise?: Promise<string | undefined>
+}) {
+	const result = use(orgTimeEntriesPromise)
+	if (!result.ok) {
+		return (
+			<Card className="p-8 text-center text-red-500">
+				{'Error fetching org stats: '}
+				{result.error.reason}
+			</Card>
+		)
+	}
+
+	return (
+		<OrgStatsView
+			entries={result.value}
+			membersPromise={membersPromise}
+			selectedMonthPromise={selectedMonthPromise}
+			selectedWeekPromise={selectedWeekPromise}
+			selectedYearPromise={selectedYearPromise}
+			timeframePromise={timeframePromise}
+		/>
 	)
 }
