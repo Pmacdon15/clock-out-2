@@ -1,7 +1,11 @@
 'use client'
 
 import { use, useOptimistic } from 'react'
-import type { OrgSettingsData, SerializableResult } from '@/lib/types'
+import type {
+	OrgSettingsData,
+	ReportingSettingsData,
+	SerializableResult,
+} from '@/lib/types'
 import ReportingSettings from './ReportingSettings'
 
 interface OrgSettingsProps {
@@ -28,8 +32,15 @@ export default function OrgSettings({
 		<div className="space-y-8">
 			<ReportingSettings
 				hasReporting={hasReporting}
-				initialData={optimisticSettings}
-				onUpdateOptimistic={setOptimisticSettings}
+				initialData={optimisticSettings?.reporting ?? null}
+				onUpdateOptimistic={(next) =>
+					setOptimisticSettings({
+						reporting: {
+							...optimisticSettings?.reporting,
+							...next,
+						} as ReportingSettingsData,
+					})
+				}
 			/>
 			{/* Future settings modules can be added here */}
 		</div>

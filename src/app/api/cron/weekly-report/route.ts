@@ -1,7 +1,7 @@
 import { clerkClient } from '@clerk/nextjs/server'
 import { format, getWeek, startOfDay, subDays, subMonths } from 'date-fns'
 import { NextResponse } from 'next/server'
-import { dbGetOrgSettings } from '@/lib/db'
+import { dbGetReportingSettings } from '@/lib/db'
 import { sendWeeklyReports } from '@/lib/reports'
 
 export async function GET(request: Request) {
@@ -52,7 +52,7 @@ export async function GET(request: Request) {
 
 		if (!hasReportingFeature) continue
 
-		const settings = await dbGetOrgSettings(orgId)
+		const settings = await dbGetReportingSettings(orgId)
 		const frequency = settings?.report_frequency || 'weekly'
 		const settingDay = settings?.report_day
 		const interval = settings?.report_interval || 1
