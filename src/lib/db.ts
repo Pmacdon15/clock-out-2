@@ -1,6 +1,6 @@
 import { neon } from '@neondatabase/serverless'
 import { cacheLife, cacheTag } from 'next/cache'
-import type { OrgSettingsData, TimeEntry } from './types'
+import type { OrgSettingsData, ReportingSettingsData, TimeEntry } from './types'
 
 if (!process.env.DATABASE_URL) {
 	throw new Error('DATABASE_URL is not defined')
@@ -96,24 +96,41 @@ export async function dbGetTimeEntriesForPeriod(
 	return rows as unknown as TimeEntry[]
 }
 
-export async function dbGetOrgSettings(orgId: string) {
+export async function dbGetSettings(org_id: string) {
 	'use cache'
-	cacheTag(`settings-${orgId}`)
+	cacheTag(`settings-${org_id}`)
 	cacheLife('hours')
 	const [settings] = await sql`
-		SELECT * FROM org_settings WHERE org_id = ${orgId}
+		SELECT * FROM settings WHERE org_id = ${org_id}
 	`
-	return settings as OrgSettingsData | undefined
+	return settings as { org_id: string; updated_at: Date } | undefined
 }
 
-export async function dbUpdateOrgSettings(
+export async function dbGetReportingSettings(orgId: string) {
+	'use cache'
+	cacheTag(`reporting-settings-${orgId}`)
+	cacheLife('hours')
+	const [settings] = await sql`
+		SELECT * FROM reporting_settings WHERE org_id = ${orgId}
+	`
+	return settings as ReportingSettingsData | undefined
+}
+
+export async function dbUpdateReportingSettings(
 	orgId: string,
 	frequency: string,
 	day: string | null,
 	interval: number,
 ) {
+	// Ensure main settings entry exists
+	await sql`
+		INSERT INTO settings (org_id, updated_at)
+		VALUES (${orgId}, NOW())
+		ON CONFLICT (org_id) DO UPDATE SET updated_at = NOW()
+	`
+
 	const [updated] = await sql`
-		INSERT INTO org_settings (org_id, report_frequency, report_day, report_interval, updated_at)
+		INSERT INTO reporting_settings (org_id, report_frequency, report_day, report_interval, updated_at)
 		VALUES (${orgId}, ${frequency}, ${day}, ${interval}, NOW())
 		ON CONFLICT (org_id) 
 		DO UPDATE SET 
@@ -123,7 +140,7 @@ export async function dbUpdateOrgSettings(
             updated_at = NOW()
 		RETURNING *
 	`
-	return updated
+	return updated as ReportingSettingsData
 }
 
 // export async function dbInitSchema() {

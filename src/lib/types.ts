@@ -12,10 +12,16 @@ export type SerializableResult<T, E> =
 	| { value: T; ok: true }
 	| { error: E; ok: false }
 
-export type OrgSettingsData = {
+export type ReportingSettingsData = {
 	org_id: string
 	report_frequency: string
+	report_day: string | null
+	report_interval: number
 	updated_at?: Date
-	report_day?: string | null
-	report_interval?: number | null
+}
+
+export type OrgSettingsData = {
+	org_id: string
+	updated_at?: Date
+	reporting?: ReportingSettingsData
 }

@@ -5,9 +5,10 @@ import {
 	dbClockIn,
 	dbClockOut,
 	dbDeleteTimeEntry,
-	dbGetOrgSettings,
+	dbGetReportingSettings,
+	dbGetSettings,
 	dbGetTimeEntries,
-	dbUpdateOrgSettings,
+	dbUpdateReportingSettings,
 	dbUpdateTimeEntry,
 } from './db'
 import type { OrgSettingsData, SerializableResult, TimeEntry } from './types'
@@ -204,13 +205,21 @@ export async function getOrgSettings(): Promise<
 	}
 
 	try {
-		const settings = await dbGetOrgSettings(orgId as string)
+		const [settings, reporting] = await Promise.all([
+			dbGetSettings(orgId as string),
+			dbGetReportingSettings(orgId as string),
+		])
+
 		return {
-			value: settings || {
+			value: {
 				org_id: orgId as string,
-				report_frequency: 'weekly',
-				report_day: null,
-				report_interval: 1,
+				updated_at: settings?.updated_at,
+				reporting: reporting || {
+					org_id: orgId as string,
+					report_frequency: 'weekly',
+					report_day: null,
+					report_interval: 1,
+				},
 			},
 			ok: true,
 		}
@@ -220,7 +229,7 @@ export async function getOrgSettings(): Promise<
 	}
 }
 
-export async function updateOrgSettingsDal(
+export async function updateReportingSettingsDal(
 	frequency: string,
 	day: string | null = null,
 	interval: number = 1,
@@ -242,7 +251,7 @@ export async function updateOrgSettingsDal(
 	}
 
 	try {
-		const updated = await dbUpdateOrgSettings(
+		const updated = await dbUpdateReportingSettings(
 			orgId,
 			frequency,
 			day,

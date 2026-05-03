@@ -9,11 +9,13 @@ CREATE TABLE IF NOT EXISTS time_entries (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
-
-DROP TABLE IF EXISTS org_settings;
-
-CREATE TABLE org_settings (
+CREATE TABLE IF NOT EXISTS settings (
     org_id TEXT PRIMARY KEY,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS reporting_settings (
+    org_id TEXT PRIMARY KEY REFERENCES settings(org_id) ON DELETE CASCADE,
     report_frequency TEXT NOT NULL DEFAULT 'weekly',
     report_day TEXT, -- e.g., 'Monday', 'Tuesday'
     report_interval INTEGER DEFAULT 1, -- 1 for weekly, 2 for bi-weekly
