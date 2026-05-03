@@ -3,7 +3,7 @@ import { auth } from '@clerk/nextjs/server'
 import { Suspense } from 'react'
 import DashboardTabs from '@/components/DashboardTabs'
 import MainPageHeader from '@/components/headers/main-page-header'
-import { getOrgMembers, getOrgSettings, getTimeEntries } from '@/lib/dal'
+import { getOrgMembers, getOrgSettings, getTimeEntries, getOrgTimeEntries } from '@/lib/dal'
 
 export default function Home(props: PageProps<'/'>) {
 	const userIdPromise = props.searchParams.then((params) =>
@@ -43,6 +43,7 @@ export default function Home(props: PageProps<'/'>) {
 	
 	const membersPromise = getOrgMembers()
 	const orgSettingsPromise = getOrgSettings()
+	const orgTimeEntriesPromise = getOrgTimeEntries()
 
 	return (
 		<main className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-4 py-8">
@@ -55,6 +56,7 @@ export default function Home(props: PageProps<'/'>) {
 							entriesPromise={timeEntriesPromise}
 							membersPromise={membersPromise}
 							orgSettingsPromise={orgSettingsPromise}
+							orgTimeEntriesPromise={orgTimeEntriesPromise}
 							selectedMonthPromise={selectedMonthPromise}
 							selectedUserIdPromise={userIdPromise}
 							selectedWeekPromise={selectedWeekPromise}

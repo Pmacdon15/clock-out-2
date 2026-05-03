@@ -21,6 +21,19 @@ export async function dbGetTimeEntries(userId: string, orgId: string) {
 	return rows as unknown as TimeEntry[]
 }
 
+export async function dbGetOrgTimeEntries(orgId: string) {
+	'use cache'
+	cacheTag(`org-time-entries-${orgId}`)
+	cacheLife('hours')
+
+	const rows = await sql`
+        SELECT * FROM time_entries 
+        WHERE org_id = ${orgId}
+        ORDER BY clock_in DESC
+    `
+	return rows as unknown as TimeEntry[]
+}
+
 export async function dbCheckActiveEntry(userId: string, orgId: string) {
 	const activeEntry = await sql`
         SELECT id FROM time_entries 
