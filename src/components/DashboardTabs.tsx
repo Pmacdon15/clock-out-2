@@ -160,11 +160,13 @@ export default function DashboardTabs({
 				<TabsContent className="mt-0" value="stats">
 					<Suspense
 						fallback={
-							<div className="p-8 text-center">Loading stats...</div>
+							<div className="p-8 text-center">
+								Loading stats...
+							</div>
 						}
 					>
 						<OrgStatsWrapper
-							membersPromise={membersPromise!}
+							membersPromise={membersPromise}
 							orgTimeEntriesPromise={orgTimeEntriesPromise}
 							selectedMonthPromise={selectedMonthPromise}
 							selectedWeekPromise={selectedWeekPromise}
@@ -197,8 +199,17 @@ function OrgStatsWrapper({
 	selectedYearPromise,
 	timeframePromise,
 }: {
-	orgTimeEntriesPromise: Promise<SerializableResult<TimeEntry[], { reason: string }>>
-	membersPromise: Promise<{ id: string; name: string }[]>
+	orgTimeEntriesPromise: Promise<
+		SerializableResult<TimeEntry[], { reason: string }>
+	>
+	membersPromise:
+		| Promise<
+				{
+					id: string
+					name: string
+				}[]
+		  >
+		| undefined
 	selectedWeekPromise?: Promise<string | undefined>
 	selectedMonthPromise?: Promise<string | undefined>
 	selectedYearPromise?: Promise<string | undefined>

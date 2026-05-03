@@ -15,17 +15,19 @@ import {
 	TimeframeSelector,
 	type TimeframeValue,
 } from '../ViewHours/TimeframeSelector'
-import { OrgHoursChart } from './OrgHoursChart'
 import { MemberToggles } from './MemberToggles'
+import { OrgHoursChart } from './OrgHoursChart'
 
 interface OrgStatsViewProps {
 	entries: TimeEntry[]
-	membersPromise: Promise<
-		{
-			id: string
-			name: string
-		}[]
-	>
+	membersPromise:
+		| Promise<
+				{
+					id: string
+					name: string
+				}[]
+		  >
+		| undefined
 	selectedWeekPromise?: Promise<string | undefined>
 	selectedMonthPromise?: Promise<string | undefined>
 	selectedYearPromise?: Promise<string | undefined>
@@ -40,8 +42,8 @@ export default function OrgStatsView({
 	selectedYearPromise,
 	timeframePromise,
 }: OrgStatsViewProps) {
-	const members = use(membersPromise)
-	
+	const members = use(membersPromise ?? Promise.resolve([]))
+
 	const initialWeekParsed = use(
 		selectedWeekPromise || Promise.resolve(undefined),
 	)
@@ -77,7 +79,7 @@ export default function OrgStatsView({
 
 	// Member visibility state
 	const [visibleMemberIds, setVisibleMemberIds] = useState<Set<string>>(
-		new Set(members.map((m) => m.id))
+		new Set(members.map((m) => m.id)),
 	)
 
 	const toggleMember = (id: string) => {
@@ -132,7 +134,10 @@ export default function OrgStatsView({
 
 			result = result.filter((e) => {
 				try {
-					return isWithinInterval(new Date(e.clock_in), { start, end })
+					return isWithinInterval(new Date(e.clock_in), {
+						start,
+						end,
+					})
 				} catch {
 					return false
 				}
@@ -142,7 +147,10 @@ export default function OrgStatsView({
 			const end = endOfMonth(new Date(selectedYear, selectedMonth, 1))
 			result = result.filter((e) => {
 				try {
-					return isWithinInterval(new Date(e.clock_in), { start, end })
+					return isWithinInterval(new Date(e.clock_in), {
+						start,
+						end,
+					})
 				} catch {
 					return false
 				}
@@ -152,7 +160,10 @@ export default function OrgStatsView({
 			const end = endOfYear(new Date(selectedYear, 0, 1))
 			result = result.filter((e) => {
 				try {
-					return isWithinInterval(new Date(e.clock_in), { start, end })
+					return isWithinInterval(new Date(e.clock_in), {
+						start,
+						end,
+					})
 				} catch {
 					return false
 				}
