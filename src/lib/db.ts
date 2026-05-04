@@ -15,7 +15,10 @@ export async function dbGetTimeEntries(
 	endDate?: Date,
 ) {
 	'use cache'
-	cacheTag(`time-entries-${userId}-${orgId}`)
+	cacheTag(
+		`time-entries-${userId}-${orgId}-${startDate}-${endDate}`,
+		`time-entries-${orgId}`,
+	)
 	cacheLife('hours')
 
 	if (startDate && endDate) {
@@ -42,7 +45,7 @@ export async function dbGetOrgTimeEntries(
 	endDate?: Date,
 ) {
 	'use cache'
-	cacheTag(`org-time-entries-${orgId}`)
+	cacheTag(`org-time-entries-${orgId}-${startDate}-${endDate}, org-time-entries-${orgId} `)
 	cacheLife('hours')
 
 	if (startDate && endDate) {
@@ -138,7 +141,6 @@ export async function dbGetTimeEntriesForPeriod(
 	return rows as unknown as TimeEntry[]
 }
 
-
 export async function dbGetReportingSettings(orgId: string) {
 	'use cache'
 	cacheTag(`reporting-settings-${orgId}`)
@@ -175,4 +177,3 @@ export async function dbUpdateReportingSettings(
 	`
 	return updated as ReportingSettingsData
 }
-

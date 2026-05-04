@@ -29,16 +29,16 @@ interface OrgHoursChartProps {
 }
 
 export const COLORS = [
-	'#2563eb', // blue-600
-	'#16a34a', // green-600
-	'#dc2626', // red-600
-	'#ca8a04', // yellow-600
-	'#9333ea', // purple-600
-	'#0891b2', // cyan-600
-	'#ea580c', // orange-600
-	'#be185d', // pink-600
-	'#4f46e5', // indigo-600
-	'#059669', // emerald-600
+	'#3b82f6', // blue-500
+	'#22c55e', // green-500
+	'#ef4444', // red-500
+	'#eab308', // yellow-500
+	'#a855f7', // purple-500
+	'#06b6d4', // cyan-500
+	'#f97316', // orange-500
+	'#ec4899', // pink-500
+	'#6366f1', // indigo-500
+	'#10b981', // emerald-500
 ]
 
 export function OrgHoursChart(props: OrgHoursChartProps) {
@@ -81,6 +81,7 @@ export function OrgHoursChart(props: OrgHoursChartProps) {
 
 	return (
 		<>
+			{/* On-screen version matches the bar graph style */}
 			<Card className="p-6">
 				<OrgHoursChartContent
 					{...props}
@@ -90,7 +91,7 @@ export function OrgHoursChart(props: OrgHoursChartProps) {
 				/>
 			</Card>
 
-			{/* Hidden desktop-sized version for download */}
+			{/* Hidden desktop-sized version for download (Light Mode) */}
 			{isDownloading && (
 				<div
 					style={{
@@ -194,11 +195,19 @@ function OrgHoursChartContent({
 		return breakdown
 	}, [filteredEntries])
 
+	// Theme variables for the chart itself
+	// In app: use zinc-400 for ticks/grid to look good in both themes
+	// In download: use zinc-900/zinc-200
+	const textColor = isDownloadMode ? '#18181b' : '#71717a'
+	const gridColor = isDownloadMode ? '#e5e7eb' : '#3f3f46'
+
 	return (
 		<>
 			<div className="mb-8 flex items-start justify-between">
 				<div>
-					<h3 className="font-bold text-xl text-zinc-900 tracking-tight">
+					<h3
+						className={`font-bold text-xl tracking-tight ${isDownloadMode ? 'text-zinc-900' : 'text-zinc-900 dark:text-zinc-100'}`}
+					>
 						{isDownloadMode
 							? `Organization Hours Report: ${summaryText}`
 							: 'Organization Hours'}
@@ -209,17 +218,19 @@ function OrgHoursChartContent({
 						</p>
 					)}
 					<div className="flex items-end gap-2">
-						<span className="font-black text-3xl text-zinc-900">
+						<span
+							className={`font-black text-3xl ${isDownloadMode ? 'text-zinc-900' : 'text-zinc-900 dark:text-zinc-100'}`}
+						>
 							{totalOrgHours.toFixed(2)}h
 						</span>
 						{!isDownloadMode && (
-							<span className="mb-1 font-medium text-muted-foreground text-sm">
+							<span className="mb-1 font-medium text-zinc-500 text-sm dark:text-zinc-400">
 								total hours
 							</span>
 						)}
 					</div>
 					{!isDownloadMode && (
-						<p className="mt-1 text-muted-foreground text-sm">
+						<p className="mt-1 text-zinc-500 text-sm dark:text-zinc-400">
 							Daily breakdown of hours per employee.
 						</p>
 					)}
@@ -257,7 +268,7 @@ function OrgHoursChartContent({
 						}
 					>
 						<CartesianGrid
-							stroke="#e5e7eb"
+							stroke={gridColor}
 							strokeDasharray="3 3"
 							vertical={false}
 						/>
@@ -265,12 +276,12 @@ function OrgHoursChartContent({
 							axisLine={false}
 							dataKey="name"
 							dy={10}
-							tick={{ fill: '#71717a', fontSize: 12 }}
+							tick={{ fill: textColor, fontSize: 12 }}
 							tickLine={false}
 						/>
 						<YAxis
 							axisLine={false}
-							tick={{ fill: '#71717a', fontSize: 12 }}
+							tick={{ fill: textColor, fontSize: 12 }}
 							tickLine={false}
 						/>
 						{!isDownloadMode && (
@@ -301,6 +312,7 @@ function OrgHoursChartContent({
 							wrapperStyle={{
 								paddingBottom: '20px',
 								fontSize: '12px',
+								color: textColor,
 							}}
 						/>
 						{members.map((member, index) => (

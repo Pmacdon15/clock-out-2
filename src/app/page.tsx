@@ -74,7 +74,7 @@ export default function Home(props: PageProps<'/'>) {
 		}),
 	)
 	const activeEntryPromise = getActiveEntry()
-	const recentEntriesPromise = getTimeEntries() // Unfiltered personal entries for Time Clock
+	const recentEntriesPromise = getTimeEntries() 
 
 	return (
 		<main className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-4 py-8">
