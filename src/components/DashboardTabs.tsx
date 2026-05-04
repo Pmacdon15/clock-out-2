@@ -2,12 +2,12 @@
 
 import { useAuth } from '@clerk/nextjs'
 import { Suspense, use, useOptimistic } from 'react'
+import TimeClock from '@/components/time-clock'
 import type {
 	ReportingSettingsData,
 	SerializableResult,
 	TimeEntry,
 } from '@/lib/types'
-import ManageHours from './ManageHours'
 import OrgSettings from './OrgSettings'
 import { Card } from './ui'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
@@ -27,9 +27,6 @@ interface DashboardTabsProps {
 	orgTimeEntriesPromise: Promise<
 		SerializableResult<TimeEntry[], { reason: string }>
 	>
-	activeEntryPromise: Promise<
-		SerializableResult<TimeEntry | null, { reason: string }>
-	>
 	recentEntriesPromise: Promise<
 		SerializableResult<TimeEntry[], { reason: string }>
 	>
@@ -45,14 +42,13 @@ interface DashboardTabsProps {
 	selectedYearPromise?: Promise<string | undefined>
 	timeframePromise?: Promise<string | undefined>
 }
-type TabType = 'manage' | 'view' | 'settings'
+type TabType = 'time-clock' | 'view' | 'settings'
 
 export default function DashboardTabs({
 	defaultTabPromise,
 	orgSettingsPromise,
 	entriesPromise,
 	orgTimeEntriesPromise,
-	activeEntryPromise,
 	recentEntriesPromise,
 	membersPromise,
 	selectedUserIdPromise,
@@ -63,7 +59,6 @@ export default function DashboardTabs({
 }: DashboardTabsProps) {
 	const { userId, has } = useAuth()
 	const result = use(entriesPromise)
-	const activeEntryResult = use(activeEntryPromise)
 	const recentEntriesResult = use(recentEntriesPromise)
 	const defaultTabResult = use(defaultTabPromise)
 	const defaultTab: TabType =
@@ -71,7 +66,7 @@ export default function DashboardTabs({
 			? 'view'
 			: defaultTabResult === 'settings'
 				? 'settings'
-				: 'manage'
+				: 'time-clock'
 
 	const [optimisticEntries, setOptimisticEntries] = useOptimistic(
 		result.ok ? result : { value: [] as TimeEntry[], ok: true as const },
@@ -164,24 +159,21 @@ export default function DashboardTabs({
 		? optimisticRecentEntries.value
 		: []
 
-	const activeEntry = activeEntryResult.ok ? activeEntryResult.value : null
-
 	const hasReporting = has({ feature: 'reporting' })
 	const isAdmin = has({ role: 'org:admin' })
 
 	return (
 		<Tabs className="space-y-8" defaultValue={defaultTab}>
 			<TabsList>
-				<TabsTrigger value="manage">Time Clock</TabsTrigger>
+				<TabsTrigger value="time-clock">Time Clock</TabsTrigger>
 				<TabsTrigger value="view">Hours</TabsTrigger>
 				{isAdmin && hasReporting && (
 					<TabsTrigger value="settings">Settings</TabsTrigger>
 				)}
 			</TabsList>
 
-			<TabsContent className="mt-0" value="manage">
-				<ManageHours
-					activeEntry={activeEntry}
+			<TabsContent className="mt-0" value="time-clock">
+				<TimeClock					
 					initialEntries={recentEntries}
 					isAdmin={isAdmin}
 					setOptimisticEntries={setOptimisticRecentEntries}

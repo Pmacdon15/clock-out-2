@@ -2,8 +2,7 @@ import { Show, SignInButton } from '@clerk/nextjs'
 import { Suspense } from 'react'
 import DashboardTabs from '@/components/DashboardTabs'
 import MainPageHeader from '@/components/headers/main-page-header'
-import {
-	getActiveEntry,
+import {	
 	getOrgMembers,
 	getOrgReportingSettings,
 	getOrgTimeEntries,
@@ -73,7 +72,7 @@ export default function Home(props: PageProps<'/'>) {
 			end: Array.isArray(params.end) ? params.end[0] : params.end,
 		}),
 	)
-	const activeEntryPromise = getActiveEntry()
+	
 	const recentEntriesPromise = getTimeEntries() 
 
 	return (
@@ -82,8 +81,7 @@ export default function Home(props: PageProps<'/'>) {
 			<Suspense>
 				<Show when="signed-in">
 					<Suspense fallback={<DashboardSkeleton />}>
-						<DashboardTabs
-							activeEntryPromise={activeEntryPromise}
+						<DashboardTabs							
 							defaultTabPromise={defaultTabPromise}
 							entriesPromise={timeEntriesPromise}
 							membersPromise={membersPromise}

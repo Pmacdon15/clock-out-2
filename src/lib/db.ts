@@ -17,7 +17,7 @@ export async function dbGetTimeEntries(
 	'use cache'
 	cacheTag(
 		`time-entries-${userId}-${orgId}-${startDate}-${endDate}`,
-		`time-entries-${orgId}`,
+		`time-entries-${userId}-${orgId}`,
 	)
 	cacheLife('hours')
 
@@ -45,7 +45,12 @@ export async function dbGetOrgTimeEntries(
 	endDate?: Date,
 ) {
 	'use cache'
-	cacheTag(`org-time-entries-${orgId}-${startDate}-${endDate}, org-time-entries-${orgId} `)
+	const startStr = startDate?.toISOString() ?? 'all'
+	const endStr = endDate?.toISOString() ?? 'all'
+	cacheTag(
+		`org-time-entries-${orgId}`,
+		`org-time-entries-${orgId}-${startStr}-${endStr}`,
+	)
 	cacheLife('hours')
 
 	if (startDate && endDate) {
