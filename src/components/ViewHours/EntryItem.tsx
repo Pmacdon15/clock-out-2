@@ -140,13 +140,13 @@ export function EntryItem({
 				<span>{format(new Date(entry.clock_in), 'eeee, MMM d')}</span>
 				<div className="flex items-center gap-3">
 					<span className="tabular-nums">
-						{entry.clock_out
-							? (
-									(new Date(entry.clock_out).getTime() -
-										new Date(entry.clock_in).getTime()) /
-									(1000 * 60 * 60)
-								).toFixed(2)
-							: '0.00'}
+						{(
+							((entry.clock_out
+								? new Date(entry.clock_out).getTime()
+								: Date.now()) -
+								new Date(entry.clock_in).getTime()) /
+							(1000 * 60 * 60)
+						).toFixed(2)}
 						h
 					</span>
 					{isAdmin && (
