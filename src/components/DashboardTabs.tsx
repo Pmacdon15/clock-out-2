@@ -3,7 +3,7 @@
 import { useAuth } from '@clerk/nextjs'
 import { Suspense, use, useOptimistic } from 'react'
 import type {
-	OrgSettingsData,
+	ReportingSettingsData,
 	SerializableResult,
 	TimeEntry,
 } from '@/lib/types'
@@ -17,7 +17,7 @@ interface DashboardTabsProps {
 	defaultTabPromise: Promise<string | undefined>
 	entriesPromise: Promise<SerializableResult<TimeEntry[], { reason: string }>>
 	orgSettingsPromise: Promise<
-		SerializableResult<OrgSettingsData, { reason: string }>
+		SerializableResult<ReportingSettingsData | null, { reason: string }>
 	>
 	orgTimeEntriesPromise: Promise<
 		SerializableResult<TimeEntry[], { reason: string }>
