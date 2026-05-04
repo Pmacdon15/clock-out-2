@@ -1,6 +1,6 @@
 import { neon } from '@neondatabase/serverless'
 import { cacheLife, cacheTag } from 'next/cache'
-import type { OrgSettingsData, ReportingSettingsData, TimeEntry } from './types'
+import type { ReportingSettingsData, TimeEntry } from './types'
 
 if (!process.env.DATABASE_URL) {
 	throw new Error('DATABASE_URL is not defined')

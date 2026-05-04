@@ -43,7 +43,7 @@ export async function GET(request: Request) {
 						(f: any) => f.slug === 'reporting',
 					),
 			)
-		} catch (error) {
+		} catch (_error) {
 			// If no billing or error, assume no feature
 			console.log(
 				`[Cron] No billing/subscription for ${org.name} (${orgId})`,

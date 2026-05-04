@@ -1,5 +1,6 @@
 'use client'
 
+import { useUser } from '@clerk/nextjs'
 import {
 	endOfDay,
 	endOfMonth,
@@ -55,8 +56,17 @@ export default function ViewHours({
 	timeframePromise,
 	currentUserId,
 }: ViewHoursProps) {
+	const { user } = useUser()
 	const members = use(membersPromise || Promise.resolve([]))
 	const selectedUserId = use(selectedUserIdPromise || Promise.resolve(''))
+
+	const selectedMember = useMemo(
+		() => members.find((m) => m.id === selectedUserId),
+		[members, selectedUserId],
+	)
+	const employeeName = selectedUserId
+		? selectedMember?.name || 'Employee'
+		: user?.fullName || 'You'
 
 	const initialWeekParsed = use(
 		selectedWeekPromise || Promise.resolve(undefined),
@@ -124,7 +134,7 @@ export default function ViewHours({
 
 	// Filter entries based on timeframe
 	const filteredEntries = useMemo(() => {
-		let result = entries.filter((e) => e.clock_out) // Only completed shifts
+		let result = entries // Include all entries, even active ones
 
 		if (timeframe === 'week') {
 			let start: Date
@@ -298,6 +308,7 @@ export default function ViewHours({
 
 			<div className="grid grid-cols-1 gap-6 md:grid-cols-3">
 				<HoursChart
+					employeeName={employeeName}
 					filteredEntries={filteredEntries}
 					previousTotalHours={previousTotalHours}
 					selectedMonth={selectedMonth}

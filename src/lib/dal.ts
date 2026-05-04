@@ -99,7 +99,7 @@ export async function getTimeEntries(
 export async function getOrgTimeEntries(): Promise<
 	SerializableResult<TimeEntry[], { reason: string }>
 > {
-	const { userId, orgId, orgRole, has } = await auth()
+	const { userId, orgId, orgRole, has } = await auth.protect()
 	const hasOrgStats = has({ feature: 'org_stats' })
 	const isAdmin = orgRole === 'org:admin'
 
@@ -263,7 +263,7 @@ export async function updateReportingSettingsDal(
 	const { userId, orgId, orgRole, has } = await auth.protect()
 	const isAdmin = orgRole === 'org:admin'
 	// const hasReporting = has({ feature: 'reporting' })
-	
+
 	if (!userId || !orgId || !isAdmin) {
 		return errAsync({ reason: 'Unauthorized' } as const)
 	}
