@@ -53,7 +53,7 @@ export async function sendWeeklyReports(
 
 		// Check for reporting feature in subscriptions
 		let hasReportingFeature = false
-		try {			
+		try {
 			const subscription =
 				await client.billing.getOrganizationBillingSubscription(orgId)
 			hasReportingFeature = subscription.subscriptionItems.some(

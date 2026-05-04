@@ -17,6 +17,7 @@ import {
 } from 'recharts'
 import type { TimeEntry } from '@/lib/dal'
 import { downloadElementAsImage } from '@/lib/download'
+import { COLORS } from '../OrgStats/OrgHoursChart'
 import { Button, Card } from '../ui'
 
 interface HoursChartProps {
@@ -27,6 +28,9 @@ interface HoursChartProps {
 	selectedWeek: number
 	previousTotalHours: number
 	employeeName?: string
+	members?: { id: string; name: string }[]
+	visibleMemberIds?: Set<string>
+	isViewingAll?: boolean
 }
 
 export function HoursChart(props: HoursChartProps) {
@@ -122,6 +126,9 @@ function HoursChartContent({
 	summaryText,
 	previousTotalHours,
 	timeframe,
+	members = [],
+	visibleMemberIds,
+	isViewingAll = false,
 }: HoursChartProps & {
 	onDownload?: () => void
 	isDownloading?: boolean
@@ -129,7 +136,7 @@ function HoursChartContent({
 	summaryText: string
 }) {
 	const chartData = useMemo(() => {
-		const dataMap: Record<string, { hours: number; date: Date }> = {}
+		const dataMap: Record<string, { date: Date; [key: string]: any }> = {}
 
 		filteredEntries.forEach((e) => {
 			const clockIn = new Date(e.clock_in)
@@ -140,24 +147,50 @@ function HoursChartContent({
 			const hours = Math.max(0, durationMs / (1000 * 60 * 60))
 
 			if (!dataMap[dayKey]) {
-				dataMap[dayKey] = { hours: 0, date: clockIn }
+				dataMap[dayKey] = { date: clockIn }
 			}
-			dataMap[dayKey].hours += hours
+
+			if (isViewingAll) {
+				const memberId = e.user_id
+				if (visibleMemberIds?.has(memberId)) {
+					dataMap[dayKey][memberId] =
+						(dataMap[dayKey][memberId] || 0) + hours
+				}
+			} else {
+				dataMap[dayKey].hours = (dataMap[dayKey].hours || 0) + hours
+			}
 		})
 
 		return Object.values(dataMap)
 			.sort((a, b) => a.date.getTime() - b.date.getTime())
-			.map((val) => ({
-				name: format(val.date, 'MMM dd'),
-				hours: parseFloat(val.hours.toFixed(2)),
-				fullLabel: format(val.date, 'MMM dd, yyyy'),
-			}))
-	}, [filteredEntries])
+			.map((val) => {
+				const row: any = {
+					name: format(val.date, 'MMM dd'),
+					fullLabel: format(val.date, 'MMM dd, yyyy'),
+				}
+				if (isViewingAll) {
+					let dayTotal = 0
+					members.forEach((m) => {
+						if (visibleMemberIds?.has(m.id)) {
+							const h = parseFloat((val[m.id] || 0).toFixed(2))
+							row[m.id] = h
+							dayTotal += h
+						}
+					})
+					row.total = parseFloat(dayTotal.toFixed(2))
+				} else {
+					row.hours = parseFloat((val.hours || 0).toFixed(2))
+				}
+				return row
+			})
+	}, [filteredEntries, isViewingAll, visibleMemberIds, members])
 
-	const totalHours = useMemo(
-		() => chartData.reduce((acc, curr) => acc + curr.hours, 0),
-		[chartData],
-	)
+	const totalHours = useMemo(() => {
+		if (isViewingAll) {
+			return chartData.reduce((acc, curr) => acc + (curr.total || 0), 0)
+		}
+		return chartData.reduce((acc, curr) => acc + (curr.hours || 0), 0)
+	}, [chartData, isViewingAll])
 
 	const percentage = useMemo(() => {
 		if (previousTotalHours === 0) return null
@@ -177,7 +210,9 @@ function HoursChartContent({
 				<div className="flex flex-col gap-1">
 					<h3 className="font-medium text-sm text-zinc-500">
 						{employeeName && (
-							<span className={`mb-1 block font-bold ${isDownloadMode ? 'text-zinc-900' : 'text-zinc-900 dark:text-zinc-100'}`}>
+							<span
+								className={`mb-1 block font-bold ${isDownloadMode ? 'text-zinc-900' : 'text-zinc-900 dark:text-zinc-100'}`}
+							>
 								{employeeName}
 							</span>
 						)}
@@ -192,7 +227,9 @@ function HoursChartContent({
 						)}
 					</h3>
 					<div className="flex items-end gap-2">
-						<span className={`font-black text-3xl ${isDownloadMode ? 'text-zinc-900' : 'text-zinc-900 dark:text-zinc-100'}`}>
+						<span
+							className={`font-black text-3xl ${isDownloadMode ? 'text-zinc-900' : 'text-zinc-900 dark:text-zinc-100'}`}
+						>
 							{totalHours.toFixed(2)}h
 						</span>
 						{percentage !== null && !isDownloadMode && (
@@ -232,7 +269,9 @@ function HoursChartContent({
 
 			<div
 				className={
-					isDownloadMode ? 'mt-4 h-[400px] w-full' : 'mt-4 h-[300px] w-full'
+					isDownloadMode
+						? 'mt-4 h-[400px] w-full'
+						: 'mt-4 h-[300px] w-full'
 				}
 			>
 				<ResponsiveContainer height="100%" width="100%">
@@ -266,7 +305,8 @@ function HoursChartContent({
 								contentStyle={{
 									borderRadius: '12px',
 									border: 'none',
-									boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
+									boxShadow:
+										'0 10px 15px -3px rgb(0 0 0 / 0.1)',
 									backgroundColor: '#18181b',
 									color: '#fff',
 								}}
@@ -281,35 +321,58 @@ function HoursChartContent({
 								}}
 							/>
 						)}
-						<Bar
-							barSize={32}
-							dataKey="hours"
-							fill={isDownloadMode ? '#2563eb' : '#18181b'}
-							isAnimationActive={!isDownloadMode}
-							radius={[4, 4, 0, 0]}
-						>
-							{isDownloadMode && (
-								<LabelList
-									dataKey="hours"									
-									position="top"
-									style={{
-										fill: '#71717a',
-										fontSize: 10,
-										fontWeight: 'bold',
-									}}
-								/>
-							)}
-							{chartData.map((d, _index) => (
-								<Cell
-									className={
-										isDownloadMode
-											? 'fill-blue-600'
-											: 'fill-zinc-900 dark:fill-zinc-50'
-									}
-									key={`cell-${JSON.stringify(d)}`}
-								/>
-							))}
-						</Bar>
+
+						{isViewingAll ? (
+							members.map((m, index) => {
+								const visibleMembers = members.filter(
+									(member) =>
+										visibleMemberIds?.has(member.id),
+								)
+								const isLast =
+									visibleMembers.at(-1)?.id === m.id
+								return (
+									<Bar
+										dataKey={m.id}
+										fill={COLORS[index % COLORS.length]}
+										hide={!visibleMemberIds?.has(m.id)}
+										isAnimationActive={!isDownloadMode}
+										key={m.id}
+										radius={isLast ? [6, 6, 0, 0] : 0}
+										stackId="a"
+									/>
+								)
+							})
+						) : (
+							<Bar
+								barSize={32}
+								dataKey="hours"
+								fill={isDownloadMode ? '#2563eb' : '#18181b'}
+								isAnimationActive={!isDownloadMode}
+								radius={[6, 6, 0, 0]}
+							>
+								{isDownloadMode && (
+									<LabelList
+										dataKey="hours"
+										position="top"
+										style={{
+											fill: '#71717a',
+											fontSize: 10,
+											fontWeight: 'bold',
+										}}
+									/>
+								)}
+								{chartData.map((d, _index) => (
+									<Cell
+										className={
+											isDownloadMode
+												? 'fill-blue-600'
+												: 'fill-zinc-900 dark:fill-zinc-50'
+										}
+										key={`cell-${JSON.stringify(d)}`}
+									/>
+								))}
+							</Bar>
+						)}
 					</BarChart>
 				</ResponsiveContainer>
 			</div>
@@ -328,6 +391,11 @@ function HoursChartContent({
 								<th className="pb-3 font-bold text-[10px] text-zinc-400 uppercase tracking-wider">
 									Date
 								</th>
+								{isViewingAll && (
+									<th className="pb-3 font-bold text-[10px] text-zinc-400 uppercase tracking-wider">
+										Member
+									</th>
+								)}
 								<th className="pb-3 font-bold text-[10px] text-zinc-400 uppercase tracking-wider">
 									Clock In
 								</th>
@@ -358,6 +426,9 @@ function HoursChartContent({
 										0,
 										durationMs / (1000 * 60 * 60),
 									)
+									const member = members.find(
+										(m) => m.id === e.user_id,
+									)
 
 									return (
 										<tr key={e.id}>
@@ -367,6 +438,11 @@ function HoursChartContent({
 													'eee, MMM d, yyyy',
 												)}
 											</td>
+											{isViewingAll && (
+												<td className="py-3 text-zinc-500">
+													{member?.name || 'Unknown'}
+												</td>
+											)}
 											<td className="py-3 text-zinc-500">
 												{format(clockIn, 'hh:mm a')}
 											</td>
@@ -379,7 +455,7 @@ function HoursChartContent({
 													</span>
 												)}
 											</td>
-											<td className="py-3 text-right font-bold tabular-nums text-zinc-900">
+											<td className="py-3 text-right font-bold text-zinc-900 tabular-nums">
 												{hours.toFixed(2)}h
 											</td>
 										</tr>

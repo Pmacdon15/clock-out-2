@@ -1,4 +1,12 @@
 import { auth, clerkClient } from '@clerk/nextjs/server'
+import {
+	endOfDay,
+	endOfMonth,
+	endOfYear,
+	startOfDay,
+	startOfMonth,
+	startOfYear,
+} from 'date-fns'
 import { errAsync, okAsync } from 'neverthrow'
 import {
 	dbCheckActiveEntry,
@@ -7,15 +15,68 @@ import {
 	dbDeleteTimeEntry,
 	dbGetOrgTimeEntries,
 	dbGetReportingSettings,
-	dbGetSettings,
 	dbGetTimeEntries,
 	dbUpdateReportingSettings,
 	dbUpdateTimeEntry,
+	sql,
 } from './db'
-import type { OrgSettingsData, SerializableResult, TimeEntry } from './types'
+import type {
+	ReportingSettingsData,
+	SerializableResult,
+	TimeEntry,
+} from './types'
 import { getProcessedMembers, isOverMemberShipLimit } from './utils-clerk'
 
 export type { SerializableResult, TimeEntry }
+
+export function getDateRange(params: {
+	timeframe?: string
+	week?: string
+	month?: string
+	year?: string
+	start?: string
+	end?: string
+}) {
+	const now = new Date()
+	const timeframe = params.timeframe || 'week'
+	const selectedYear = params.year
+		? parseInt(params.year, 10)
+		: now.getFullYear()
+	const selectedMonth = params.month
+		? parseInt(params.month, 10)
+		: now.getMonth()
+	const selectedWeek = params.week ? parseInt(params.week, 10) : 1
+
+	let startDate: Date | undefined
+	let endDate: Date | undefined
+
+	if (timeframe === 'week') {
+		if (selectedWeek === 1) {
+			startDate = startOfDay(new Date(selectedYear, selectedMonth, 1))
+			endDate = endOfDay(new Date(selectedYear, selectedMonth, 7))
+		} else if (selectedWeek === 2) {
+			startDate = startOfDay(new Date(selectedYear, selectedMonth, 8))
+			endDate = endOfDay(new Date(selectedYear, selectedMonth, 15))
+		} else if (selectedWeek === 3) {
+			startDate = startOfDay(new Date(selectedYear, selectedMonth, 16))
+			endDate = endOfDay(new Date(selectedYear, selectedMonth, 23))
+		} else {
+			startDate = startOfDay(new Date(selectedYear, selectedMonth, 24))
+			endDate = endOfMonth(new Date(selectedYear, selectedMonth, 1))
+		}
+	} else if (timeframe === 'month') {
+		startDate = startOfMonth(new Date(selectedYear, selectedMonth, 1))
+		endDate = endOfMonth(new Date(selectedYear, selectedMonth, 1))
+	} else if (timeframe === 'year') {
+		startDate = startOfYear(new Date(selectedYear, 0, 1))
+		endDate = endOfYear(new Date(selectedYear, 0, 1))
+	} else if (timeframe === 'custom' && params.start && params.end) {
+		startDate = startOfDay(new Date(`${params.start}T00:00:00`))
+		endDate = endOfDay(new Date(`${params.end}T00:00:00`))
+	}
+
+	return { startDate, endDate }
+}
 
 export async function getAuthSession(): Promise<
 	SerializableResult<
@@ -35,12 +96,7 @@ export async function getAuthSession(): Promise<
 			ok: false,
 		}
 	}
-	// const client = await clerkClient()
-	// const _organization = await client.organizations.getOrganization({
-	// 	organizationId: orgId,
-	// })
 	const isPaidPlan = !has({ plan: 'free_org' })
-	// console.log("isPaidPlan: ", isPaidPlan)
 
 	return {
 		value: { userId, orgId, isAdmin: orgRole === 'org:admin', isPaidPlan },
@@ -64,8 +120,17 @@ export async function getOrgMembers() {
 
 	return await getProcessedMembers(orgId, plainMembers)
 }
+
 export async function getTimeEntries(
 	targetUserId?: string,
+	filters?: {
+		timeframe?: string
+		week?: string
+		month?: string
+		year?: string
+		start?: string
+		end?: string
+	},
 ): Promise<SerializableResult<TimeEntry[], { reason: string }>> {
 	const { userId, orgId, orgRole } = await auth()
 	if (!userId || !orgId) {
@@ -87,8 +152,17 @@ export async function getTimeEntries(
 		}
 	}
 
+	const { startDate, endDate } = filters
+		? getDateRange(filters)
+		: { startDate: undefined, endDate: undefined }
+
 	try {
-		const rows = await dbGetTimeEntries(queryUserId, orgId)
+		const rows = await dbGetTimeEntries(
+			queryUserId,
+			orgId,
+			startDate,
+			endDate,
+		)
 		return { value: rows, ok: true }
 	} catch (error) {
 		console.error('DB error: ', error)
@@ -96,24 +170,32 @@ export async function getTimeEntries(
 	}
 }
 
-export async function getOrgTimeEntries(): Promise<
-	SerializableResult<TimeEntry[], { reason: string }>
-> {
-	const { userId, orgId, orgRole, has } = await auth.protect()
-	const hasOrgStats = has({ feature: 'org_stats' })
+export async function getOrgTimeEntries(filters?: {
+	timeframe?: string
+	week?: string
+	month?: string
+	year?: string
+	start?: string
+	end?: string
+}): Promise<SerializableResult<TimeEntry[], { reason: string }>> {
+	const { userId, orgId, orgRole } = await auth.protect()
 	const isAdmin = orgRole === 'org:admin'
 
-	if (!userId || !orgId || !isAdmin || !hasOrgStats) {
+	if (!userId || !orgId || !isAdmin) {
 		return {
 			error: {
-				reason: 'Unauthorized or feature not available for your organization',
+				reason: 'Unauthorized: You must be an admin to view organization stats',
 			},
 			ok: false,
 		}
 	}
 
+	const { startDate, endDate } = filters
+		? getDateRange(filters)
+		: { startDate: undefined, endDate: undefined }
+
 	try {
-		const rows = await dbGetOrgTimeEntries(orgId)
+		const rows = await dbGetOrgTimeEntries(orgId, startDate, endDate)
 		return { value: rows, ok: true }
 	} catch (error) {
 		console.error('DB error: ', error)
@@ -220,38 +302,30 @@ export async function updateTimeEntry(
 	}
 }
 
-export async function getOrgSettings(): Promise<
-	SerializableResult<OrgSettingsData, { reason: string }>
+export async function getActiveEntry(): Promise<
+	SerializableResult<TimeEntry | null, { reason: string }>
 > {
-	const { orgId, orgRole } = await auth.protect()
-	const isAdmin = orgRole === 'org:admin'
-
-	if (!isAdmin) {
-		return { error: { reason: 'Only admins can view settings' }, ok: false }
+	const { userId, orgId } = await auth()
+	if (!userId || !orgId) {
+		return {
+			error: { reason: 'Unauthorized or no organization selected' },
+			ok: false,
+		}
 	}
 
 	try {
-		const [settings, reporting] = await Promise.all([
-			dbGetSettings(orgId as string),
-			dbGetReportingSettings(orgId as string),
-		])
-
+		const [activeEntry] = await sql`
+            SELECT * FROM time_entries 
+            WHERE user_id = ${userId} AND org_id = ${orgId} AND clock_out IS NULL
+            LIMIT 1
+        `
 		return {
-			value: {
-				org_id: orgId as string,
-				updated_at: settings?.updated_at,
-				reporting: reporting || {
-					org_id: orgId as string,
-					report_frequency: 'weekly',
-					report_day: null,
-					report_interval: 1,
-				},
-			},
+			value: (activeEntry as unknown as TimeEntry) || null,
 			ok: true,
 		}
 	} catch (error) {
-		console.error('Get settings error: ', error)
-		return { error: { reason: 'Failed to fetch settings' }, ok: false }
+		console.error('DB error: ', error)
+		return { error: { reason: 'Unknown DB error' }, ok: false }
 	}
 }
 
@@ -262,19 +336,19 @@ export async function updateReportingSettingsDal(
 ) {
 	const { userId, orgId, orgRole, has } = await auth.protect()
 	const isAdmin = orgRole === 'org:admin'
-	// const hasReporting = has({ feature: 'reporting' })
+	const hasReporting = has({ feature: 'reporting' })
 
-	if (!userId || !orgId || !isAdmin) {
+	if (!userId || !orgId || !isAdmin || !hasReporting) {
 		return errAsync({ reason: 'Unauthorized' } as const)
 	}
 
-	const isPaidPlan = !has({ plan: 'free' })
+	// const isPaidPlan = !has({ plan: 'free' })
 
-	if (!isPaidPlan) {
-		return errAsync({
-			reason: 'Reports settings are only available on paid plans',
-		} as const)
-	}
+	// if (!isPaidPlan) {
+	// 	return errAsync({
+	// 		reason: 'Reports settings are only available on paid plans',
+	// 	} as const)
+	// }
 
 	try {
 		const updated = await dbUpdateReportingSettings(
@@ -287,5 +361,28 @@ export async function updateReportingSettingsDal(
 	} catch (error) {
 		console.error('Update settings error: ', error)
 		return errAsync({ reason: 'Failed to update settings' } as const)
+	}
+}
+
+export async function getOrgSettings(): Promise<
+	SerializableResult<ReportingSettingsData | null, { reason: string }>
+> {
+	const { userId, orgId } = await auth()
+	if (!userId || !orgId) {
+		return {
+			error: { reason: 'Unauthorized or no organization selected' },
+			ok: false,
+		}
+	}
+
+	try {
+		const settings = await dbGetReportingSettings(orgId)
+		return {
+			value: (settings as unknown as ReportingSettingsData) || null,
+			ok: true,
+		}
+	} catch (error) {
+		console.error('DB error: ', error)
+		return { error: { reason: 'Unknown DB error' }, ok: false }
 	}
 }

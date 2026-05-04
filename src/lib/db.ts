@@ -8,10 +8,25 @@ if (!process.env.DATABASE_URL) {
 
 export const sql = neon(process.env.DATABASE_URL)
 
-export async function dbGetTimeEntries(userId: string, orgId: string) {
+export async function dbGetTimeEntries(
+	userId: string,
+	orgId: string,
+	startDate?: Date,
+	endDate?: Date,
+) {
 	'use cache'
 	cacheTag(`time-entries-${userId}-${orgId}`)
 	cacheLife('hours')
+
+	if (startDate && endDate) {
+		const rows = await sql`
+            SELECT * FROM time_entries 
+            WHERE user_id = ${userId} AND org_id = ${orgId}
+            AND clock_in >= ${startDate} AND clock_in < ${endDate}
+            ORDER BY clock_in DESC
+        `
+		return rows as unknown as TimeEntry[]
+	}
 
 	const rows = await sql`
         SELECT * FROM time_entries 
@@ -21,10 +36,24 @@ export async function dbGetTimeEntries(userId: string, orgId: string) {
 	return rows as unknown as TimeEntry[]
 }
 
-export async function dbGetOrgTimeEntries(orgId: string) {
+export async function dbGetOrgTimeEntries(
+	orgId: string,
+	startDate?: Date,
+	endDate?: Date,
+) {
 	'use cache'
 	cacheTag(`org-time-entries-${orgId}`)
 	cacheLife('hours')
+
+	if (startDate && endDate) {
+		const rows = await sql`
+            SELECT * FROM time_entries 
+            WHERE org_id = ${orgId}
+            AND clock_in >= ${startDate} AND clock_in < ${endDate}
+            ORDER BY clock_in DESC
+        `
+		return rows as unknown as TimeEntry[]
+	}
 
 	const rows = await sql`
         SELECT * FROM time_entries 
@@ -109,15 +138,6 @@ export async function dbGetTimeEntriesForPeriod(
 	return rows as unknown as TimeEntry[]
 }
 
-export async function dbGetSettings(org_id: string) {
-	'use cache'
-	cacheTag(`settings-${org_id}`)
-	cacheLife('hours')
-	const [settings] = await sql`
-		SELECT * FROM settings WHERE org_id = ${org_id}
-	`
-	return settings as { org_id: string; updated_at: Date } | undefined
-}
 
 export async function dbGetReportingSettings(orgId: string) {
 	'use cache'
@@ -156,12 +176,3 @@ export async function dbUpdateReportingSettings(
 	return updated as ReportingSettingsData
 }
 
-// export async function dbInitSchema() {
-// 	await sql`
-// 		CREATE TABLE IF NOT EXISTS org_settings (
-// 			org_id TEXT PRIMARY KEY,
-// 			report_frequency TEXT NOT NULL DEFAULT 'weekly',
-// 			updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-// 		);
-// 	`
-// }

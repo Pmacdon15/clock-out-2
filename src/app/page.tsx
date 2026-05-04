@@ -3,6 +3,7 @@ import { Suspense } from 'react'
 import DashboardTabs from '@/components/DashboardTabs'
 import MainPageHeader from '@/components/headers/main-page-header'
 import {
+	getActiveEntry,
 	getOrgMembers,
 	getOrgSettings,
 	getOrgTimeEntries,
@@ -41,12 +42,38 @@ export default function Home(props: PageProps<'/'>) {
 	const timeEntriesPromise = props.searchParams.then((params) =>
 		getTimeEntries(
 			Array.isArray(params.userId) ? params.userId[0] : params.userId,
+			{
+				timeframe: Array.isArray(params.timeframe)
+					? params.timeframe[0]
+					: params.timeframe,
+				week: Array.isArray(params.week) ? params.week[0] : params.week,
+				month: Array.isArray(params.month)
+					? params.month[0]
+					: params.month,
+				year: Array.isArray(params.year) ? params.year[0] : params.year,
+				start: Array.isArray(params.start)
+					? params.start[0]
+					: params.start,
+				end: Array.isArray(params.end) ? params.end[0] : params.end,
+			},
 		),
 	)
 
 	const membersPromise = getOrgMembers()
 	const orgSettingsPromise = getOrgSettings()
-	const orgTimeEntriesPromise = getOrgTimeEntries()
+	const orgTimeEntriesPromise = props.searchParams.then((params) =>
+		getOrgTimeEntries({
+			timeframe: Array.isArray(params.timeframe)
+				? params.timeframe[0]
+				: params.timeframe,
+			week: Array.isArray(params.week) ? params.week[0] : params.week,
+			month: Array.isArray(params.month) ? params.month[0] : params.month,
+			year: Array.isArray(params.year) ? params.year[0] : params.year,
+			start: Array.isArray(params.start) ? params.start[0] : params.start,
+			end: Array.isArray(params.end) ? params.end[0] : params.end,
+		}),
+	)
+	const activeEntryPromise = getActiveEntry()
 
 	return (
 		<main className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-4 py-8">
@@ -55,6 +82,7 @@ export default function Home(props: PageProps<'/'>) {
 				<Show when="signed-in">
 					<Suspense fallback={<DashboardSkeleton />}>
 						<DashboardTabs
+							activeEntryPromise={activeEntryPromise}
 							defaultTabPromise={defaultTabPromise}
 							entriesPromise={timeEntriesPromise}
 							membersPromise={membersPromise}

@@ -1,21 +1,10 @@
 'use client'
 
 import { useUser } from '@clerk/nextjs'
-import {
-	endOfDay,
-	endOfMonth,
-	endOfWeek,
-	endOfYear,
-	isWithinInterval,
-	startOfDay,
-	startOfMonth,
-	startOfWeek,
-	startOfYear,
-	subMonths,
-	subYears,
-} from 'date-fns'
 import { use, useMemo, useState } from 'react'
-import type { TimeEntry } from '@/lib/dal'
+import type { SerializableResult, TimeEntry } from '@/lib/dal'
+import { MemberToggles } from './OrgStats/MemberToggles'
+import { OrgHoursChart } from './OrgStats/OrgHoursChart'
 import { EntryList } from './ViewHours/EntryList'
 import { HoursChart } from './ViewHours/HoursChart'
 import {
@@ -36,6 +25,9 @@ interface ViewHoursProps {
 			name: string
 		}[]
 	>
+	orgTimeEntriesPromise: Promise<
+		SerializableResult<TimeEntry[], { reason: string }>
+	>
 	selectedUserIdPromise?: Promise<string | undefined>
 	selectedWeekPromise?: Promise<string | undefined>
 	selectedMonthPromise?: Promise<string | undefined>
@@ -49,6 +41,7 @@ export default function ViewHours({
 	setOptimisticEntries,
 	isAdmin = false,
 	membersPromise,
+	orgTimeEntriesPromise,
 	selectedUserIdPromise,
 	selectedWeekPromise,
 	selectedMonthPromise,
@@ -59,14 +52,13 @@ export default function ViewHours({
 	const { user } = useUser()
 	const members = use(membersPromise || Promise.resolve([]))
 	const selectedUserId = use(selectedUserIdPromise || Promise.resolve(''))
+	const orgTimeEntriesResult = use(orgTimeEntriesPromise)
 
-	const selectedMember = useMemo(
-		() => members.find((m) => m.id === selectedUserId),
-		[members, selectedUserId],
-	)
-	const employeeName = selectedUserId
-		? selectedMember?.name || 'Employee'
-		: user?.fullName || 'You'
+	const orgEntries = useMemo(() => {
+		return orgTimeEntriesResult.ok ? orgTimeEntriesResult.value : []
+	}, [orgTimeEntriesResult])
+
+	const isViewingAll = selectedUserId === 'all' && isAdmin
 
 	const initialWeekParsed = use(
 		selectedWeekPromise || Promise.resolve(undefined),
@@ -81,246 +73,164 @@ export default function ViewHours({
 		timeframePromise || Promise.resolve(undefined),
 	)
 
-	// Determine default timeframe based on current data
-	const defaultTimeframeValue = useMemo(() => {
-		if (
-			initialTimeframeParsed === 'week' ||
-			initialTimeframeParsed === 'month' ||
-			initialTimeframeParsed === 'year' ||
-			initialTimeframeParsed === 'all' ||
-			initialTimeframeParsed === 'custom'
-		) {
-			return initialTimeframeParsed as TimeframeValue
+	const timeframe = (initialTimeframeParsed as TimeframeValue) || 'week'
+	const selectedYear = initialYearParsed
+		? parseInt(initialYearParsed, 10)
+		: new Date().getFullYear()
+	const selectedMonth = initialMonthParsed
+		? parseInt(initialMonthParsed, 10)
+		: new Date().getMonth()
+	const selectedWeek = initialWeekParsed ? parseInt(initialWeekParsed, 10) : 1
+
+	const [chartType, setChartType] = useState<'bar' | 'line'>('bar')
+
+	const selectedMember = useMemo(
+		() => members.find((m) => m.id === selectedUserId),
+		[members, selectedUserId],
+	)
+
+	const employeeName = useMemo(() => {
+		if (isViewingAll) return 'Entire Organization'
+		if (selectedUserId) return selectedMember?.name || 'Employee'
+		return user?.fullName || 'You'
+	}, [isViewingAll, selectedUserId, selectedMember, user])
+
+	// Member visibility state for Org view
+	const [visibleMemberIds, setVisibleMemberIds] = useState<Set<string>>(
+		new Set(members.map((m) => m.id)),
+	)
+
+	const toggleMember = (id: string) => {
+		const newSet = new Set(visibleMemberIds)
+		if (newSet.has(id)) {
+			newSet.delete(id)
+		} else {
+			newSet.add(id)
 		}
-		const start = startOfWeek(new Date(), { weekStartsOn: 1 })
-		const end = endOfWeek(new Date(), { weekStartsOn: 1 })
-		const hasEntriesInWeek = entries.some(
-			(e) =>
-				e.clock_out &&
-				isWithinInterval(new Date(e.clock_in), { start, end }),
-		)
-		return hasEntriesInWeek ? 'week' : 'all'
-	}, [entries, initialTimeframeParsed])
+		setVisibleMemberIds(newSet)
+	}
 
-	// View state
-	const [timeframe, setTimeframe] = useState<TimeframeValue>(
-		defaultTimeframeValue,
-	)
-	const [startDate, setStartDate] = useState('')
-	const [endDate, setEndDate] = useState('')
-	const [selectedYear, setSelectedYear] = useState(
-		initialYearParsed
-			? parseInt(initialYearParsed, 10)
-			: new Date().getFullYear(),
-	)
-	const [selectedMonth, setSelectedMonth] = useState(
-		initialMonthParsed
-			? parseInt(initialMonthParsed, 10)
-			: new Date().getMonth(),
-	)
-	const [selectedWeek, setSelectedWeek] = useState(
-		initialWeekParsed ? parseInt(initialWeekParsed, 10) : 1,
-	)
+	const toggleAll = () => {
+		if (visibleMemberIds.size === members.length) {
+			setVisibleMemberIds(new Set())
+		} else {
+			setVisibleMemberIds(new Set(members.map((m) => m.id)))
+		}
+	}
 
-	// Derive available years from entries
+	// Derive available years
 	const availableYears = useMemo(() => {
 		const years = new Set<number>()
 		years.add(new Date().getFullYear())
-		for (const e of entries) {
-			years.add(new Date(e.clock_in).getFullYear())
-		}
 		return Array.from(years).sort((a, b) => b - a)
-	}, [entries])
+	}, [])
 
-	// Filter entries based on timeframe
-	const filteredEntries = useMemo(() => {
-		let result = entries // Include all entries, even active ones
+	// Since the entries are already filtered by the server, we use them directly.
+	const displayEntries = isViewingAll ? orgEntries : entries
 
-		if (timeframe === 'week') {
-			let start: Date
-			let end: Date
+	// Previous total hours calculation placeholder
+	const previousTotalHours = 0
 
-			if (selectedWeek === 1) {
-				start = startOfDay(new Date(selectedYear, selectedMonth, 1))
-				end = endOfDay(new Date(selectedYear, selectedMonth, 7))
-			} else if (selectedWeek === 2) {
-				start = startOfDay(new Date(selectedYear, selectedMonth, 8))
-				end = endOfDay(new Date(selectedYear, selectedMonth, 15))
-			} else if (selectedWeek === 3) {
-				start = startOfDay(new Date(selectedYear, selectedMonth, 16))
-				end = endOfDay(new Date(selectedYear, selectedMonth, 23))
-			} else {
-				// Week 4: 22nd to end of month
-				start = startOfDay(new Date(selectedYear, selectedMonth, 24))
-				end = endOfMonth(new Date(selectedYear, selectedMonth, 1))
-			}
+	const lineChartMembers = useMemo(() => {
+		if (isViewingAll) return members
+		return [
+			{ id: selectedUserId || currentUserId || '', name: employeeName },
+		]
+	}, [isViewingAll, members, selectedUserId, currentUserId, employeeName])
 
-			result = result.filter((e) => {
-				try {
-					return isWithinInterval(new Date(e.clock_in), {
-						start,
-						end,
-					})
-				} catch {
-					return false
-				}
-			})
-		} else if (timeframe === 'month') {
-			const start = startOfMonth(new Date(selectedYear, selectedMonth, 1))
-			const end = endOfMonth(new Date(selectedYear, selectedMonth, 1))
-			result = result.filter((e) => {
-				try {
-					return isWithinInterval(new Date(e.clock_in), {
-						start,
-						end,
-					})
-				} catch {
-					return false
-				}
-			})
-		} else if (timeframe === 'year') {
-			const start = startOfYear(new Date(selectedYear, 0, 1))
-			const end = endOfYear(new Date(selectedYear, 0, 1))
-			result = result.filter((e) => {
-				try {
-					return isWithinInterval(new Date(e.clock_in), {
-						start,
-						end,
-					})
-				} catch {
-					return false
-				}
-			})
-		} else if (timeframe === 'custom' && startDate && endDate) {
-			const start = startOfDay(new Date(`${startDate}T00:00:00`))
-			const end = endOfDay(new Date(`${endDate}T00:00:00`))
-			result = result.filter((e) => {
-				try {
-					const d = new Date(e.clock_in)
-					return isWithinInterval(d, { start, end })
-				} catch {
-					return false
-				}
-			})
-		}
-
-		return result
-	}, [
-		entries,
-		timeframe,
-		startDate,
-		endDate,
-		selectedYear,
-		selectedMonth,
-		selectedWeek,
-	])
-
-	// Calculate previous period total hours for comparison
-	const previousTotalHours = useMemo(() => {
-		let prevStart: Date
-		let prevEnd: Date
-
-		if (timeframe === 'week') {
-			// For comparison, we use the immediate previous week
-			let prevYear = selectedYear
-			let prevMonth = selectedMonth
-			let prevWeek = selectedWeek - 1
-
-			if (prevWeek === 0) {
-				const prevMonthDate = subMonths(
-					new Date(selectedYear, selectedMonth, 1),
-					1,
-				)
-				prevYear = prevMonthDate.getFullYear()
-				prevMonth = prevMonthDate.getMonth()
-				prevWeek = 4 // Compare Week 1 to Week 4 of previous month
-			}
-
-			if (prevWeek === 1) {
-				prevStart = startOfDay(new Date(prevYear, prevMonth, 1))
-				prevEnd = endOfDay(new Date(prevYear, prevMonth, 7))
-			} else if (prevWeek === 2) {
-				prevStart = startOfDay(new Date(prevYear, prevMonth, 8))
-				prevEnd = endOfDay(new Date(prevYear, prevMonth, 15))
-			} else if (prevWeek === 3) {
-				prevStart = startOfDay(new Date(prevYear, prevMonth, 16))
-				prevEnd = endOfDay(new Date(prevYear, prevMonth, 23))
-			} else {
-				prevStart = startOfDay(new Date(prevYear, prevMonth, 24))
-				prevEnd = endOfMonth(new Date(prevYear, prevMonth, 1))
-			}
-		} else if (timeframe === 'month') {
-			const currentMonth = new Date(selectedYear, selectedMonth, 1)
-			prevStart = startOfMonth(subMonths(currentMonth, 1))
-			prevEnd = endOfMonth(subMonths(currentMonth, 1))
-		} else if (timeframe === 'year') {
-			const currentYear = new Date(selectedYear, 0, 1)
-			prevStart = startOfYear(subYears(currentYear, 1))
-			prevEnd = endOfYear(subYears(currentYear, 1))
-		} else {
-			return 0 // No comparison for custom or all
-		}
-
-		return entries
-			.filter((e) => {
-				try {
-					return (
-						e.clock_out &&
-						isWithinInterval(new Date(e.clock_in), {
-							start: prevStart,
-							end: prevEnd,
-						})
-					)
-				} catch {
-					return false
-				}
-			})
-			.reduce((acc, e) => {
-				const clockOutDate = e.clock_out ? new Date(e.clock_out) : null
-				if (!clockOutDate) return acc
-				const durationMs =
-					clockOutDate.getTime() - new Date(e.clock_in).getTime()
-				return acc + durationMs / (1000 * 60 * 60)
-			}, 0)
-	}, [entries, timeframe, selectedYear, selectedMonth, selectedWeek])
+	const lineChartVisibleIds = useMemo(() => {
+		if (isViewingAll) return visibleMemberIds
+		return new Set([selectedUserId || currentUserId || ''])
+	}, [isViewingAll, visibleMemberIds, selectedUserId, currentUserId])
 
 	return (
 		<div className="space-y-6 pb-20">
-			<TimeframeSelector
-				availableYears={availableYears}
-				currentUserId={currentUserId}
-				endDate={endDate}
-				isAdmin={isAdmin}
-				members={members}
-				selectedMonth={selectedMonth}
-				selectedUserId={selectedUserId}
-				selectedWeek={selectedWeek}
-				selectedYear={selectedYear}
-				setEndDate={setEndDate}
-				setSelectedMonth={setSelectedMonth}
-				setSelectedWeek={setSelectedWeek}
-				setSelectedYear={setSelectedYear}
-				setStartDate={setStartDate}
-				setTimeframe={setTimeframe}
-				startDate={startDate}
-				timeframe={timeframe}
-			/>
-
-			<div className="grid grid-cols-1 gap-6 md:grid-cols-3">
-				<HoursChart
-					employeeName={employeeName}
-					filteredEntries={filteredEntries}
-					previousTotalHours={previousTotalHours}
+			<div className="flex flex-col gap-6">
+				<TimeframeSelector
+					availableYears={availableYears}
+					currentUserId={currentUserId}
+					endDate={''} // Handled by searchParams
+					isAdmin={isAdmin}
+					members={members}
 					selectedMonth={selectedMonth}
+					selectedUserId={selectedUserId}
 					selectedWeek={selectedWeek}
 					selectedYear={selectedYear}
+					startDate={''} // Handled by searchParams
 					timeframe={timeframe}
 				/>
-				<EntryList
-					entries={filteredEntries}
-					isAdmin={isAdmin}
-					setOptimisticEntries={setOptimisticEntries}
-				/>
+
+				<div className="flex w-full justify-center">
+					<div className="flex rounded-lg bg-zinc-100 p-1 dark:bg-zinc-900">
+						<button
+							className={`px-4 py-1.5 font-bold text-xs transition-all ${
+								chartType === 'bar'
+									? 'rounded-md bg-white text-zinc-950 shadow-sm dark:bg-zinc-800 dark:text-zinc-50'
+									: 'text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-50'
+							}`}
+							onClick={() => setChartType('bar')}
+							type="button"
+						>
+							BAR CHART
+						</button>
+						<button
+							className={`px-4 py-1.5 font-bold text-xs transition-all ${
+								chartType === 'line'
+									? 'rounded-md bg-white text-zinc-950 shadow-sm dark:bg-zinc-800 dark:text-zinc-50'
+									: 'text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-50'
+							}`}
+							onClick={() => setChartType('line')}
+							type="button"
+						>
+							LINE CHART
+						</button>
+					</div>
+				</div>
+			</div>
+
+			<div className="grid grid-cols-1 gap-6 lg:grid-cols-4">
+				<div className="lg:col-span-3">
+					{chartType === 'bar' ? (
+						<HoursChart
+							employeeName={employeeName}
+							filteredEntries={displayEntries}
+							isViewingAll={isViewingAll}
+							members={members}
+							previousTotalHours={previousTotalHours}
+							selectedMonth={selectedMonth}
+							selectedWeek={selectedWeek}
+							selectedYear={selectedYear}
+							timeframe={timeframe}
+							visibleMemberIds={visibleMemberIds}
+						/>
+					) : (
+						<OrgHoursChart
+							filteredEntries={displayEntries}
+							members={lineChartMembers}
+							selectedMonth={selectedMonth}
+							selectedWeek={selectedWeek}
+							selectedYear={selectedYear}
+							timeframe={timeframe}
+							visibleMemberIds={lineChartVisibleIds}
+						/>
+					)}
+				</div>
+
+				<div className="space-y-6 lg:col-span-1">
+					{isViewingAll && (
+						<MemberToggles
+							members={members}
+							toggleAll={toggleAll}
+							toggleMember={toggleMember}
+							visibleMemberIds={visibleMemberIds}
+						/>
+					)}
+					<EntryList
+						entries={displayEntries}
+						isAdmin={isAdmin}
+						setOptimisticEntries={setOptimisticEntries}
+					/>
+				</div>
 			</div>
 		</div>
 	)

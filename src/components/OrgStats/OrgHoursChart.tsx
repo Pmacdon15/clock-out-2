@@ -198,7 +198,7 @@ function OrgHoursChartContent({
 		<>
 			<div className="mb-8 flex items-start justify-between">
 				<div>
-					<h3 className="font-bold text-xl tracking-tight text-zinc-900">
+					<h3 className="font-bold text-xl text-zinc-900 tracking-tight">
 						{isDownloadMode
 							? `Organization Hours Report: ${summaryText}`
 							: 'Organization Hours'}
@@ -278,7 +278,8 @@ function OrgHoursChartContent({
 								contentStyle={{
 									borderRadius: '12px',
 									border: 'none',
-									boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
+									boxShadow:
+										'0 10px 15px -3px rgb(0 0 0 / 0.1)',
 									backgroundColor: '#18181b',
 									color: '#fff',
 								}}
@@ -362,7 +363,7 @@ function OrgHoursChartContent({
 													{member.name}
 												</div>
 											</td>
-											<td className="py-3 text-right font-bold tabular-nums text-zinc-900">
+											<td className="py-3 text-right font-bold text-zinc-900 tabular-nums">
 												{(
 													memberBreakdown[
 														member.id
@@ -453,7 +454,7 @@ function OrgHoursChartContent({
 														</span>
 													)}
 												</td>
-												<td className="py-3 text-right font-bold tabular-nums text-zinc-900">
+												<td className="py-3 text-right font-bold text-zinc-900 tabular-nums">
 													{hours.toFixed(2)}h
 												</td>
 											</tr>

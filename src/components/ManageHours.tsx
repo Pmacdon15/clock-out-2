@@ -2,7 +2,7 @@
 
 import { useMutation } from '@tanstack/react-query'
 import { Clock, Loader2, Play, Square, Trash2 } from 'lucide-react'
-import { startTransition, useEffect, useState } from 'react'
+import { startTransition, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { clockInAction, clockOutAction } from '@/lib/actions'
 import type { TimeEntry } from '@/lib/dal'
@@ -23,6 +23,7 @@ const formatDuration = (start: Date, end: Date = new Date()) => {
 
 interface ManageHoursProps {
 	initialEntries: TimeEntry[]
+	activeEntry: TimeEntry | null
 	isAdmin: boolean
 	setOptimisticEntries: (action: {
 		type: 'ADD' | 'REMOVE' | 'UPDATE'
@@ -32,10 +33,15 @@ interface ManageHoursProps {
 
 export default function ManageHours({
 	initialEntries = [],
+	activeEntry: serverActiveEntry,
 	isAdmin,
 	setOptimisticEntries,
 }: ManageHoursProps) {
-	const activeEntry = initialEntries?.find?.((e) => !e.clock_out)
+	const activeEntry = useMemo(() => {
+		// Use server-provided active entry, or find it in initialEntries if it was added optimistically
+		return serverActiveEntry || initialEntries.find((e) => !e.clock_out)
+	}, [serverActiveEntry, initialEntries])
+
 	const [elapsedTime, setElapsedTime] = useState<string>('')
 
 	useEffect(() => {
@@ -93,7 +99,6 @@ export default function ManageHours({
 		const now = new Date()
 
 		startTransition(() => {
-			// This updates the specific entry in the list to have a clock_out time
 			setOptimisticEntries({
 				type: 'UPDATE',
 				payload: {

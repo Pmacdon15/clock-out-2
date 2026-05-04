@@ -9,7 +9,6 @@ import type {
 } from '@/lib/types'
 import ManageHours from './ManageHours'
 import OrgSettings from './OrgSettings'
-import OrgStatsView from './OrgStats/OrgStatsView'
 import { Card } from './ui'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
 import ViewHours from './ViewHours'
@@ -23,6 +22,9 @@ interface DashboardTabsProps {
 	orgTimeEntriesPromise: Promise<
 		SerializableResult<TimeEntry[], { reason: string }>
 	>
+	activeEntryPromise: Promise<
+		SerializableResult<TimeEntry | null, { reason: string }>
+	>
 	membersPromise?: Promise<
 		{
 			id: string
@@ -35,13 +37,14 @@ interface DashboardTabsProps {
 	selectedYearPromise?: Promise<string | undefined>
 	timeframePromise?: Promise<string | undefined>
 }
-type TabType = 'manage' | 'view' | 'settings' | 'stats'
+type TabType = 'manage' | 'view' | 'settings'
 
 export default function DashboardTabs({
 	defaultTabPromise,
 	orgSettingsPromise,
 	entriesPromise,
 	orgTimeEntriesPromise,
+	activeEntryPromise,
 	membersPromise,
 	selectedUserIdPromise,
 	selectedWeekPromise,
@@ -49,17 +52,16 @@ export default function DashboardTabs({
 	selectedYearPromise,
 	timeframePromise,
 }: DashboardTabsProps) {
-	const { has, userId } = useAuth()
+	const { userId, has } = useAuth()
 	const result = use(entriesPromise)
+	const activeEntryResult = use(activeEntryPromise)
 	const defaultTabResult = use(defaultTabPromise)
 	const defaultTab: TabType =
 		defaultTabResult === 'view'
 			? 'view'
 			: defaultTabResult === 'settings'
 				? 'settings'
-				: defaultTabResult === 'stats'
-					? 'stats'
-					: 'manage'
+				: 'manage'
 
 	const [optimisticResult, setOptimisticEntries] = useOptimistic(
 		result.ok ? result : { value: [] as TimeEntry[], ok: true as const },
@@ -73,7 +75,7 @@ export default function DashboardTabs({
 				case 'ADD':
 					return {
 						...state,
-						value: [...(state.value || []), action.payload],
+						value: [action.payload, ...(state.value || [])],
 					}
 				case 'REMOVE':
 					return {
@@ -110,8 +112,9 @@ export default function DashboardTabs({
 		? optimisticResult.value
 		: []
 
+	const activeEntry = activeEntryResult.ok ? activeEntryResult.value : null
+
 	const hasReporting = has({ feature: 'reporting' })
-	const hasOrgStats = has({ feature: 'org_stats' })
 	const isAdmin = has({ role: 'org:admin' })
 
 	return (
@@ -119,9 +122,6 @@ export default function DashboardTabs({
 			<TabsList>
 				<TabsTrigger value="manage">Time Clock</TabsTrigger>
 				<TabsTrigger value="view">Hours</TabsTrigger>
-				{isAdmin && hasOrgStats && (
-					<TabsTrigger value="stats">Stats</TabsTrigger>
-				)}
 				{isAdmin && hasReporting && (
 					<TabsTrigger value="settings">Settings</TabsTrigger>
 				)}
@@ -129,6 +129,7 @@ export default function DashboardTabs({
 
 			<TabsContent className="mt-0" value="manage">
 				<ManageHours
+					activeEntry={activeEntry}
 					initialEntries={entries}
 					isAdmin={isAdmin}
 					setOptimisticEntries={setOptimisticEntries}
@@ -146,6 +147,7 @@ export default function DashboardTabs({
 						entries={entries}
 						isAdmin={isAdmin}
 						membersPromise={membersPromise}
+						orgTimeEntriesPromise={orgTimeEntriesPromise}
 						selectedMonthPromise={selectedMonthPromise}
 						selectedUserIdPromise={selectedUserIdPromise}
 						selectedWeekPromise={selectedWeekPromise}
@@ -155,27 +157,6 @@ export default function DashboardTabs({
 					/>
 				</Suspense>
 			</TabsContent>
-
-			{isAdmin && hasOrgStats && (
-				<TabsContent className="mt-0" value="stats">
-					<Suspense
-						fallback={
-							<div className="p-8 text-center">
-								Loading stats...
-							</div>
-						}
-					>
-						<OrgStatsWrapper
-							membersPromise={membersPromise}
-							orgTimeEntriesPromise={orgTimeEntriesPromise}
-							selectedMonthPromise={selectedMonthPromise}
-							selectedWeekPromise={selectedWeekPromise}
-							selectedYearPromise={selectedYearPromise}
-							timeframePromise={timeframePromise}
-						/>
-					</Suspense>
-				</TabsContent>
-			)}
 
 			{isAdmin && hasReporting && (
 				<TabsContent className="mt-0" value="settings">
@@ -188,51 +169,5 @@ export default function DashboardTabs({
 				</TabsContent>
 			)}
 		</Tabs>
-	)
-}
-
-function OrgStatsWrapper({
-	orgTimeEntriesPromise,
-	membersPromise,
-	selectedWeekPromise,
-	selectedMonthPromise,
-	selectedYearPromise,
-	timeframePromise,
-}: {
-	orgTimeEntriesPromise: Promise<
-		SerializableResult<TimeEntry[], { reason: string }>
-	>
-	membersPromise:
-		| Promise<
-				{
-					id: string
-					name: string
-				}[]
-		  >
-		| undefined
-	selectedWeekPromise?: Promise<string | undefined>
-	selectedMonthPromise?: Promise<string | undefined>
-	selectedYearPromise?: Promise<string | undefined>
-	timeframePromise?: Promise<string | undefined>
-}) {
-	const result = use(orgTimeEntriesPromise)
-	if (!result.ok) {
-		return (
-			<Card className="p-8 text-center text-red-500">
-				{'Error fetching org stats: '}
-				{result.error.reason}
-			</Card>
-		)
-	}
-
-	return (
-		<OrgStatsView
-			entries={result.value}
-			membersPromise={membersPromise}
-			selectedMonthPromise={selectedMonthPromise}
-			selectedWeekPromise={selectedWeekPromise}
-			selectedYearPromise={selectedYearPromise}
-			timeframePromise={timeframePromise}
-		/>
 	)
 }
