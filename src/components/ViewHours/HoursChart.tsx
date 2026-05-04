@@ -9,6 +9,7 @@ import {
 	BarChart,
 	CartesianGrid,
 	Cell,
+	LabelList,
 	ResponsiveContainer,
 	Tooltip,
 	XAxis,
@@ -71,7 +72,7 @@ export function HoursChart(props: HoursChartProps) {
 				await downloadElementAsImage(downloadRef.current, fileName)
 			}
 			setIsDownloading(false)
-		}, 100)
+		}, 150)
 	}
 
 	return (
@@ -97,7 +98,7 @@ export function HoursChart(props: HoursChartProps) {
 					}}
 				>
 					<div
-						className="rounded-xl border border-zinc-200 bg-white p-12 dark:border-zinc-800 dark:bg-zinc-950"
+						className="rounded-xl border border-zinc-200 bg-white p-12 text-zinc-950 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-50"
 						ref={downloadRef}
 					>
 						<HoursChartContent
@@ -176,17 +177,23 @@ function HoursChartContent({
 				<div className="flex flex-col gap-1">
 					<h3 className="font-medium text-sm text-zinc-500">
 						{employeeName && (
-							<span className="mb-1 block font-bold text-zinc-900 dark:text-zinc-100">
+							<span className="mb-1 block font-bold text-zinc-900">
 								{employeeName}
 							</span>
 						)}
-						Summary hours for {summaryText}
+						{isDownloadMode ? (
+							<span className="font-bold text-zinc-900">
+								Hours Summary Report for {summaryText}
+							</span>
+						) : (
+							<>Summary hours for {summaryText}</>
+						)}
 					</h3>
 					<div className="flex items-end gap-2">
-						<span className="font-black text-3xl">
-							{totalHours.toFixed(1)}h
+						<span className="font-black text-3xl text-zinc-900">
+							{totalHours.toFixed(2)}h
 						</span>
-						{percentage !== null && (
+						{percentage !== null && !isDownloadMode && (
 							<span
 								className={`mb-1 flex items-center gap-0.5 font-bold text-xs ${
 									percentage >= 0
@@ -221,11 +228,19 @@ function HoursChartContent({
 				)}
 			</div>
 
-			<div className="mt-4 h-[300px] w-full">
+			<div
+				className={
+					isDownloadMode ? 'mt-4 h-100 w-full' : 'mt-4 h-75 w-full'
+				}
+			>
 				<ResponsiveContainer height="100%" width="100%">
 					<BarChart
 						data={chartData}
-						margin={{ top: 0, right: 0, left: -20, bottom: 0 }}
+						margin={
+							isDownloadMode
+								? { top: 20, right: 30, left: 0, bottom: 20 }
+								: { top: 0, right: 0, left: -20, bottom: 0 }
+						}
 					>
 						<CartesianGrid
 							stroke="#e5e7eb"
@@ -244,24 +259,26 @@ function HoursChartContent({
 							tick={{ fill: '#71717a', fontSize: 12 }}
 							tickLine={false}
 						/>
-						<Tooltip
-							contentStyle={{
-								borderRadius: '12px',
-								border: 'none',
-								boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
-								backgroundColor: '#18181b',
-								color: '#fff',
-							}}
-							cursor={{ fill: 'rgba(0,0,0,0.05)' }}
-							itemStyle={{ color: '#fff' }}
-							labelFormatter={(value, payload) =>
-								payload[0]?.payload.fullLabel || value
-							}
-							labelStyle={{
-								fontWeight: 'bold',
-								marginBottom: '4px',
-							}}
-						/>
+						{!isDownloadMode && (
+							<Tooltip
+								contentStyle={{
+									borderRadius: '12px',
+									border: 'none',
+									boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
+									backgroundColor: '#18181b',
+									color: '#fff',
+								}}
+								cursor={{ fill: 'rgba(0,0,0,0.05)' }}
+								itemStyle={{ color: '#fff' }}
+								labelFormatter={(value, payload) =>
+									payload[0]?.payload.fullLabel || value
+								}
+								labelStyle={{
+									fontWeight: 'bold',
+									marginBottom: '4px',
+								}}
+							/>
+						)}
 						<Bar
 							barSize={32}
 							dataKey="hours"
@@ -269,6 +286,17 @@ function HoursChartContent({
 							isAnimationActive={!isDownloadMode}
 							radius={[4, 4, 0, 0]}
 						>
+							{isDownloadMode && (
+								<LabelList
+									dataKey="hours"									
+									position="top"
+									style={{
+										fill: '#71717a',
+										fontSize: 10,
+										fontWeight: 'bold',
+									}}
+								/>
+							)}
 							{chartData.map((d, _index) => (
 								<Cell
 									className={
@@ -286,9 +314,9 @@ function HoursChartContent({
 
 			{isDownloadMode && (
 				<div className="mt-12 border-zinc-200 border-t pt-8 dark:border-zinc-800">
-					<h4 className="mb-6 flex items-center gap-2 font-bold text-lg">
+					<h4 className="mb-6 flex items-center gap-2 font-bold text-lg text-zinc-900">
 						Detailed Entry Log
-						<span className="rounded bg-zinc-100 px-2 py-0.5 font-medium text-xs text-zinc-500 dark:bg-zinc-800">
+						<span className="rounded bg-zinc-100 px-2 py-0.5 font-medium text-xs text-zinc-500">
 							{filteredEntries.length} entries
 						</span>
 					</h4>
@@ -331,7 +359,7 @@ function HoursChartContent({
 
 									return (
 										<tr key={e.id}>
-											<td className="py-3 font-medium">
+											<td className="py-3 font-medium text-zinc-900">
 												{format(
 													clockIn,
 													'eee, MMM d, yyyy',
@@ -349,21 +377,21 @@ function HoursChartContent({
 													</span>
 												)}
 											</td>
-											<td className="py-3 text-right font-bold tabular-nums">
-												{hours.toFixed(2)}h
+											<td className="py-3 text-right font-bold tabular-nums text-zinc-700">
+												{hours.toFixed(2)}
 											</td>
 										</tr>
 									)
 								})}
 						</tbody>
 					</table>
-					<div className="mt-8 flex justify-end border-zinc-100 border-t pt-6 dark:border-zinc-900">
+					<div className="mt-8 flex justify-end border-zinc-100 border-t pt-6 dark:border-zinc-500">
 						<div className="text-right">
-							<span className="mb-1 block font-bold text-[10px] text-zinc-400 uppercase tracking-widest">
+							<span className="mb-1 block font-bold text-[10px] uppercase tracking-widest">
 								Total Hours for Period
 							</span>
-							<span className="font-black text-2xl">
-								{totalHours.toFixed(2)}h
+							<span className="font-black text-2xl text-zinc-500">
+								{totalHours.toFixed(2)} 
 							</span>
 						</div>
 					</div>
