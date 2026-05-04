@@ -228,7 +228,7 @@ export default function ReportingSettings({
 							frequency === 'custom' ? reportInterval : 1
 
 						startTransition(async () => {
-							if (initialData) {								
+							if (initialData) {
 								onUpdateOptimistic({
 									...initialData,
 									report_frequency: freq,

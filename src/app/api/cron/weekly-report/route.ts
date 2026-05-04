@@ -3,6 +3,11 @@ import { format, getWeek, startOfDay, subDays, subMonths } from 'date-fns'
 import { NextResponse } from 'next/server'
 import { dbGetReportingSettings } from '@/lib/db'
 import { sendWeeklyReports } from '@/lib/reports'
+import type {
+	ClerkBillingFeature,
+	ClerkBillingSubscription,
+	ClerkBillingSubscriptionItem,
+} from '@/lib/types'
 
 export async function GET(request: Request) {
 	const authHeader = request.headers.get('authorization')
@@ -36,14 +41,16 @@ export async function GET(request: Request) {
 		let hasReportingFeature = false
 		try {
 			const subscription =
-				await client.billing.getOrganizationBillingSubscription(orgId)
+				(await client.billing.getOrganizationBillingSubscription(
+					orgId,
+				)) as unknown as ClerkBillingSubscription
 			hasReportingFeature = subscription.subscriptionItems.some(
-				(item: any) =>
+				(item: ClerkBillingSubscriptionItem) =>
 					item.plan?.features?.some(
-						(f: any) => f.slug === 'reporting',
+						(f: ClerkBillingFeature) => f.slug === 'reporting',
 					),
 			)
-		} catch (error) {
+		} catch (_error) {
 			// If no billing or error, assume no feature
 			console.log(
 				`[Cron] No billing/subscription for ${org.name} (${orgId})`,

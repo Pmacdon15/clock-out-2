@@ -1,9 +1,14 @@
-import { clerkClient } from '@clerk/nextjs/server'
-import { format } from 'date-fns'
 import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses'
+import { clerkClient } from '@clerk/nextjs/server'
 import { render } from '@react-email/render'
+import { format } from 'date-fns'
 import { WeeklyReportEmail } from '@/components/emails/WeeklyReportEmail'
 import { dbGetTimeEntriesForPeriod } from './db'
+import type {
+	ClerkBillingFeature,
+	ClerkBillingSubscription,
+	ClerkBillingSubscriptionItem,
+} from './types'
 
 const sesClient = new SESClient({
 	region: process.env.AWS_REGION || 'us-east-1',
@@ -54,14 +59,22 @@ export async function sendWeeklyReports(
 		// Check for reporting feature in subscriptions
 		let hasReportingFeature = false
 		try {
-			// @ts-ignore - Clerk Billing is in Beta and types might not be fully updated yet
-			const subscription = await client.billing.getOrganizationBillingSubscription(orgId)
-			hasReportingFeature = subscription.subscriptionItems.some((item: any) =>
-				item.plan?.features?.some((f: any) => f.slug === 'reporting'),
+			// @ts-expect-error - Clerk Billing is in Beta and types might not be fully updated yet
+			const subscription =
+				(await client.billing.getOrganizationBillingSubscription(
+					orgId,
+				)) as unknown as ClerkBillingSubscription
+			hasReportingFeature = subscription.subscriptionItems.some(
+				(item: ClerkBillingSubscriptionItem) =>
+					item.plan?.features?.some(
+						(f: ClerkBillingFeature) => f.slug === 'reporting',
+					),
 			)
-		} catch (error) {
+		} catch (_error) {
 			// If no billing or error, assume no feature
-			console.log(`[Reports] No billing/subscription for ${org.name} (${orgId})`)
+			console.log(
+				`[Reports] No billing/subscription for ${org.name} (${orgId})`,
+			)
 		}
 
 		if (!hasReportingFeature) {

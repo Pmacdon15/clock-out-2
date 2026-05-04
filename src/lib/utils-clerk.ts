@@ -1,4 +1,5 @@
 import { clerkClient } from '@clerk/nextjs/server'
+import type { RawClerkMember } from './types'
 
 export async function isOverMemberShipLimit(orgId: string) {
 	try {
@@ -25,7 +26,7 @@ export async function isOverMemberShipLimit(orgId: string) {
 
 export async function getProcessedMembers(
 	_orgId: string,
-	rawMembersArray: any[],
+	rawMembersArray: RawClerkMember[],
 ) {
 	return rawMembersArray.map((m) => {
 		const userData = m.publicUserData

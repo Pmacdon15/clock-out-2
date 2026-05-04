@@ -5,6 +5,7 @@ import { Trash2 } from 'lucide-react'
 import { startTransition, useState } from 'react'
 import { toast } from 'sonner'
 import { deleteTimeEntryAction } from '@/lib/actions'
+import type { TimeEntryAction } from '@/lib/types'
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -19,10 +20,7 @@ import {
 
 interface DeleteConfirmDialogProps {
 	entryId: number
-	setOptimisticEntries?: (action: {
-		type: 'ADD' | 'REMOVE'
-		payload: any
-	}) => void
+	setOptimisticEntries?: (action: TimeEntryAction) => void
 	trigger?: React.ReactNode
 }
 

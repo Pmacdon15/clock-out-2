@@ -1,9 +1,13 @@
 import { Show, SignInButton } from '@clerk/nextjs'
-import { auth } from '@clerk/nextjs/server'
 import { Suspense } from 'react'
 import DashboardTabs from '@/components/DashboardTabs'
 import MainPageHeader from '@/components/headers/main-page-header'
-import { getOrgMembers, getOrgSettings, getTimeEntries, getOrgTimeEntries } from '@/lib/dal'
+import {
+	getOrgMembers,
+	getOrgSettings,
+	getOrgTimeEntries,
+	getTimeEntries,
+} from '@/lib/dal'
 
 export default function Home(props: PageProps<'/'>) {
 	const userIdPromise = props.searchParams.then((params) =>
@@ -40,7 +44,6 @@ export default function Home(props: PageProps<'/'>) {
 		),
 	)
 
-	
 	const membersPromise = getOrgMembers()
 	const orgSettingsPromise = getOrgSettings()
 	const orgTimeEntriesPromise = getOrgTimeEntries()
@@ -51,7 +54,7 @@ export default function Home(props: PageProps<'/'>) {
 			<Suspense>
 				<Show when="signed-in">
 					<Suspense fallback={<DashboardSkeleton />}>
-						<DashboardTabs							
+						<DashboardTabs
 							defaultTabPromise={defaultTabPromise}
 							entriesPromise={timeEntriesPromise}
 							membersPromise={membersPromise}

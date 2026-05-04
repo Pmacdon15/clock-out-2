@@ -6,6 +6,7 @@ import type {
 	OrgSettingsData,
 	SerializableResult,
 	TimeEntry,
+	TimeEntryAction,
 } from '@/lib/types'
 import ManageHours from './ManageHours'
 import OrgSettings from './OrgSettings'
@@ -65,27 +66,27 @@ export default function DashboardTabs({
 		result.ok ? result : { value: [] as TimeEntry[], ok: true as const },
 		(
 			state: SerializableResult<TimeEntry[], { reason: string }>,
-			action: { type: 'ADD' | 'REMOVE' | 'UPDATE'; payload: any },
-		) => {
+			action: TimeEntryAction,
+		): SerializableResult<TimeEntry[], { reason: string }> => {
 			if (!state.ok) return state
 
 			switch (action.type) {
 				case 'ADD':
 					return {
-						...state,
-						value: [...(state.value || []), action.payload],
+						ok: true as const,
+						value: [...state.value, action.payload],
 					}
 				case 'REMOVE':
 					return {
-						...state,
-						value: (state.value || []).filter(
+						ok: true as const,
+						value: state.value.filter(
 							(entry) => entry.id !== action.payload,
 						),
 					}
 				case 'UPDATE':
 					return {
-						...state,
-						value: (state.value || []).map((entry) =>
+						ok: true as const,
+						value: state.value.map((entry) =>
 							entry.id === action.payload.id
 								? { ...entry, ...action.payload }
 								: entry,

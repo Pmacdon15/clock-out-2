@@ -1,12 +1,13 @@
 import { verifyWebhook } from '@clerk/nextjs/webhooks'
 import type { NextRequest } from 'next/server'
+import type { ClerkWebhookEvent } from '@/lib/types'
 import { handleSubscriptionUpdate } from '@/lib/webhooks/clerk'
 
 export async function POST(req: NextRequest) {
 	try {
 		const evt = (await verifyWebhook(req, {
 			signingSecret: process.env.CLERK_WEBHOOK_SIGNING_SECRET, // Added ! to ensure TS it exists
-		})) as any // Using any or specific Clerk billing type if available
+		})) as unknown as ClerkWebhookEvent
 
 		console.log('Web Hook :', evt.type, ' ', evt.data)
 

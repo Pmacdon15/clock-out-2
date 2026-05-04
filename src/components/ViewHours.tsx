@@ -14,7 +14,7 @@ import {
 	subYears,
 } from 'date-fns'
 import { use, useMemo, useState } from 'react'
-import type { TimeEntry } from '@/lib/dal'
+import type { TimeEntry, TimeEntryAction } from '@/lib/types'
 import { EntryList } from './ViewHours/EntryList'
 import { HoursChart } from './ViewHours/HoursChart'
 import {
@@ -24,10 +24,7 @@ import {
 
 interface ViewHoursProps {
 	entries: TimeEntry[]
-	setOptimisticEntries: (action: {
-		type: 'ADD' | 'REMOVE' | 'UPDATE'
-		payload: any
-	}) => void
+	setOptimisticEntries: (action: TimeEntryAction) => void
 	isAdmin?: boolean
 	membersPromise?: Promise<
 		{

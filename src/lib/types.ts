@@ -25,3 +25,45 @@ export type OrgSettingsData = {
 	updated_at?: Date
 	reporting?: ReportingSettingsData
 }
+
+export type TimeEntryAction =
+	| { type: 'ADD'; payload: TimeEntry }
+	| { type: 'REMOVE'; payload: number }
+	| { type: 'UPDATE'; payload: { id: number } & Partial<TimeEntry> }
+
+export interface ClerkBillingFeature {
+	slug: string
+}
+
+export interface ClerkBillingPlan {
+	features?: ClerkBillingFeature[]
+}
+
+export interface ClerkBillingSubscriptionItem {
+	plan?: ClerkBillingPlan
+}
+
+export interface ClerkBillingSubscription {
+	subscriptionItems: ClerkBillingSubscriptionItem[]
+}
+
+export interface ClerkWebhookEvent {
+	type: string
+	data: {
+		plan: {
+			slug: string
+		}
+		payer?: {
+			organization_id?: string
+		}
+	}
+}
+
+export interface RawClerkMember {
+	publicUserData?: {
+		userId?: string
+		firstName?: string | null
+		lastName?: string | null
+		identifier?: string
+	}
+}
