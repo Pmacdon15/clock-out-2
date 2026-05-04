@@ -9,8 +9,7 @@ export async function downloadElementAsImage(
 	element: HTMLElement,
 	fileName: string,
 ) {
-	const isDark = document.documentElement.classList.contains('dark')
-	const bgColor = isDark ? '#09090b' : '#ffffff'
+	const bgColor = '#ffffff'
 
 	try {
 		// Wait a tiny bit to ensure Recharts has layouted if it was just rendered

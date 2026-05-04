@@ -102,7 +102,7 @@ export function OrgHoursChart(props: OrgHoursChartProps) {
 					}}
 				>
 					<div
-						className="rounded-xl border border-zinc-200 bg-white p-12 text-zinc-950 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-50"
+						className="rounded-xl border border-zinc-200 bg-white p-12 text-zinc-950"
 						ref={downloadRef}
 					>
 						<OrgHoursChartContent
@@ -198,18 +198,23 @@ function OrgHoursChartContent({
 		<>
 			<div className="mb-8 flex items-start justify-between">
 				<div>
-					<h3 className="font-bold text-xl tracking-tight text-zinc-900 dark:text-zinc-100">
+					<h3 className="font-bold text-xl tracking-tight text-zinc-900">
 						{isDownloadMode
 							? `Organization Hours Report: ${summaryText}`
 							: 'Organization Hours'}
 					</h3>
+					{!isDownloadMode && (
+						<p className="font-bold text-zinc-500 dark:text-zinc-400">
+							{summaryText}
+						</p>
+					)}
 					<div className="flex items-end gap-2">
-						<span className="font-black text-3xl text-zinc-900 dark:text-zinc-100">
+						<span className="font-black text-3xl text-zinc-900">
 							{totalOrgHours.toFixed(2)}h
 						</span>
 						{!isDownloadMode && (
 							<span className="mb-1 font-medium text-muted-foreground text-sm">
-								total for {summaryText}
+								total hours
 							</span>
 						)}
 					</div>
@@ -302,7 +307,11 @@ function OrgHoursChartContent({
 								activeDot={{ r: 6, strokeWidth: 0 }}
 								connectNulls
 								dataKey={member.id}
-								dot={{ r: 4, strokeWidth: 0 }}
+								dot={{
+									r: 4,
+									strokeWidth: 0,
+									fill: COLORS[index % COLORS.length],
+								}}
 								hide={!visibleMemberIds.has(member.id)}
 								isAnimationActive={!isDownloadMode}
 								key={member.id}
@@ -318,13 +327,13 @@ function OrgHoursChartContent({
 
 			{isDownloadMode && (
 				<div className="mt-12 space-y-12">
-					<div className="border-zinc-200 border-t pt-8 dark:border-zinc-800">
-						<h4 className="mb-6 font-bold text-lg text-zinc-900 dark:text-zinc-100">
+					<div className="border-zinc-200 border-t pt-8">
+						<h4 className="mb-6 font-bold text-lg text-zinc-900">
 							Employee Breakdown
 						</h4>
 						<table className="w-full text-sm">
 							<thead>
-								<tr className="border-zinc-200 border-b text-left dark:border-zinc-800">
+								<tr className="border-zinc-200 border-b text-left">
 									<th className="pb-3 font-bold text-[10px] text-zinc-400 uppercase">
 										Employee
 									</th>
@@ -333,12 +342,12 @@ function OrgHoursChartContent({
 									</th>
 								</tr>
 							</thead>
-							<tbody className="divide-y divide-zinc-100 dark:divide-zinc-900">
+							<tbody className="divide-y divide-zinc-100">
 								{members
 									.filter((m) => memberBreakdown[m.id])
 									.map((member, index) => (
 										<tr key={member.id}>
-											<td className="py-3 font-medium text-zinc-900 dark:text-zinc-100">
+											<td className="py-3 font-medium text-zinc-900">
 												<div className="flex items-center gap-2">
 													<div
 														className="h-2 w-2 rounded-full"
@@ -353,7 +362,7 @@ function OrgHoursChartContent({
 													{member.name}
 												</div>
 											</td>
-											<td className="py-3 text-right font-bold tabular-nums text-zinc-900 dark:text-zinc-100">
+											<td className="py-3 text-right font-bold tabular-nums text-zinc-900">
 												{(
 													memberBreakdown[
 														member.id
@@ -367,16 +376,16 @@ function OrgHoursChartContent({
 						</table>
 					</div>
 
-					<div className="border-zinc-200 border-t pt-8 dark:border-zinc-800">
-						<h4 className="mb-6 flex items-center gap-2 font-bold text-lg text-zinc-900 dark:text-zinc-100">
+					<div className="border-zinc-200 border-t pt-8">
+						<h4 className="mb-6 flex items-center gap-2 font-bold text-lg text-zinc-900">
 							Detailed Organization Log
-							<span className="rounded bg-zinc-100 px-2 py-0.5 font-medium text-xs text-zinc-500 dark:bg-zinc-800">
+							<span className="rounded bg-zinc-100 px-2 py-0.5 font-medium text-xs text-zinc-500">
 								{filteredEntries.length} entries
 							</span>
 						</h4>
 						<table className="w-full border-collapse text-sm">
 							<thead>
-								<tr className="border-zinc-200 border-b text-left dark:border-zinc-800">
+								<tr className="border-zinc-200 border-b text-left">
 									<th className="pb-3 font-bold text-[10px] text-zinc-400 uppercase">
 										Date
 									</th>
@@ -394,7 +403,7 @@ function OrgHoursChartContent({
 									</th>
 								</tr>
 							</thead>
-							<tbody className="divide-y divide-zinc-100 dark:divide-zinc-900">
+							<tbody className="divide-y divide-zinc-100">
 								{filteredEntries
 									.sort(
 										(a, b) =>
@@ -420,7 +429,7 @@ function OrgHoursChartContent({
 
 										return (
 											<tr key={e.id}>
-												<td className="py-3 font-medium text-zinc-900 dark:text-zinc-100">
+												<td className="py-3 font-medium text-zinc-900">
 													{format(
 														clockIn,
 														'MMM d, yyyy',
@@ -444,7 +453,7 @@ function OrgHoursChartContent({
 														</span>
 													)}
 												</td>
-												<td className="py-3 text-right font-bold tabular-nums text-zinc-900 dark:text-zinc-100">
+												<td className="py-3 text-right font-bold tabular-nums text-zinc-900">
 													{hours.toFixed(2)}h
 												</td>
 											</tr>

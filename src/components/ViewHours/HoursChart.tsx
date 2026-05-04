@@ -98,7 +98,7 @@ export function HoursChart(props: HoursChartProps) {
 					}}
 				>
 					<div
-						className="rounded-xl border border-zinc-200 bg-white p-12 text-zinc-950 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-50"
+						className="rounded-xl border border-zinc-200 bg-white p-12 text-zinc-950"
 						ref={downloadRef}
 					>
 						<HoursChartContent
@@ -177,7 +177,7 @@ function HoursChartContent({
 				<div className="flex flex-col gap-1">
 					<h3 className="font-medium text-sm text-zinc-500">
 						{employeeName && (
-							<span className="mb-1 block font-bold text-zinc-900">
+							<span className={`mb-1 block font-bold ${isDownloadMode ? 'text-zinc-900' : 'text-zinc-900 dark:text-zinc-100'}`}>
 								{employeeName}
 							</span>
 						)}
@@ -186,11 +186,13 @@ function HoursChartContent({
 								Hours Summary Report for {summaryText}
 							</span>
 						) : (
-							<>Summary hours for {summaryText}</>
+							<span className="dark:text-zinc-100">
+								Summary hours for {summaryText}
+							</span>
 						)}
 					</h3>
 					<div className="flex items-end gap-2">
-						<span className="font-black text-3xl text-zinc-900">
+						<span className={`font-black text-3xl ${isDownloadMode ? 'text-zinc-900' : 'text-zinc-900 dark:text-zinc-100'}`}>
 							{totalHours.toFixed(2)}h
 						</span>
 						{percentage !== null && !isDownloadMode && (
@@ -230,7 +232,7 @@ function HoursChartContent({
 
 			<div
 				className={
-					isDownloadMode ? 'mt-4 h-100 w-full' : 'mt-4 h-75 w-full'
+					isDownloadMode ? 'mt-4 h-[400px] w-full' : 'mt-4 h-[300px] w-full'
 				}
 			>
 				<ResponsiveContainer height="100%" width="100%">
@@ -288,7 +290,8 @@ function HoursChartContent({
 						>
 							{isDownloadMode && (
 								<LabelList
-									dataKey="hours"									
+									dataKey="hours"
+									formatter={(val: number) => `${val}h`}
 									position="top"
 									style={{
 										fill: '#71717a',
@@ -313,7 +316,7 @@ function HoursChartContent({
 			</div>
 
 			{isDownloadMode && (
-				<div className="mt-12 border-zinc-200 border-t pt-8 dark:border-zinc-800">
+				<div className="mt-12 border-zinc-200 border-t pt-8">
 					<h4 className="mb-6 flex items-center gap-2 font-bold text-lg text-zinc-900">
 						Detailed Entry Log
 						<span className="rounded bg-zinc-100 px-2 py-0.5 font-medium text-xs text-zinc-500">
@@ -322,7 +325,7 @@ function HoursChartContent({
 					</h4>
 					<table className="w-full border-collapse text-sm">
 						<thead>
-							<tr className="border-zinc-200 border-b text-left dark:border-zinc-800">
+							<tr className="border-zinc-200 border-b text-left">
 								<th className="pb-3 font-bold text-[10px] text-zinc-400 uppercase tracking-wider">
 									Date
 								</th>
@@ -337,7 +340,7 @@ function HoursChartContent({
 								</th>
 							</tr>
 						</thead>
-						<tbody className="divide-y divide-zinc-100 dark:divide-zinc-900">
+						<tbody className="divide-y divide-zinc-100">
 							{filteredEntries
 								.sort(
 									(a, b) =>
@@ -377,21 +380,21 @@ function HoursChartContent({
 													</span>
 												)}
 											</td>
-											<td className="py-3 text-right font-bold tabular-nums text-zinc-700">
-												{hours.toFixed(2)}
+											<td className="py-3 text-right font-bold tabular-nums text-zinc-900">
+												{hours.toFixed(2)}h
 											</td>
 										</tr>
 									)
 								})}
 						</tbody>
 					</table>
-					<div className="mt-8 flex justify-end border-zinc-100 border-t pt-6 dark:border-zinc-500">
+					<div className="mt-8 flex justify-end border-zinc-100 border-t pt-6">
 						<div className="text-right">
-							<span className="mb-1 block font-bold text-[10px] uppercase tracking-widest">
+							<span className="mb-1 block font-bold text-[10px] text-zinc-400 uppercase tracking-widest">
 								Total Hours for Period
 							</span>
-							<span className="font-black text-2xl text-zinc-500">
-								{totalHours.toFixed(2)} 
+							<span className="font-black text-2xl text-zinc-900">
+								{totalHours.toFixed(2)}h
 							</span>
 						</div>
 					</div>
