@@ -58,8 +58,7 @@ export async function sendWeeklyReports(
 
 		// Check for reporting feature in subscriptions
 		let hasReportingFeature = false
-		try {
-			// @ts-expect-error - Clerk Billing is in Beta and types might not be fully updated yet
+		try {			
 			const subscription =
 				(await client.billing.getOrganizationBillingSubscription(
 					orgId,
