@@ -290,8 +290,7 @@ function HoursChartContent({
 						>
 							{isDownloadMode && (
 								<LabelList
-									dataKey="hours"
-									formatter={(val: number) => `${val}h`}
+									dataKey="hours"									
 									position="top"
 									style={{
 										fill: '#71717a',
