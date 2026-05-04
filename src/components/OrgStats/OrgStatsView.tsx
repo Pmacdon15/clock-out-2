@@ -112,7 +112,7 @@ export default function OrgStatsView({
 
 	// Filter entries based on timeframe
 	const filteredEntries = useMemo(() => {
-		let result = entries.filter((e) => e.clock_out) // Only completed shifts
+		let result = entries // Include all entries, even active ones
 
 		if (timeframe === 'week') {
 			let start: Date
@@ -215,6 +215,10 @@ export default function OrgStatsView({
 					<OrgHoursChart
 						filteredEntries={filteredEntries}
 						members={members}
+						selectedMonth={selectedMonth}
+						selectedWeek={selectedWeek}
+						selectedYear={selectedYear}
+						timeframe={timeframe}
 						visibleMemberIds={visibleMemberIds}
 					/>
 				</div>

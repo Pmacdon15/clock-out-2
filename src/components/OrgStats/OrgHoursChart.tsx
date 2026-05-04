@@ -117,6 +117,7 @@ export function OrgHoursChart(props: OrgHoursChartProps) {
 	)
 }
 
+<<<<<<< HEAD
 type ChartDataMapValue = {
 	date: Date
 	[userId: string]: number | Date
@@ -128,6 +129,8 @@ type ChartDataEntry = {
 	[userId: string]: number | string
 }
 
+=======
+>>>>>>> 81af103 (fixed use memo)
 function OrgHoursChartContent({
 	filteredEntries,
 	members,
@@ -143,7 +146,12 @@ function OrgHoursChartContent({
 	summaryText: string
 }) {
 	const chartData = useMemo(() => {
+<<<<<<< HEAD
 		const dataMap: Record<string, ChartDataMapValue> = {}
+=======
+		const dataMap: Record<string, { date: Date; [userId: string]: any }> =
+			{}
+>>>>>>> 81af103 (fixed use memo)
 
 		filteredEntries.forEach((e) => {
 			const clockIn = new Date(e.clock_in)

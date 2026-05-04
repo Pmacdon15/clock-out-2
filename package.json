@@ -22,6 +22,7 @@
 		"@vercel/analytics": "^2.0.1",
 		"clsx": "^2.1.1",
 		"date-fns": "^4.1.0",
+		"html-to-image": "^1.11.13",
 		"lucide-react": "^1.8.0",
 		"neverthrow": "^8.2.0",
 		"next": "16.2.4",

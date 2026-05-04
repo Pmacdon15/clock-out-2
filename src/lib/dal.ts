@@ -99,7 +99,7 @@ export async function getTimeEntries(
 export async function getOrgTimeEntries(): Promise<
 	SerializableResult<TimeEntry[], { reason: string }>
 > {
-	const { userId, orgId, orgRole, has } = await auth()
+	const { userId, orgId, orgRole, has } = await auth.protect()
 	const hasOrgStats = has({ feature: 'org_stats' })
 	const isAdmin = orgRole === 'org:admin'
 

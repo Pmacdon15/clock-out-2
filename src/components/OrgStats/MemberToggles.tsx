@@ -2,6 +2,7 @@
 
 import { Check, Users } from 'lucide-react'
 import { Card } from '../ui'
+import { COLORS } from './OrgHoursChart'
 
 interface MemberTogglesProps {
 	members: { id: string; name: string }[]
@@ -36,8 +37,9 @@ export function MemberToggles({
 			</div>
 
 			<div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-1">
-				{members.map((member) => {
+				{members.map((member, index) => {
 					const isVisible = visibleMemberIds.has(member.id)
+					const color = COLORS[index % COLORS.length]
 					return (
 						<button
 							className={`flex items-center justify-between rounded-xl p-3 text-left transition-all ${
@@ -49,9 +51,21 @@ export function MemberToggles({
 							onClick={() => toggleMember(member.id)}
 							type="button"
 						>
+<<<<<<< HEAD
 							<span className="font-medium text-sm">
 								{member.name}
 							</span>
+=======
+							<div className="flex items-center gap-3">
+								<div
+									className="h-2 w-2 rounded-full"
+									style={{ backgroundColor: color }}
+								/>
+								<span className="font-medium text-sm">
+									{member.name}
+								</span>
+							</div>
+>>>>>>> 81af103 (fixed use memo)
 							{isVisible && (
 								<div className="rounded-full bg-zinc-900 p-0.5 text-zinc-50 dark:bg-zinc-50 dark:text-zinc-900">
 									<Check className="h-3 w-3" />

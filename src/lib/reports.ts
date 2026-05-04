@@ -67,6 +67,7 @@ export async function sendWeeklyReports(
 				(item: ClerkBillingSubscriptionItem) =>
 					item.plan?.features?.some(
 						(f: ClerkBillingFeature) => f.slug === 'reporting',
+
 					),
 			)
 		} catch (_error) {
