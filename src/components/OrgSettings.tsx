@@ -10,7 +10,12 @@ import ReportingSettings from './ReportingSettings'
 
 interface OrgSettingsProps {
 	orgSettingsPromise: Promise<
-		SerializableResult<OrgSettingsData, { reason: string }>
+		SerializableResult<
+			ReportingSettingsData | null,
+			{
+				reason: string
+			}
+		>
 	>
 	hasReporting: boolean
 }

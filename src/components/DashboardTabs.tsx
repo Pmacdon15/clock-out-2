@@ -17,13 +17,21 @@ interface DashboardTabsProps {
 	defaultTabPromise: Promise<string | undefined>
 	entriesPromise: Promise<SerializableResult<TimeEntry[], { reason: string }>>
 	orgSettingsPromise: Promise<
-		SerializableResult<ReportingSettingsData | null, { reason: string }>
+		SerializableResult<
+			ReportingSettingsData | null,
+			{
+				reason: string
+			}
+		>
 	>
 	orgTimeEntriesPromise: Promise<
 		SerializableResult<TimeEntry[], { reason: string }>
 	>
 	activeEntryPromise: Promise<
 		SerializableResult<TimeEntry | null, { reason: string }>
+	>
+	recentEntriesPromise: Promise<
+		SerializableResult<TimeEntry[], { reason: string }>
 	>
 	membersPromise?: Promise<
 		{
@@ -45,6 +53,7 @@ export default function DashboardTabs({
 	entriesPromise,
 	orgTimeEntriesPromise,
 	activeEntryPromise,
+	recentEntriesPromise,
 	membersPromise,
 	selectedUserIdPromise,
 	selectedWeekPromise,
@@ -55,6 +64,7 @@ export default function DashboardTabs({
 	const { userId, has } = useAuth()
 	const result = use(entriesPromise)
 	const activeEntryResult = use(activeEntryPromise)
+	const recentEntriesResult = use(recentEntriesPromise)
 	const defaultTabResult = use(defaultTabPromise)
 	const defaultTab: TabType =
 		defaultTabResult === 'view'
@@ -63,8 +73,46 @@ export default function DashboardTabs({
 				? 'settings'
 				: 'manage'
 
-	const [optimisticResult, setOptimisticEntries] = useOptimistic(
+	const [optimisticEntries, setOptimisticEntries] = useOptimistic(
 		result.ok ? result : { value: [] as TimeEntry[], ok: true as const },
+		(
+			state: SerializableResult<TimeEntry[], { reason: string }>,
+			action: { type: 'ADD' | 'REMOVE' | 'UPDATE'; payload: any },
+		) => {
+			if (!state.ok) return state
+
+			switch (action.type) {
+				case 'ADD':
+					return {
+						...state,
+						value: [action.payload, ...(state.value || [])],
+					}
+				case 'REMOVE':
+					return {
+						...state,
+						value: (state.value || []).filter(
+							(entry) => entry.id !== action.payload,
+						),
+					}
+				case 'UPDATE':
+					return {
+						...state,
+						value: (state.value || []).map((entry) =>
+							entry.id === action.payload.id
+								? { ...entry, ...action.payload }
+								: entry,
+						),
+					}
+				default:
+					return state
+			}
+		},
+	)
+
+	const [optimisticRecentEntries, setOptimisticRecentEntries] = useOptimistic(
+		recentEntriesResult.ok
+			? recentEntriesResult
+			: { value: [] as TimeEntry[], ok: true as const },
 		(
 			state: SerializableResult<TimeEntry[], { reason: string }>,
 			action: { type: 'ADD' | 'REMOVE' | 'UPDATE'; payload: any },
@@ -108,8 +156,12 @@ export default function DashboardTabs({
 		)
 	}
 
-	const entries: TimeEntry[] = optimisticResult.ok
-		? optimisticResult.value
+	const entries: TimeEntry[] = optimisticEntries.ok
+		? optimisticEntries.value
+		: []
+
+	const recentEntries: TimeEntry[] = optimisticRecentEntries.ok
+		? optimisticRecentEntries.value
 		: []
 
 	const activeEntry = activeEntryResult.ok ? activeEntryResult.value : null
@@ -130,9 +182,9 @@ export default function DashboardTabs({
 			<TabsContent className="mt-0" value="manage">
 				<ManageHours
 					activeEntry={activeEntry}
-					initialEntries={entries}
+					initialEntries={recentEntries}
 					isAdmin={isAdmin}
-					setOptimisticEntries={setOptimisticEntries}
+					setOptimisticEntries={setOptimisticRecentEntries}
 				/>
 			</TabsContent>
 

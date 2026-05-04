@@ -5,7 +5,7 @@ import MainPageHeader from '@/components/headers/main-page-header'
 import {
 	getActiveEntry,
 	getOrgMembers,
-	getOrgSettings,
+	getOrgReportingSettings,
 	getOrgTimeEntries,
 	getTimeEntries,
 } from '@/lib/dal'
@@ -60,7 +60,7 @@ export default function Home(props: PageProps<'/'>) {
 	)
 
 	const membersPromise = getOrgMembers()
-	const orgSettingsPromise = getOrgSettings()
+	const orgSettingsPromise = getOrgReportingSettings()
 	const orgTimeEntriesPromise = props.searchParams.then((params) =>
 		getOrgTimeEntries({
 			timeframe: Array.isArray(params.timeframe)
@@ -74,6 +74,7 @@ export default function Home(props: PageProps<'/'>) {
 		}),
 	)
 	const activeEntryPromise = getActiveEntry()
+	const recentEntriesPromise = getTimeEntries() // Unfiltered personal entries for Time Clock
 
 	return (
 		<main className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-4 py-8">
@@ -88,6 +89,7 @@ export default function Home(props: PageProps<'/'>) {
 							membersPromise={membersPromise}
 							orgSettingsPromise={orgSettingsPromise}
 							orgTimeEntriesPromise={orgTimeEntriesPromise}
+							recentEntriesPromise={recentEntriesPromise}
 							selectedMonthPromise={selectedMonthPromise}
 							selectedUserIdPromise={userIdPromise}
 							selectedWeekPromise={selectedWeekPromise}

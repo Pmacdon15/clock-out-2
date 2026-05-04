@@ -364,7 +364,7 @@ export async function updateReportingSettingsDal(
 	}
 }
 
-export async function getOrgSettings(): Promise<
+export async function getOrgReportingSettings(): Promise<
 	SerializableResult<ReportingSettingsData | null, { reason: string }>
 > {
 	const { userId, orgId } = await auth()
