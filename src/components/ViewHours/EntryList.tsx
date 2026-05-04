@@ -19,10 +19,10 @@ export function EntryList({
 	setOptimisticEntries,
 }: EntryListProps) {
 	return (
-		<Card className="relative flex min-h-[400px] flex-col justify-between overflow-hidden p-6">
-			<div className="space-y-4">
+		<Card className="relative flex min-h-[100 flex-col justify-between overflow-hidden p-6">
+			<div className="space-y-8">
 				<h3 className="mb-6 font-bold text-lg">Details</h3>
-				<div className="custom-scrollbar max-h-[500px] space-y-6 overflow-auto pr-2">
+				<div className="custom-scrollbar max-h-125 space-y-6 pr-2">
 					{entries.length === 0 ? (
 						<div className="flex flex-col items-center justify-center py-12 text-center text-zinc-500 italic">
 							<p className="text-sm">

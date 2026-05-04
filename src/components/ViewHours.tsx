@@ -188,7 +188,7 @@ export default function ViewHours({
 				</div>
 			</div>
 
-			<div className="grid grid-cols-1 gap-6 lg:grid-cols-4">
+			<div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
 				<div className="lg:col-span-3">
 					{chartType === 'bar' ? (
 						<HoursChart
@@ -216,7 +216,7 @@ export default function ViewHours({
 					)}
 				</div>
 
-				<div className="space-y-6 lg:col-span-1">
+				<div className="space-y-6 lg:col-span-2">
 					{isViewingAll && (
 						<MemberToggles
 							members={members}
