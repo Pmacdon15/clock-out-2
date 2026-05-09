@@ -19,7 +19,7 @@ export function EntryList({
 	setOptimisticEntries,
 }: EntryListProps) {
 	return (
-		<Card className="relative flex min-h-[100 flex-col justify-between overflow-hidden p-6">
+		<Card className="relative flex min-h-[100px] flex-col justify-between overflow-y-auto p-6 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-zinc-300 hover:scrollbar-thumb-zinc-400 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-300 [&::-webkit-scrollbar-track]:bg-transparent">
 			<div className="space-y-8">
 				<h3 className="mb-6 font-bold text-lg">Details</h3>
 				<div className="custom-scrollbar max-h-125 space-y-6 pr-2">
