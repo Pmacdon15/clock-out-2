@@ -126,7 +126,7 @@ export function TimeframeSelector({
 					<div className="flex w-full items-center gap-2 sm:w-auto">
 						<input
 							className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-xs outline-none focus:ring-1 focus:ring-zinc-400"
-							defaultValue={startDate}
+							defaultValue={startDate || new Date().toISOString().split('T')[0]}
 							name="start-date"
 							onChange={(e) =>
 								updateParams({ start: e.target.value })
