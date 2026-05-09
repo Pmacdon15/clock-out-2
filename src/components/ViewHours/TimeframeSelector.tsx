@@ -80,7 +80,10 @@ export function TimeframeSelector({
 							<option className="bg-zinc-900 text-white" value="">
 								My Own Hours (Self)
 							</option>
-							<option className="bg-zinc-900 font-bold text-blue-400" value="all">
+							<option
+								className="bg-zinc-900 font-bold text-blue-400"
+								value="all"
+							>
 								Entire Organization (All Members)
 							</option>
 							{members
@@ -122,17 +125,23 @@ export function TimeframeSelector({
 				{timeframe === 'custom' && (
 					<div className="flex w-full items-center gap-2 sm:w-auto">
 						<input
-							className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs outline-none focus:ring-1 focus:ring-zinc-400 dark:border-zinc-800 dark:bg-zinc-950"
-							onChange={(e) => updateParams({ start: e.target.value })}
+							className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-xs outline-none focus:ring-1 focus:ring-zinc-400"
+							defaultValue={startDate}
+							name="start-date"
+							onChange={(e) =>
+								updateParams({ start: e.target.value })
+							}
 							type="date"
-							value={startDate}
 						/>
 						<span className="text-zinc-400">to</span>
 						<input
-							className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs outline-none focus:ring-1 focus:ring-zinc-400 dark:border-zinc-800 dark:bg-zinc-950"
-							onChange={(e) => updateParams({ end: e.target.value })}
+							className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-xs outline-none focus:ring-1 focus:ring-zinc-400"
+							defaultValue={endDate}
+							name="end-date"
+							onChange={(e) =>
+								updateParams({ end: e.target.value })
+							}
 							type="date"
-							value={endDate}
 						/>
 					</div>
 				)}
@@ -142,7 +151,9 @@ export function TimeframeSelector({
 						<Calendar className="h-4 w-4 text-zinc-400" />
 						<select
 							className="rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-xs outline-none focus:ring-1 focus:ring-zinc-400 dark:border-zinc-800 dark:bg-zinc-950"
-							onChange={(e) => updateParams({ week: e.target.value })}
+							onChange={(e) =>
+								updateParams({ week: e.target.value })
+							}
 							value={selectedWeek}
 						>
 							<option value={1}>Week 1 (1-7)</option>
@@ -165,7 +176,9 @@ export function TimeframeSelector({
 						</select>
 						<select
 							className="rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-xs outline-none focus:ring-1 focus:ring-zinc-400 dark:border-zinc-800 dark:bg-zinc-950"
-							onChange={(e) => updateParams({ month: e.target.value })}
+							onChange={(e) =>
+								updateParams({ month: e.target.value })
+							}
 							value={selectedMonth}
 						>
 							{Array.from({ length: 12 }).map((_, i) => {
@@ -182,7 +195,9 @@ export function TimeframeSelector({
 						</select>
 						<select
 							className="rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-xs outline-none focus:ring-1 focus:ring-zinc-400 dark:border-zinc-800 dark:bg-zinc-950"
-							onChange={(e) => updateParams({ year: e.target.value })}
+							onChange={(e) =>
+								updateParams({ year: e.target.value })
+							}
 							value={selectedYear}
 						>
 							{availableYears.map((y) => (
@@ -199,7 +214,9 @@ export function TimeframeSelector({
 						<Calendar className="h-4 w-4 text-zinc-400" />
 						<select
 							className="rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-xs outline-none focus:ring-1 focus:ring-zinc-400 dark:border-zinc-800 dark:bg-zinc-950"
-							onChange={(e) => updateParams({ month: e.target.value })}
+							onChange={(e) =>
+								updateParams({ month: e.target.value })
+							}
 							value={selectedMonth}
 						>
 							{Array.from({ length: 12 }).map((_, i) => {
@@ -216,7 +233,9 @@ export function TimeframeSelector({
 						</select>
 						<select
 							className="rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-xs outline-none focus:ring-1 focus:ring-zinc-400 dark:border-zinc-800 dark:bg-zinc-950"
-							onChange={(e) => updateParams({ year: e.target.value })}
+							onChange={(e) =>
+								updateParams({ year: e.target.value })
+							}
 							value={selectedYear}
 						>
 							{availableYears.map((y) => (
@@ -233,7 +252,9 @@ export function TimeframeSelector({
 						<Calendar className="h-4 w-4 text-zinc-400" />
 						<select
 							className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs outline-none focus:ring-1 focus:ring-zinc-400 dark:border-zinc-800 dark:bg-zinc-950"
-							onChange={(e) => updateParams({ year: e.target.value })}
+							onChange={(e) =>
+								updateParams({ year: e.target.value })
+							}
 							value={selectedYear}
 						>
 							{availableYears.map((y) => (
@@ -248,4 +269,3 @@ export function TimeframeSelector({
 		</div>
 	)
 }
-

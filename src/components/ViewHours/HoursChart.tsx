@@ -65,7 +65,7 @@ export function HoursChart(props: HoursChartProps) {
 
 	const handleDownload = async () => {
 		setIsDownloading(true)
-		// Small delay to allow the hidden div to be rendered/layouted by React
+		// Small delay to allow the hidden div to be rendered by React
 		setTimeout(async () => {
 			if (downloadRef.current) {
 				const name =

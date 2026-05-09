@@ -173,7 +173,7 @@ export default function DashboardTabs({
 			</TabsList>
 
 			<TabsContent className="mt-0" value="time-clock">
-				<TimeClock					
+				<TimeClock
 					initialEntries={recentEntries}
 					isAdmin={isAdmin}
 					setOptimisticEntries={setOptimisticRecentEntries}

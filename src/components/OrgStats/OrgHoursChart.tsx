@@ -224,13 +224,13 @@ function OrgHoursChartContent({
 							{totalOrgHours.toFixed(2)}h
 						</span>
 						{!isDownloadMode && (
-							<span className="mb-1 font-medium text-zinc-500 text-sm dark:text-zinc-400">
+							<span className="mb-1 font-medium text-sm text-zinc-500 dark:text-zinc-400">
 								total hours
 							</span>
 						)}
 					</div>
 					{!isDownloadMode && (
-						<p className="mt-1 text-zinc-500 text-sm dark:text-zinc-400">
+						<p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
 							Daily breakdown of hours per employee.
 						</p>
 					)}
