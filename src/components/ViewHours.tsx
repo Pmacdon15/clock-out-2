@@ -33,6 +33,8 @@ interface ViewHoursProps {
 	selectedMonthPromise?: Promise<string | undefined>
 	selectedYearPromise?: Promise<string | undefined>
 	timeframePromise?: Promise<string | undefined>
+	startDatePromise?: Promise<string | undefined>
+	endDatePromise?: Promise<string | undefined>
 	currentUserId?: string | null | undefined
 }
 
@@ -47,12 +49,21 @@ export default function ViewHours({
 	selectedMonthPromise,
 	selectedYearPromise,
 	timeframePromise,
+	startDatePromise,
+	endDatePromise,
 	currentUserId,
 }: ViewHoursProps) {
 	const { user } = useUser()
 	const members = use(membersPromise || Promise.resolve([]))
 	const selectedUserId = use(selectedUserIdPromise || Promise.resolve(''))
 	const orgTimeEntriesResult = use(orgTimeEntriesPromise)
+
+	const startDate =
+		(startDatePromise ? use(startDatePromise) : null) ??
+		new Date().toLocaleDateString('en-CA')
+	const endDate =
+		(endDatePromise ? use(endDatePromise) : null) ??
+		new Date().toLocaleDateString('en-CA')
 
 	const orgEntries = useMemo(() => {
 		return orgTimeEntriesResult.ok ? orgTimeEntriesResult.value : []
@@ -149,14 +160,14 @@ export default function ViewHours({
 				<TimeframeSelector
 					availableYears={availableYears}
 					currentUserId={currentUserId}
-					endDate={''} // Handled by searchParams
+					endDate={endDate}
 					isAdmin={isAdmin}
 					members={members}
 					selectedMonth={selectedMonth}
 					selectedUserId={selectedUserId}
 					selectedWeek={selectedWeek}
 					selectedYear={selectedYear}
-					startDate={''} // Handled by searchParams
+					startDate={startDate}
 					timeframe={timeframe}
 				/>
 

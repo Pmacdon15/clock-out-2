@@ -37,6 +37,12 @@ export default function Home(props: PageProps<'/'>) {
 			? params.timeframe[0]
 			: params.timeframe,
 	)
+	const startDatePromise = props.searchParams.then((params) =>
+		Array.isArray(params.start) ? params.start[0] : params.start,
+	)
+	const endDatePromise = props.searchParams.then((params) =>
+		Array.isArray(params.end) ? params.end[0] : params.end,
+	)
 
 	const timeEntriesPromise = props.searchParams.then((params) =>
 		getTimeEntries(
@@ -83,6 +89,7 @@ export default function Home(props: PageProps<'/'>) {
 					<Suspense fallback={<DashboardSkeleton />}>
 						<DashboardTabs
 							defaultTabPromise={defaultTabPromise}
+							endDatePromise={endDatePromise}
 							entriesPromise={timeEntriesPromise}
 							membersPromise={membersPromise}
 							orgSettingsPromise={orgSettingsPromise}
@@ -92,6 +99,7 @@ export default function Home(props: PageProps<'/'>) {
 							selectedUserIdPromise={userIdPromise}
 							selectedWeekPromise={selectedWeekPromise}
 							selectedYearPromise={selectedYearPromise}
+							startDatePromise={startDatePromise}
 							timeframePromise={timeframePromise}
 						/>
 					</Suspense>

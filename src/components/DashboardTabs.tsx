@@ -41,6 +41,8 @@ interface DashboardTabsProps {
 	selectedMonthPromise?: Promise<string | undefined>
 	selectedYearPromise?: Promise<string | undefined>
 	timeframePromise?: Promise<string | undefined>
+	endDatePromise: Promise<string | undefined>
+	startDatePromise: Promise<string | undefined>
 }
 type TabType = 'time-clock' | 'view' | 'settings'
 
@@ -56,6 +58,8 @@ export default function DashboardTabs({
 	selectedMonthPromise,
 	selectedYearPromise,
 	timeframePromise,
+	startDatePromise,
+	endDatePromise,
 }: DashboardTabsProps) {
 	const { userId, has } = useAuth()
 	const result = use(entriesPromise)
@@ -188,6 +192,7 @@ export default function DashboardTabs({
 				>
 					<ViewHours
 						currentUserId={userId}
+						endDatePromise={endDatePromise}
 						entries={entries}
 						isAdmin={isAdmin}
 						membersPromise={membersPromise}
@@ -197,6 +202,7 @@ export default function DashboardTabs({
 						selectedWeekPromise={selectedWeekPromise}
 						selectedYearPromise={selectedYearPromise}
 						setOptimisticEntries={setOptimisticEntries}
+						startDatePromise={startDatePromise}
 						timeframePromise={timeframePromise}
 					/>
 				</Suspense>

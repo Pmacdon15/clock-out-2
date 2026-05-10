@@ -4,6 +4,7 @@ import { endOfMonth, format } from 'date-fns'
 import { Calendar, Users } from 'lucide-react'
 import type { Route } from 'next'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import { useEffect } from 'react'
 
 export type TimeframeValue = 'week' | 'month' | 'year' | 'custom' | 'all'
 
@@ -57,6 +58,25 @@ export function TimeframeSelector({
 	const handleTimeframeChange = (t: TimeframeValue) => {
 		updateParams({ timeframe: t })
 	}
+
+	useEffect(() => {
+		const params = new URLSearchParams(searchParams.toString())
+
+		const hasStart = params.has('start')
+		const hasEnd = params.has('end')
+
+		if (!hasStart || !hasEnd) {
+			if (!hasStart) {
+				params.set('start', startDate)
+			}
+
+			if (!hasEnd) {
+				params.set('end', endDate)
+			}
+
+			router.replace(`${pathname}?${params.toString()}` as Route)
+		}
+	}, [searchParams, startDate, endDate, pathname, router])
 
 	return (
 		<div className="flex flex-col gap-6">
@@ -126,7 +146,7 @@ export function TimeframeSelector({
 					<div className="flex w-full items-center gap-2 sm:w-auto">
 						<input
 							className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-xs outline-none focus:ring-1 focus:ring-zinc-400"
-							defaultValue={startDate || new Date().toISOString().split('T')[0]}
+							defaultValue={startDate}
 							name="start-date"
 							onChange={(e) =>
 								updateParams({ start: e.target.value })
