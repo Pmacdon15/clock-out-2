@@ -7,10 +7,8 @@ import { sendWeeklyReports } from '@/lib/reports'
 export async function GET(request: Request) {
 	const authHeader = request.headers.get('authorization')
 
-	if (process.env.CRON_SECRET) {
-		if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-			return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-		}
+	if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+		return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 	}
 
 	const today = new Date()
@@ -119,7 +117,14 @@ export async function GET(request: Request) {
 				`[Cron] Sending ${frequency} report for ${org.name} (${orgId})`,
 			)
 			try {
-				await sendWeeklyReports(startOfDay(startDate), endDate, orgId)
+				const emailTimeframe =
+					frequency === 'twice-monthly' ? 'custom' : 'week'
+				await sendWeeklyReports(
+					startOfDay(startDate),
+					endDate,
+					orgId,
+					emailTimeframe,
+				)
 				results.push({
 					org: org.name,
 					status: 'sent',

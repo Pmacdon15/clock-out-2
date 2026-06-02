@@ -1,7 +1,7 @@
 import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses'
 import { clerkClient } from '@clerk/nextjs/server'
 import { render } from '@react-email/render'
-import { format } from 'date-fns'
+import { format, subDays } from 'date-fns'
 import { WeeklyReportEmail } from '@/components/emails/WeeklyReportEmail'
 import { dbGetTimeEntriesForPeriod } from './db'
 
@@ -21,6 +21,7 @@ export async function sendWeeklyReports(
 	startDate: Date,
 	endDate: Date,
 	targetOrgId?: string,
+	timeframe: string = 'week',
 ) {
 	const hasAwsCreds =
 		process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY
@@ -97,6 +98,7 @@ export async function sendWeeklyReports(
 				return isAdmin && hasEmail
 			})
 			.map((m) => m.publicUserData?.identifier as string)
+			.filter((email) => email.toLowerCase() !== 'driftlandscaping@gmail.com')
 
 		console.log(`[Reports] Admin emails found:`, adminEmails)
 
@@ -203,9 +205,21 @@ export async function sendWeeklyReports(
 			}
 			const chartUrl = `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(chartConfig))}&w=500&h=300`
 
+			// If endDate is exactly at start of day, the inclusive end date is the previous day.
+			// Otherwise, it is today.
+			const isStartOfDay =
+				endDate.getHours() === 0 &&
+				endDate.getMinutes() === 0 &&
+				endDate.getSeconds() === 0 &&
+				endDate.getMilliseconds() === 0
+			const inclusiveEndDate = isStartOfDay ? subDays(endDate, 1) : endDate
+
 			// Render React Email
 			const periodStartStr = format(startDate, 'MMM d, yyyy')
-			const periodEndStr = format(endDate, 'MMM d, yyyy')
+			const periodEndStr = format(inclusiveEndDate, 'MMM d, yyyy')
+
+			const customStart = format(startDate, 'yyyy-MM-dd')
+			const customEnd = format(inclusiveEndDate, 'yyyy-MM-dd')
 
 			// Map startDate to the 1-4 week indexing used in ViewHours UI
 			const dayOfMonth = startDate.getDate()
@@ -233,6 +247,9 @@ export async function sendWeeklyReports(
 							week: weekIndex.toString(),
 							month: startDate.getMonth().toString(),
 							year: startDate.getFullYear().toString(),
+							timeframe,
+							customStart,
+							customEnd,
 							breakdown: breakdown,
 						}),
 					)

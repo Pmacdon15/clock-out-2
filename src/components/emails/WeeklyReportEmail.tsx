@@ -25,6 +25,9 @@ interface WeeklyReportEmailProps {
 	week?: string
 	month?: string
 	year?: string
+	timeframe?: string
+	customStart?: string
+	customEnd?: string
 	breakdown: {
 		date: string
 		shifts: { start: string; end: string; duration: string }[]
@@ -42,13 +45,21 @@ export const WeeklyReportEmail = ({
 	week = '',
 	month = '',
 	year = '',
+	timeframe = 'week',
+	customStart = '',
+	customEnd = '',
 	breakdown = [],
 }: WeeklyReportEmailProps) => {
-	let linkWithParams = `${dashboardUrl}/?defaultTab=view&timeframe=week`
+	let linkWithParams = `${dashboardUrl}/?defaultTab=view&timeframe=${timeframe}`
 	if (userId) linkWithParams += `&userId=${userId}`
-	if (week) linkWithParams += `&week=${week}`
-	if (month) linkWithParams += `&month=${month}`
-	if (year) linkWithParams += `&year=${year}`
+	if (timeframe === 'custom') {
+		if (customStart) linkWithParams += `&start=${customStart}`
+		if (customEnd) linkWithParams += `&end=${customEnd}`
+	} else {
+		if (week) linkWithParams += `&week=${week}`
+		if (month) linkWithParams += `&month=${month}`
+		if (year) linkWithParams += `&year=${year}`
+	}
 
 	return (
 		<Html>
