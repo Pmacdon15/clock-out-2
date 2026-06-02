@@ -22,6 +22,7 @@ interface WeeklyReportEmailProps {
 	chartUrl: string
 	dashboardUrl: string
 	userId?: string
+	orgId?: string
 	week?: string
 	month?: string
 	year?: string
@@ -42,6 +43,7 @@ export const WeeklyReportEmail = ({
 	chartUrl = '',
 	dashboardUrl = 'https://clockout.patmac.ca',
 	userId = '',
+	orgId = '',
 	week = '',
 	month = '',
 	year = '',
@@ -52,6 +54,7 @@ export const WeeklyReportEmail = ({
 }: WeeklyReportEmailProps) => {
 	let linkWithParams = `${dashboardUrl}/?defaultTab=view&timeframe=${timeframe}`
 	if (userId) linkWithParams += `&userId=${userId}`
+	if (orgId) linkWithParams += `&orgId=${orgId}`
 	if (timeframe === 'custom') {
 		if (customStart) linkWithParams += `&start=${customStart}`
 		if (customEnd) linkWithParams += `&end=${customEnd}`

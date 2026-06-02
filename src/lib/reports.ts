@@ -97,8 +97,7 @@ export async function sendWeeklyReports(
 				const hasEmail = !!m.publicUserData?.identifier
 				return isAdmin && hasEmail
 			})
-			.map((m) => m.publicUserData?.identifier as string)
-			.filter((email) => email.toLowerCase() !== 'driftlandscaping@gmail.com')
+			.map((m) => m.publicUserData?.identifier as string)			
 
 		console.log(`[Reports] Admin emails found:`, adminEmails)
 
@@ -244,6 +243,7 @@ export async function sendWeeklyReports(
 								process.env.NEXT_PUBLIC_APP_URL ||
 								'https://clockout.patmac.ca',
 							userId: userId,
+							orgId: orgId,
 							week: weekIndex.toString(),
 							month: startDate.getMonth().toString(),
 							year: startDate.getFullYear().toString(),

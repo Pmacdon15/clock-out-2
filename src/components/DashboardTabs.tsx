@@ -1,7 +1,8 @@
 'use client'
 
-import { useAuth } from '@clerk/nextjs'
-import { Suspense, use, useOptimistic } from 'react'
+import { useAuth, useClerk } from '@clerk/nextjs'
+import { useSearchParams } from 'next/navigation'
+import { Suspense, use, useEffect, useOptimistic } from 'react'
 import TimeClock from '@/components/time-clock'
 import type {
 	ReportingSettingsData,
@@ -62,6 +63,16 @@ export default function DashboardTabs({
 	endDatePromise,
 }: DashboardTabsProps) {
 	const { userId, has } = useAuth()
+	const { setActive, organization } = useClerk()
+	const searchParams = useSearchParams()
+
+	useEffect(() => {
+		const urlOrgId = searchParams.get('orgId')
+		if (urlOrgId && organization?.id !== urlOrgId && setActive) {
+			console.log(`[Org Switcher] Switching to organization: ${urlOrgId}`)
+			setActive({ organization: urlOrgId })
+		}
+	}, [searchParams, organization, setActive])
 	const result = use(entriesPromise)
 	const recentEntriesResult = use(recentEntriesPromise)
 	const defaultTabResult = use(defaultTabPromise)
