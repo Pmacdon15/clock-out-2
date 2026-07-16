@@ -97,7 +97,7 @@ export async function sendWeeklyReports(
 				const hasEmail = !!m.publicUserData?.identifier
 				return isAdmin && hasEmail
 			})
-			.map((m) => m.publicUserData?.identifier as string)			
+			.map((m) => m.publicUserData?.identifier as string)
 
 		console.log(`[Reports] Admin emails found:`, adminEmails)
 
@@ -211,7 +211,9 @@ export async function sendWeeklyReports(
 				endDate.getMinutes() === 0 &&
 				endDate.getSeconds() === 0 &&
 				endDate.getMilliseconds() === 0
-			const inclusiveEndDate = isStartOfDay ? subDays(endDate, 1) : endDate
+			const inclusiveEndDate = isStartOfDay
+				? subDays(endDate, 1)
+				: endDate
 
 			// Render React Email
 			const periodStartStr = format(startDate, 'MMM d, yyyy')

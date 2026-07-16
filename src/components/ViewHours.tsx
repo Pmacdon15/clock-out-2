@@ -5,6 +5,7 @@ import { use, useMemo, useState } from 'react'
 import type { SerializableResult, TimeEntry } from '@/lib/dal'
 import { MemberToggles } from './OrgStats/MemberToggles'
 import { OrgHoursChart } from './OrgStats/OrgHoursChart'
+import { DaysWorkedBreakdown } from './ViewHours/DaysWorkedBreakdown'
 import { EntryList } from './ViewHours/EntryList'
 import { HoursChart } from './ViewHours/HoursChart'
 import {
@@ -236,6 +237,10 @@ export default function ViewHours({
 							visibleMemberIds={visibleMemberIds}
 						/>
 					)}
+					<DaysWorkedBreakdown
+						entries={displayEntries}
+						isViewingAll={isViewingAll}
+					/>
 					<EntryList
 						entries={displayEntries}
 						isAdmin={isAdmin}

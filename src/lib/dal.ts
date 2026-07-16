@@ -8,6 +8,7 @@ import {
 	startOfYear,
 } from 'date-fns'
 import { errAsync, okAsync } from 'neverthrow'
+import { connection } from 'next/server'
 import {
 	dbCheckActiveEntry,
 	dbClockIn,
@@ -178,6 +179,7 @@ export async function getOrgTimeEntries(filters?: {
 	start?: string
 	end?: string
 }): Promise<SerializableResult<TimeEntry[], { reason: string }>> {
+	
 	const { userId, orgId, orgRole } = await auth.protect()
 	const isAdmin = orgRole === 'org:admin'
 
