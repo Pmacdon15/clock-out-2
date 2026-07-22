@@ -1,6 +1,7 @@
 import { Show, SignInButton } from '@clerk/nextjs'
 import { Suspense } from 'react'
 import DashboardTabs from '@/components/DashboardTabs'
+import DashboardSkeleton from '@/components/fallbacks/home-page-fallback'
 import MainPageHeader from '@/components/headers/main-page-header'
 import {
 	getOrgMembers,
@@ -8,79 +9,9 @@ import {
 	getOrgTimeEntries,
 	getTimeEntries,
 } from '@/lib/dal'
+import { parseParams } from '@/lib/utils'
 
 export default function Home(props: PageProps<'/'>) {
-	const userIdPromise = props.searchParams.then((params) =>
-		Array.isArray(params.userId) ? params.userId[0] : params.userId,
-	)
-
-	const defaultTabPromise = props.searchParams.then((params) =>
-		Array.isArray(params.defaultTab)
-			? params.defaultTab[0]
-			: params.defaultTab,
-	)
-
-	const selectedWeekPromise = props.searchParams.then((params) =>
-		Array.isArray(params.week) ? params.week[0] : params.week,
-	)
-
-	const selectedMonthPromise = props.searchParams.then((params) =>
-		Array.isArray(params.month) ? params.month[0] : params.month,
-	)
-
-	const selectedYearPromise = props.searchParams.then((params) =>
-		Array.isArray(params.year) ? params.year[0] : params.year,
-	)
-
-	const timeframePromise = props.searchParams.then((params) =>
-		Array.isArray(params.timeframe)
-			? params.timeframe[0]
-			: params.timeframe,
-	)
-	const startDatePromise = props.searchParams.then((params) =>
-		Array.isArray(params.start) ? params.start[0] : params.start,
-	)
-	const endDatePromise = props.searchParams.then((params) =>
-		Array.isArray(params.end) ? params.end[0] : params.end,
-	)
-
-	const timeEntriesPromise = props.searchParams.then((params) =>
-		getTimeEntries(
-			Array.isArray(params.userId) ? params.userId[0] : params.userId,
-			{
-				timeframe: Array.isArray(params.timeframe)
-					? params.timeframe[0]
-					: params.timeframe,
-				week: Array.isArray(params.week) ? params.week[0] : params.week,
-				month: Array.isArray(params.month)
-					? params.month[0]
-					: params.month,
-				year: Array.isArray(params.year) ? params.year[0] : params.year,
-				start: Array.isArray(params.start)
-					? params.start[0]
-					: params.start,
-				end: Array.isArray(params.end) ? params.end[0] : params.end,
-			},
-		),
-	)
-
-	const membersPromise = getOrgMembers()
-	const orgSettingsPromise = getOrgReportingSettings()
-	const orgTimeEntriesPromise = props.searchParams.then((params) =>
-		getOrgTimeEntries({
-			timeframe: Array.isArray(params.timeframe)
-				? params.timeframe[0]
-				: params.timeframe,
-			week: Array.isArray(params.week) ? params.week[0] : params.week,
-			month: Array.isArray(params.month) ? params.month[0] : params.month,
-			year: Array.isArray(params.year) ? params.year[0] : params.year,
-			start: Array.isArray(params.start) ? params.start[0] : params.start,
-			end: Array.isArray(params.end) ? params.end[0] : params.end,
-		}),
-	)
-
-	const recentEntriesPromise = getTimeEntries()
-
 	return (
 		<main className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-4 py-8">
 			<MainPageHeader />
@@ -88,19 +19,56 @@ export default function Home(props: PageProps<'/'>) {
 				<Show when="signed-in">
 					<Suspense fallback={<DashboardSkeleton />}>
 						<DashboardTabs
-							defaultTabPromise={defaultTabPromise}
-							endDatePromise={endDatePromise}
-							entriesPromise={timeEntriesPromise}
-							membersPromise={membersPromise}
-							orgSettingsPromise={orgSettingsPromise}
-							orgTimeEntriesPromise={orgTimeEntriesPromise}
-							recentEntriesPromise={recentEntriesPromise}
-							selectedMonthPromise={selectedMonthPromise}
-							selectedUserIdPromise={userIdPromise}
-							selectedWeekPromise={selectedWeekPromise}
-							selectedYearPromise={selectedYearPromise}
-							startDatePromise={startDatePromise}
-							timeframePromise={timeframePromise}
+							defaultTabPromise={props.searchParams.then(
+								(params) => parseParams(params.defaultTab),
+							)}
+							endDatePromise={props.searchParams.then((params) =>
+								parseParams(params.end),
+							)}
+							entriesPromise={props.searchParams.then((params) =>
+								getTimeEntries(parseParams(params.userId), {
+									timeframe: parseParams(params.timeframe),
+									week: parseParams(params.week),
+									month: parseParams(params.month),
+									year: parseParams(params.year),
+									start: parseParams(params.start),
+									end: parseParams(params.end),
+								}),
+							)}
+							membersPromise={getOrgMembers()}
+							orgSettingsPromise={getOrgReportingSettings()}
+							orgTimeEntriesPromise={props.searchParams.then(
+								(params) =>
+									getOrgTimeEntries({
+										timeframe: parseParams(
+											params.timeframe,
+										),
+										week: parseParams(params.week),
+										month: parseParams(params.month),
+										year: parseParams(params.year),
+										start: parseParams(params.star),
+										end: parseParams(params.end),
+									}),
+							)}
+							recentEntriesPromise={getTimeEntries()}
+							selectedMonthPromise={props.searchParams.then(
+								(params) => parseParams(params.month),
+							)}
+							selectedUserIdPromise={props.searchParams.then(
+								(params) => parseParams(params.userId),
+							)}
+							selectedWeekPromise={props.searchParams.then(
+								(params) => parseParams(params.week),
+							)}
+							selectedYearPromise={props.searchParams.then(
+								(params) => parseParams(params.year),
+							)}
+							startDatePromise={props.searchParams.then(
+								(params) => parseParams(params.start),
+							)}
+							timeframePromise={props.searchParams.then(
+								(params) => parseParams(params.timeframe),
+							)}
 						/>
 					</Suspense>
 				</Show>
@@ -128,14 +96,5 @@ export default function Home(props: PageProps<'/'>) {
 				</Show>
 			</Suspense>
 		</main>
-	)
-}
-
-function DashboardSkeleton() {
-	return (
-		<div className="animate-pulse space-y-8">
-			<div className="h-10 w-1/3 rounded-md bg-zinc-200 dark:bg-zinc-800"></div>
-			<div className="h-[400px] rounded-xl bg-zinc-200 dark:bg-zinc-800"></div>
-		</div>
 	)
 }
