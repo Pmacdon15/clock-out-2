@@ -25,7 +25,7 @@ import type {
   SerializableResult,
   TimeEntry,
 } from "./types";
-import { getProcessedMembers, isOverMemberShipLimit } from "./utils-clerk";
+import { isOverMemberShipLimit } from "./utils-clerk";
 
 export type { SerializableResult, TimeEntry };
 
@@ -78,47 +78,27 @@ export function getDateRange(params: {
   return { startDate, endDate };
 }
 
-export async function getAuthSession(): Promise<
-  SerializableResult<
-    {
-      userId: string;
-      orgId: string;
-      isAdmin: boolean;
-      isPaidPlan: boolean;
-    },
-    { reason: string }
-  >
-> {
-  const { userId, orgId, orgRole, has } = await auth();
-  if (!userId || !orgId) {
-    return {
-      error: { reason: "Unauthorized or no organization selected" },
-      ok: false,
-    };
-  }
-  const isPaidPlan = !has({ plan: "free_org" });
-
-  return {
-    value: { userId, orgId, isAdmin: orgRole === "org:admin", isPaidPlan },
-    ok: true,
-  };
-}
 
 export async function getOrgMembers() {
-  const { orgId, orgRole } = await auth();
+  const { orgId, orgRole } = await auth.protect();
 
   if (!orgId || orgRole !== "org:admin") {
     return [];
   }
 
-  const client = await clerkClient();
-  const response = await client.organizations.getOrganizationMembershipList({
-    organizationId: orgId,
-  });
 
-  const plainMembers = JSON.parse(JSON.stringify(response.data));
-
-  return await getProcessedMembers(orgId, plainMembers);
+return clerkClient()
+    .then((client) =>
+        client.organizations.getOrganizationMembershipList({
+            organizationId: orgId,
+        })
+    )
+    .then((response) => JSON.parse(JSON.stringify(response.data)))
+    .catch((error) => {
+        console.error('Error fetching members:', error)
+        return []
+    })
+  
 }
 
 export async function getTimeEntries(
@@ -132,7 +112,7 @@ export async function getTimeEntries(
     end?: string;
   },
 ): Promise<SerializableResult<TimeEntry[], { reason: string }>> {
-  const { userId, orgId, orgRole } = await auth();
+  const { userId, orgId, orgRole } = await auth.protect();
   if (!userId || !orgId) {
     return {
       error: { reason: "Unauthorized or no organization selected" },
@@ -300,7 +280,7 @@ export async function updateTimeEntry(
 export async function getActiveEntry(): Promise<
   SerializableResult<TimeEntry | null, { reason: string }>
 > {
-  const { userId, orgId } = await auth();
+  const { userId, orgId } = await auth.protect();
   if (!userId || !orgId) {
     return {
       error: { reason: "Unauthorized or no organization selected" },
@@ -362,7 +342,7 @@ export async function updateReportingSettingsDal(
 export async function getOrgReportingSettings(): Promise<
   SerializableResult<ReportingSettingsData | null, { reason: string }>
 > {
-  const { userId, orgId } = await auth();
+  const { userId, orgId } = await auth.protect();
   if (!userId || !orgId) {
     return {
       error: { reason: "Unauthorized or no organization selected" },
