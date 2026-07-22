@@ -1,4 +1,5 @@
 import { Show, SignInButton } from '@clerk/nextjs'
+import { auth } from '@clerk/nextjs/server'
 import { Suspense } from 'react'
 import DashboardTabs from '@/components/DashboardTabs'
 import DashboardSkeleton from '@/components/fallbacks/home-page-fallback'
@@ -12,6 +13,8 @@ import {
 import { parseParams } from '@/lib/utils'
 
 export default function Home(props: PageProps<'/'>) {
+	const authPromise = auth.protect()
+	const hasPromise = authPromise.then((data) => data.has)
 	return (
 		<main className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-4 py-8">
 			<MainPageHeader />
@@ -19,56 +22,62 @@ export default function Home(props: PageProps<'/'>) {
 				<Show when="signed-in">
 					<Suspense fallback={<DashboardSkeleton />}>
 						<DashboardTabs
-							defaultTabPromise={props.searchParams.then(
-								(params) => parseParams(params.defaultTab),
+							defaultTabPromise={props.searchParams.then((p) =>
+								parseParams(p.defaultTab),
 							)}
-							endDatePromise={props.searchParams.then((params) =>
-								parseParams(params.end),
+							endDatePromise={props.searchParams.then((p) =>
+								parseParams(p.end),
 							)}
-							entriesPromise={props.searchParams.then((params) =>
-								getTimeEntries(parseParams(params.userId), {
-									timeframe: parseParams(params.timeframe),
-									week: parseParams(params.week),
-									month: parseParams(params.month),
-									year: parseParams(params.year),
-									start: parseParams(params.start),
-									end: parseParams(params.end),
+							entriesPromise={props.searchParams.then((p) =>
+								getTimeEntries(parseParams(p.userId), {
+									timeframe: parseParams(p.timeframe),
+									week: parseParams(p.week),
+									month: parseParams(p.month),
+									year: parseParams(p.year),
+									start: parseParams(p.start),
+									end: parseParams(p.end),
 								}),
 							)}
+							hasReportingPromise={hasPromise.then((has) =>
+								has({ feature: 'reporting' }),
+							)}
+							isAdminPromise={hasPromise.then((has) =>
+								has({ role: 'org:admin' }),
+							)}
 							membersPromise={getOrgMembers()}
+							orgIdPromise={authPromise.then((auth)=>auth.orgId)}
 							orgSettingsPromise={getOrgReportingSettings()}
 							orgTimeEntriesPromise={props.searchParams.then(
-								(params) =>
+								(p) =>
 									getOrgTimeEntries({
-										timeframe: parseParams(
-											params.timeframe,
-										),
-										week: parseParams(params.week),
-										month: parseParams(params.month),
-										year: parseParams(params.year),
-										start: parseParams(params.star),
-										end: parseParams(params.end),
+										timeframe: parseParams(p.timeframe),
+										week: parseParams(p.week),
+										month: parseParams(p.month),
+										year: parseParams(p.year),
+										start: parseParams(p.star),
+										end: parseParams(p.end),
 									}),
 							)}
 							recentEntriesPromise={getTimeEntries()}
-							selectedMonthPromise={props.searchParams.then(
-								(params) => parseParams(params.month),
+							selectedMonthPromise={props.searchParams.then((p) =>
+								parseParams(p.month),
 							)}
 							selectedUserIdPromise={props.searchParams.then(
-								(params) => parseParams(params.userId),
+								(p) => parseParams(p.userId),
 							)}
-							selectedWeekPromise={props.searchParams.then(
-								(params) => parseParams(params.week),
+							selectedWeekPromise={props.searchParams.then((p) =>
+								parseParams(p.week),
 							)}
-							selectedYearPromise={props.searchParams.then(
-								(params) => parseParams(params.year),
+							selectedYearPromise={props.searchParams.then((p) =>
+								parseParams(p.year),
 							)}
-							startDatePromise={props.searchParams.then(
-								(params) => parseParams(params.start),
+							startDatePromise={props.searchParams.then((p) =>
+								parseParams(p.start),
 							)}
-							timeframePromise={props.searchParams.then(
-								(params) => parseParams(params.timeframe),
+							timeframePromise={props.searchParams.then((p) =>
+								parseParams(p.timeframe),
 							)}
+							userIdPromise={ authPromise.then((data) => data.userId)}
 						/>
 					</Suspense>
 				</Show>

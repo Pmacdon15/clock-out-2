@@ -2,7 +2,7 @@
 
 import { useUser } from '@clerk/nextjs'
 import { use, useMemo, useState } from 'react'
-import type { SerializableResult, TimeEntry } from '@/lib/dal'
+import type { ViewHoursProps } from '@/lib/types'
 import { DaysWorkedBreakdown } from './ViewHours/DaysWorkedBreakdown'
 import { EntryList } from './ViewHours/EntryList'
 import { HoursBarChart } from './ViewHours/HoursBarChart'
@@ -12,32 +12,6 @@ import {
 	TimeframeSelector,
 	type TimeframeValue,
 } from './ViewHours/TimeframeSelector'
-
-interface ViewHoursProps {
-	entries: TimeEntry[]
-	setOptimisticEntries: (action: {
-		type: 'ADD' | 'REMOVE' | 'UPDATE'
-		payload: any
-	}) => void
-	isAdmin?: boolean
-	membersPromise?: Promise<
-		{
-			id: string
-			name: string
-		}[]
-	>
-	orgTimeEntriesPromise: Promise<
-		SerializableResult<TimeEntry[], { reason: string }>
-	>
-	selectedUserIdPromise?: Promise<string | undefined>
-	selectedWeekPromise?: Promise<string | undefined>
-	selectedMonthPromise?: Promise<string | undefined>
-	selectedYearPromise?: Promise<string | undefined>
-	timeframePromise?: Promise<string | undefined>
-	startDatePromise?: Promise<string | undefined>
-	endDatePromise?: Promise<string | undefined>
-	currentUserId?: string | null | undefined
-}
 
 export default function ViewHours({
 	entries,
@@ -52,9 +26,10 @@ export default function ViewHours({
 	timeframePromise,
 	startDatePromise,
 	endDatePromise,
-	currentUserId,
+	currentUserIdPromise,
 }: ViewHoursProps) {
 	const { user } = useUser()
+	const currentUserId = use(currentUserIdPromise || Promise.resolve(''))
 	const members = use(membersPromise || Promise.resolve([]))
 	const selectedUserId = use(selectedUserIdPromise || Promise.resolve(''))
 	const orgTimeEntriesResult = use(orgTimeEntriesPromise)

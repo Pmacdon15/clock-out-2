@@ -14,45 +14,38 @@ export function DaysWorkedBreakdown({
 	entries,
 	isViewingAll = false,
 }: DaysWorkedBreakdownProps) {
-	const daysData = useMemo(() => {
+	const daysData = useMemo(() => {		
 		const uniqueMemberDays = new Set<string>()
-
-		entries.forEach((e) => {
-			const d = new Date(e.clock_in)
-			const year = d.getFullYear()
-			const month = String(d.getMonth() + 1).padStart(2, '0')
-			const date = String(d.getDate()).padStart(2, '0')
-			const dateStr = `${year}-${month}-${date}`
-
-			const key = isViewingAll ? `${e.user_id}:${dateStr}` : dateStr
-			uniqueMemberDays.add(key)
-		})
-
 		const counts: Record<number, number> = {
-			1: 0, // Monday
-			2: 0, // Tuesday
-			3: 0, // Wednesday
-			4: 0, // Thursday
-			5: 0, // Friday
-			6: 0, // Saturday
-			0: 0, // Sunday
+			0: 0,
+			1: 0,
+			2: 0,
+			3: 0,
+			4: 0,
+			5: 0,
+			6: 0,
 		}
 
-		uniqueMemberDays.forEach((key) => {
-			const datePart = isViewingAll ? key.split(':')[1] : key
-			const [y, m, d] = datePart.split('-').map(Number)
-			const dayOfWeek = new Date(y, m - 1, d).getDay()
-			counts[dayOfWeek] = (counts[dayOfWeek] || 0) + 1
-		})
+		for (let i = 0; i < entries.length; i++) {
+			const e = entries[i]
+			const d = new Date(e.clock_in)			
+			const dateKey = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
+			const uniqueKey = isViewingAll ? `${e.user_id}:${dateKey}` : dateKey
+
+			if (!uniqueMemberDays.has(uniqueKey)) {
+				uniqueMemberDays.add(uniqueKey)				
+				counts[d.getDay()]++
+			}
+		}
 
 		return [
-			{ label: 'Monday', shortLabel: 'Mon', count: counts[1] || 0 },
-			{ label: 'Tuesday', shortLabel: 'Tue', count: counts[2] || 0 },
-			{ label: 'Wednesday', shortLabel: 'Wed', count: counts[3] || 0 },
-			{ label: 'Thursday', shortLabel: 'Thu', count: counts[4] || 0 },
-			{ label: 'Friday', shortLabel: 'Fri', count: counts[5] || 0 },
-			{ label: 'Saturday', shortLabel: 'Sat', count: counts[6] || 0 },
-			{ label: 'Sunday', shortLabel: 'Sun', count: counts[0] || 0 },
+			{ label: 'Monday', shortLabel: 'Mon', count: counts[1] },
+			{ label: 'Tuesday', shortLabel: 'Tue', count: counts[2] },
+			{ label: 'Wednesday', shortLabel: 'Wed', count: counts[3] },
+			{ label: 'Thursday', shortLabel: 'Thu', count: counts[4] },
+			{ label: 'Friday', shortLabel: 'Fri', count: counts[5] },
+			{ label: 'Saturday', shortLabel: 'Sat', count: counts[6] },
+			{ label: 'Sunday', shortLabel: 'Sun', count: counts[0] },
 		]
 	}, [entries, isViewingAll])
 
@@ -106,7 +99,8 @@ export function DaysWorkedBreakdown({
 								/>
 							</div>
 							<span className="w-14 text-right font-bold text-xs text-zinc-900 tabular-nums dark:text-zinc-100">
-								{day.count} {day.count === 1 ? 'day' : 'days'}
+								{day.count}{' '}
+								{day.count === 1 ? 'shift' : 'shifts'}
 							</span>
 						</div>
 					)
