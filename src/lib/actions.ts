@@ -1,116 +1,116 @@
-'use server'
+"use server";
 
-import { auth } from '@clerk/nextjs/server'
-import { startOfDay, subDays } from 'date-fns'
-import { updateTag } from 'next/cache'
+import { auth } from "@clerk/nextjs/server";
+import { startOfDay, subDays } from "date-fns";
+import { updateTag } from "next/cache";
 import {
-	clockIn as dalClockIn,
-	clockOut as dalClockOut,
-	deleteTimeEntry as dalDeleteTimeEntry,
-	updateTimeEntry as dalUpdateTimeEntry,
-	updateReportingSettingsDal,
-} from './dal'
-import { sendWeeklyReports } from './reports'
+  clockIn as dalClockIn,
+  clockOut as dalClockOut,
+  deleteTimeEntry as dalDeleteTimeEntry,
+  updateTimeEntry as dalUpdateTimeEntry,
+  updateReportingSettingsDal,
+} from "./dal";
+import { sendWeeklyReports } from "./reports";
 
 export async function clockInAction() {
-	const result = await dalClockIn()
+  const result = await dalClockIn();
 
-	return result.match(
-		(entry) => {
-			updateTag(`time-entries-${entry.user_id}-${entry.org_id}`)
-			return { success: true, data: entry }
-		},
-		(err) => {
-			return { success: false, error: err.reason }
-		},
-	)
+  return result.match(
+    (entry) => {
+      updateTag(`time-entries-${entry.user_id}-${entry.org_id}`);
+      return { success: true, data: entry };
+    },
+    (err) => {
+      return { success: false, error: err.reason };
+    },
+  );
 }
 
 export async function clockOutAction() {
-	const result = await dalClockOut()
+  const result = await dalClockOut();
 
-	return result.match(
-		(entry) => {
-			updateTag(`time-entries-${entry.user_id}-${entry.org_id}`)
-			updateTag(`org-time-entries-${entry.org_id}`)
-			return { success: true, data: entry }
-		},
-		(err) => {
-			return { success: false, error: err.reason }
-		},
-	)
+  return result.match(
+    (entry) => {
+      updateTag(`time-entries-${entry.user_id}-${entry.org_id}`);
+      updateTag(`org-time-entries-${entry.org_id}`);
+      return { success: true, data: entry };
+    },
+    (err) => {
+      return { success: false, error: err.reason };
+    },
+  );
 }
 
 export async function deleteTimeEntryAction(id: number) {
-	const result = await dalDeleteTimeEntry(id)
+  const result = await dalDeleteTimeEntry(id);
 
-	return result.match(
-		(entry) => {
-			updateTag(`time-entries-${entry.user_id}-${entry.org_id}`)
-			updateTag(`org-time-entries-${entry.org_id}`)
-			return { success: true }
-		},
-		(err) => {
-			return { success: false, error: err.reason }
-		},
-	)
+  return result.match(
+    (entry) => {
+      updateTag(`time-entries-${entry.user_id}-${entry.org_id}`);
+      updateTag(`org-time-entries-${entry.org_id}`);
+      return { success: true };
+    },
+    (err) => {
+      return { success: false, error: err.reason };
+    },
+  );
 }
 
 export async function updateTimeEntryAction(
-	id: number,
-	clock_in: string,
-	clock_out: string | null,
+  id: number,
+  clock_in: string,
+  clock_out: string | null,
 ) {
-	const result = await dalUpdateTimeEntry(
-		id,
-		new Date(clock_in),
-		clock_out ? new Date(clock_out) : null,
-	)
+  const result = await dalUpdateTimeEntry(
+    id,
+    new Date(clock_in),
+    clock_out ? new Date(clock_out) : null,
+  );
 
-	return result.match(
-		(entry) => {
-			updateTag(`time-entries-${entry.user_id}-${entry.org_id}`)
-			updateTag(`org-time-entries-${entry.org_id}`)
-			return { success: true, data: entry }
-		},
-		(err) => {
-			return { success: false, error: err.reason }
-		},
-	)
+  return result.match(
+    (entry) => {
+      updateTag(`time-entries-${entry.user_id}-${entry.org_id}`);
+      updateTag(`org-time-entries-${entry.org_id}`);
+      return { success: true, data: entry };
+    },
+    (err) => {
+      return { success: false, error: err.reason };
+    },
+  );
 }
 
 export async function sendCurrentWeekReportAction() {
-	const { userId, orgId, orgRole } = await auth.protect()
-	if (!userId || !orgId) {
-		return { success: false, error: 'Unauthorized' }
-	}
-	const isAdmin = orgRole === 'org:admin'
-	if (!isAdmin) {
-		return { success: false, error: 'Only admins can test reports' }
-	}
+  const { userId, orgId, orgRole } = await auth.protect();
+  if (!userId || !orgId) {
+    return { success: false, error: "Unauthorized" };
+  }
+  const isAdmin = orgRole === "org:admin";
+  if (!isAdmin) {
+    return { success: false, error: "Only admins can test reports" };
+  }
 
-	const endDate = new Date()
-	const startDate = startOfDay(subDays(endDate, 7))
+  const endDate = new Date();
+  const startDate = startOfDay(subDays(endDate, 7));
 
-	await sendWeeklyReports(startDate, endDate, orgId)
-	return { success: true }
+  await sendWeeklyReports(startDate, endDate, orgId);
+  return { success: true };
 }
 
 export async function updateOrgSettingAction(
-	frequency: string,
-	day: string | null = null,
-	interval: number = 1,
+  frequency: string,
+  day: string | null = null,
+  interval: number = 1,
 ) {
-	const result = await updateReportingSettingsDal(frequency, day, interval)
+  const result = await updateReportingSettingsDal(frequency, day, interval);
 
-	return result.match(
-		(entry) => {
-			// updateTag(`settings-${entry.org_id}`)
-			updateTag(`reporting-settings-${entry.org_id}`)
-			return { success: true, data: entry }
-		},
-		(err) => {
-			return { success: false, error: err.reason }
-		},
-	)
+  return result.match(
+    (entry) => {
+      // updateTag(`settings-${entry.org_id}`)
+      updateTag(`reporting-settings-${entry.org_id}`);
+      return { success: true, data: entry };
+    },
+    (err) => {
+      return { success: false, error: err.reason };
+    },
+  );
 }

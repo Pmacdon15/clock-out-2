@@ -1,297 +1,289 @@
-import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses'
-import { clerkClient } from '@clerk/nextjs/server'
-import { render } from '@react-email/render'
-import { format, subDays } from 'date-fns'
-import { WeeklyReportEmail } from '@/components/emails/WeeklyReportEmail'
-import { dbGetTimeEntriesForPeriod } from './db'
+import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
+import { clerkClient } from "@clerk/nextjs/server";
+import { render } from "@react-email/render";
+import { format, subDays } from "date-fns";
+import { WeeklyReportEmail } from "@/components/emails/WeeklyReportEmail";
+import { dbGetTimeEntriesForPeriod } from "./db";
 
 const sesClient = new SESClient({
-	region: process.env.AWS_REGION || 'us-east-1',
-})
+  region: process.env.AWS_REGION || "us-east-1",
+});
 
 function formatDuration(ms: number) {
-	const totalMinutes = Math.floor(ms / (1000 * 60))
-	const hours = Math.floor(totalMinutes / 60)
-	const minutes = totalMinutes % 60
-	if (hours > 0) return `${hours}h ${minutes}m`
-	return `${minutes}m`
+  const totalMinutes = Math.floor(ms / (1000 * 60));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
 }
 
 export async function sendWeeklyReports(
-	startDate: Date,
-	endDate: Date,
-	targetOrgId?: string,
-	timeframe: string = 'week',
+  startDate: Date,
+  endDate: Date,
+  targetOrgId?: string,
+  timeframe: string = "week",
 ) {
-	const hasAwsCreds =
-		process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY
-	if (!hasAwsCreds) {
-		console.warn('AWS credentials are not defined. Skipping email sending.')
-		return false
-	}
+  const hasAwsCreds =
+    process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY;
+  if (!hasAwsCreds) {
+    console.warn("AWS credentials are not defined. Skipping email sending.");
+    return false;
+  }
 
-	const client = await clerkClient()
+  const client = await clerkClient();
 
-	let allOrgs = []
-	if (targetOrgId) {
-		const org = await client.organizations.getOrganization({
-			organizationId: targetOrgId,
-		})
-		allOrgs = [org]
-	} else {
-		// Fetch all organizations in the instance
-		const orgsResult = await client.organizations.getOrganizationList({
-			limit: 100,
-		})
-		allOrgs = orgsResult.data
-	}
+  let allOrgs = [];
+  if (targetOrgId) {
+    const org = await client.organizations.getOrganization({
+      organizationId: targetOrgId,
+    });
+    allOrgs = [org];
+  } else {
+    // Fetch all organizations in the instance
+    const orgsResult = await client.organizations.getOrganizationList({
+      limit: 100,
+    });
+    allOrgs = orgsResult.data;
+  }
 
-	console.log(`[Reports] Found ${allOrgs.length} organizations to process.`)
+  console.log(`[Reports] Found ${allOrgs.length} organizations to process.`);
 
-	// Process each organization
-	for (const org of allOrgs) {
-		const orgId = org.id
+  // Process each organization
+  for (const org of allOrgs) {
+    const orgId = org.id;
 
-		// Check for reporting feature in subscriptions
-		let hasReportingFeature = false
-		try {
-			const subscription =
-				await client.billing.getOrganizationBillingSubscription(orgId)
-			hasReportingFeature = subscription.subscriptionItems.some(
-				(item: any) =>
-					item.plan?.features?.some(
-						(f: any) => f.slug === 'reporting',
-					),
-			)
-		} catch (_error) {
-			// If no billing or error, assume no feature
-			console.log(
-				`[Reports] No billing/subscription for ${org.name} (${orgId})`,
-			)
-		}
+    // Check for reporting feature in subscriptions
+    let hasReportingFeature = false;
+    try {
+      const subscription =
+        await client.billing.getOrganizationBillingSubscription(orgId);
+      hasReportingFeature = subscription.subscriptionItems.some((item: any) =>
+        item.plan?.features?.some((f: any) => f.slug === "reporting"),
+      );
+    } catch (_error) {
+      // If no billing or error, assume no feature
+      console.log(
+        `[Reports] No billing/subscription for ${org.name} (${orgId})`,
+      );
+    }
 
-		if (!hasReportingFeature) {
-			console.log(
-				`[Reports] Organization ${org.name} (${orgId}) does not have the 'reporting' feature. Skipping reports.`,
-			)
-			continue
-		}
+    if (!hasReportingFeature) {
+      console.log(
+        `[Reports] Organization ${org.name} (${orgId}) does not have the 'reporting' feature. Skipping reports.`,
+      );
+      continue;
+    }
 
-		console.log(`[Reports] Processing Organization: ${org.name} (${orgId})`)
+    console.log(`[Reports] Processing Organization: ${org.name} (${orgId})`);
 
-		// Get members of this org
-		const membersData =
-			await client.organizations.getOrganizationMembershipList({
-				organizationId: orgId,
-				limit: 100,
-			})
-		const members = membersData.data
-		console.log(
-			`[Reports] Found ${members.length} members in organization ${org.name}.`,
-		)
+    // Get members of this org
+    const membersData =
+      await client.organizations.getOrganizationMembershipList({
+        organizationId: orgId,
+        limit: 100,
+      });
+    const members = membersData.data;
+    console.log(
+      `[Reports] Found ${members.length} members in organization ${org.name}.`,
+    );
 
-		// Find admins to send emails to
-		const adminEmails = members
-			.filter((m) => {
-				const isAdmin = m.role === 'org:admin'
-				const hasEmail = !!m.publicUserData?.identifier
-				return isAdmin && hasEmail
-			})
-			.map((m) => m.publicUserData?.identifier as string)
+    // Find admins to send emails to
+    const adminEmails = members
+      .filter((m) => {
+        const isAdmin = m.role === "org:admin";
+        const hasEmail = !!m.publicUserData?.identifier;
+        return isAdmin && hasEmail;
+      })
+      .map((m) => m.publicUserData?.identifier as string);
 
-		console.log(`[Reports] Admin emails found:`, adminEmails)
+    console.log(`[Reports] Admin emails found:`, adminEmails);
 
-		if (adminEmails.length === 0) {
-			console.log(
-				`[Reports] No admins found for organization ${org.name}. Skipping.`,
-			)
-			continue
-		}
+    if (adminEmails.length === 0) {
+      console.log(
+        `[Reports] No admins found for organization ${org.name}. Skipping.`,
+      );
+      continue;
+    }
 
-		// Generate report for each member, even non-admins
-		for (const member of members) {
-			const publicUserData = member.publicUserData
-			const userId = publicUserData?.userId
-			if (!userId) continue
+    // Generate report for each member, even non-admins
+    for (const member of members) {
+      const publicUserData = member.publicUserData;
+      const userId = publicUserData?.userId;
+      if (!userId) continue;
 
-			const userName = publicUserData.firstName
-				? `${publicUserData.firstName} ${publicUserData.lastName || ''}`.trim()
-				: publicUserData.identifier
+      const userName = publicUserData.firstName
+        ? `${publicUserData.firstName} ${publicUserData.lastName || ""}`.trim()
+        : publicUserData.identifier;
 
-			console.log(
-				`[Reports] Fetching entries for member: ${userName} (${userId})`,
-			)
+      console.log(
+        `[Reports] Fetching entries for member: ${userName} (${userId})`,
+      );
 
-			const entries = await dbGetTimeEntriesForPeriod(
-				userId,
-				orgId,
-				startDate,
-				endDate,
-			)
+      const entries = await dbGetTimeEntriesForPeriod(
+        userId,
+        orgId,
+        startDate,
+        endDate,
+      );
 
-			let totalMs = 0
-			const dailyBreakdownMap = new Map<
-				string,
-				{
-					date: string
-					rawMs: number
-					shifts: { start: string; end: string; duration: string }[]
-				}
-			>()
+      let totalMs = 0;
+      const dailyBreakdownMap = new Map<
+        string,
+        {
+          date: string;
+          rawMs: number;
+          shifts: { start: string; end: string; duration: string }[];
+        }
+      >();
 
-			for (const entry of entries) {
-				if (!entry.clock_out) continue // Skip incomplete entries
+      for (const entry of entries) {
+        if (!entry.clock_out) continue; // Skip incomplete entries
 
-				const inDate = new Date(entry.clock_in)
-				const outDate = new Date(entry.clock_out)
-				const durationMs = outDate.getTime() - inDate.getTime()
+        const inDate = new Date(entry.clock_in);
+        const outDate = new Date(entry.clock_out);
+        const durationMs = outDate.getTime() - inDate.getTime();
 
-				totalMs += durationMs
+        totalMs += durationMs;
 
-				const dateKey = format(inDate, 'MMM d, yyyy')
-				if (!dailyBreakdownMap.has(dateKey)) {
-					dailyBreakdownMap.set(dateKey, {
-						date: dateKey,
-						rawMs: 0,
-						shifts: [],
-					})
-				}
+        const dateKey = format(inDate, "MMM d, yyyy");
+        if (!dailyBreakdownMap.has(dateKey)) {
+          dailyBreakdownMap.set(dateKey, {
+            date: dateKey,
+            rawMs: 0,
+            shifts: [],
+          });
+        }
 
-				const dayData = dailyBreakdownMap.get(dateKey)
-				if (dayData) {
-					dayData.rawMs += durationMs
-					dayData.shifts.push({
-						start: format(inDate, 'h:mm a'),
-						end: format(outDate, 'h:mm a'),
-						duration: formatDuration(durationMs),
-					})
-				}
-			}
+        const dayData = dailyBreakdownMap.get(dateKey);
+        if (dayData) {
+          dayData.rawMs += durationMs;
+          dayData.shifts.push({
+            start: format(inDate, "h:mm a"),
+            end: format(outDate, "h:mm a"),
+            duration: formatDuration(durationMs),
+          });
+        }
+      }
 
-			console.log(
-				`[Reports] Member ${userName} has ${entries.length} entries for this period.`,
-			)
+      console.log(
+        `[Reports] Member ${userName} has ${entries.length} entries for this period.`,
+      );
 
-			// Convert breakdown map to array
-			const breakdown = Array.from(dailyBreakdownMap.values())
+      // Convert breakdown map to array
+      const breakdown = Array.from(dailyBreakdownMap.values());
 
-			const totalHoursString = formatDuration(totalMs)
+      const totalHoursString = formatDuration(totalMs);
 
-			// Generate Chart URL
-			const chartConfig = {
-				type: 'bar',
-				data: {
-					labels: breakdown.map((b) => b.date.split(',')[0]), // "Apr 5"
-					datasets: [
-						{
-							label: 'Hours Logged',
-							data: breakdown.map((b) =>
-								parseFloat(
-									(b.rawMs / (1000 * 60 * 60)).toFixed(2),
-								),
-							),
-							backgroundColor: 'rgba(59, 130, 246, 0.7)',
-						},
-					],
-				},
-				options: {
-					plugins: { legend: { display: false } },
-					scales: {
-						yAxes: [{ ticks: { beginAtZero: true, min: 0 } }], // v2
-						y: { beginAtZero: true, min: 0 }, // v3
-					},
-				},
-			}
-			const chartUrl = `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(chartConfig))}&w=500&h=300`
+      // Generate Chart URL
+      const chartConfig = {
+        type: "bar",
+        data: {
+          labels: breakdown.map((b) => b.date.split(",")[0]), // "Apr 5"
+          datasets: [
+            {
+              label: "Hours Logged",
+              data: breakdown.map((b) =>
+                parseFloat((b.rawMs / (1000 * 60 * 60)).toFixed(2)),
+              ),
+              backgroundColor: "rgba(59, 130, 246, 0.7)",
+            },
+          ],
+        },
+        options: {
+          plugins: { legend: { display: false } },
+          scales: {
+            yAxes: [{ ticks: { beginAtZero: true, min: 0 } }], // v2
+            y: { beginAtZero: true, min: 0 }, // v3
+          },
+        },
+      };
+      const chartUrl = `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(chartConfig))}&w=500&h=300`;
 
-			// If endDate is exactly at start of day, the inclusive end date is the previous day.
-			// Otherwise, it is today.
-			const isStartOfDay =
-				endDate.getHours() === 0 &&
-				endDate.getMinutes() === 0 &&
-				endDate.getSeconds() === 0 &&
-				endDate.getMilliseconds() === 0
-			const inclusiveEndDate = isStartOfDay
-				? subDays(endDate, 1)
-				: endDate
+      // If endDate is exactly at start of day, the inclusive end date is the previous day.
+      // Otherwise, it is today.
+      const isStartOfDay =
+        endDate.getHours() === 0 &&
+        endDate.getMinutes() === 0 &&
+        endDate.getSeconds() === 0 &&
+        endDate.getMilliseconds() === 0;
+      const inclusiveEndDate = isStartOfDay ? subDays(endDate, 1) : endDate;
 
-			// Render React Email
-			const periodStartStr = format(startDate, 'MMM d, yyyy')
-			const periodEndStr = format(inclusiveEndDate, 'MMM d, yyyy')
+      // Render React Email
+      const periodStartStr = format(startDate, "MMM d, yyyy");
+      const periodEndStr = format(inclusiveEndDate, "MMM d, yyyy");
 
-			const customStart = format(startDate, 'yyyy-MM-dd')
-			const customEnd = format(inclusiveEndDate, 'yyyy-MM-dd')
+      const customStart = format(startDate, "yyyy-MM-dd");
+      const customEnd = format(inclusiveEndDate, "yyyy-MM-dd");
 
-			// Map startDate to the 1-4 week indexing used in ViewHours UI
-			const dayOfMonth = startDate.getDate()
-			let weekIndex = 1
-			if (dayOfMonth >= 22) weekIndex = 4
-			else if (dayOfMonth >= 15) weekIndex = 3
-			else if (dayOfMonth >= 8) weekIndex = 2
+      // Map startDate to the 1-4 week indexing used in ViewHours UI
+      const dayOfMonth = startDate.getDate();
+      let weekIndex = 1;
+      if (dayOfMonth >= 22) weekIndex = 4;
+      else if (dayOfMonth >= 15) weekIndex = 3;
+      else if (dayOfMonth >= 8) weekIndex = 2;
 
-			if (entries.length > 0) {
-				console.log(
-					`[Reports] Sending email for ${userName} to admins: ${adminEmails.join(', ')}`,
-				)
-				try {
-					const emailHtml = await render(
-						WeeklyReportEmail({
-							userName,
-							totalHours: totalHoursString,
-							periodStart: periodStartStr,
-							periodEnd: periodEndStr,
-							chartUrl,
-							dashboardUrl:
-								process.env.NEXT_PUBLIC_APP_URL ||
-								'https://clockout.patmac.ca',
-							userId: userId,
-							orgId: orgId,
-							week: weekIndex.toString(),
-							month: startDate.getMonth().toString(),
-							year: startDate.getFullYear().toString(),
-							timeframe,
-							customStart,
-							customEnd,
-							breakdown: breakdown,
-						}),
-					)
+      if (entries.length > 0) {
+        console.log(
+          `[Reports] Sending email for ${userName} to admins: ${adminEmails.join(", ")}`,
+        );
+        try {
+          const emailHtml = await render(
+            WeeklyReportEmail({
+              userName,
+              totalHours: totalHoursString,
+              periodStart: periodStartStr,
+              periodEnd: periodEndStr,
+              chartUrl,
+              dashboardUrl:
+                process.env.NEXT_PUBLIC_APP_URL || "https://clockout.patmac.ca",
+              userId: userId,
+              orgId: orgId,
+              week: weekIndex.toString(),
+              month: startDate.getMonth().toString(),
+              year: startDate.getFullYear().toString(),
+              timeframe,
+              customStart,
+              customEnd,
+              breakdown: breakdown,
+            }),
+          );
 
-					const command = new SendEmailCommand({
-						Destination: {
-							ToAddresses: adminEmails,
-						},
-						Message: {
-							Body: {
-								Html: {
-									Charset: 'UTF-8',
-									Data: emailHtml,
-								},
-							},
-							Subject: {
-								Charset: 'UTF-8',
-								Data: `Weekly Hours Report for ${userName}`,
-							},
-						},
-						Source:
-							process.env.SES_FROM_EMAIL ||
-							'Clock Out <no-reply@clockout.patmac.ca>',
-					})
+          const command = new SendEmailCommand({
+            Destination: {
+              ToAddresses: adminEmails,
+            },
+            Message: {
+              Body: {
+                Html: {
+                  Charset: "UTF-8",
+                  Data: emailHtml,
+                },
+              },
+              Subject: {
+                Charset: "UTF-8",
+                Data: `Weekly Hours Report for ${userName}`,
+              },
+            },
+            Source:
+              process.env.SES_FROM_EMAIL ||
+              "Clock Out <no-reply@clockout.patmac.ca>",
+          });
 
-					const data = await sesClient.send(command)
-					console.log(`[Reports] SES Success for ${userName}:`, data)
-				} catch (error) {
-					console.error(
-						`[Reports] Catch Error sending email for ${userName}:`,
-						error,
-					)
-				}
-			} else {
-				console.log(
-					`[Reports] No completed entries for ${userName}. Skipping email.`,
-				)
-			}
-		}
-	}
+          const data = await sesClient.send(command);
+          console.log(`[Reports] SES Success for ${userName}:`, data);
+        } catch (error) {
+          console.error(
+            `[Reports] Catch Error sending email for ${userName}:`,
+            error,
+          );
+        }
+      } else {
+        console.log(
+          `[Reports] No completed entries for ${userName}. Skipping email.`,
+        );
+      }
+    }
+  }
 
-	return true
+  return true;
 }

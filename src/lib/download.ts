@@ -1,4 +1,4 @@
-import { toPng } from 'html-to-image'
+import { toPng } from "html-to-image";
 
 /**
  * Captures an element as an image and downloads it.
@@ -6,25 +6,25 @@ import { toPng } from 'html-to-image'
  * (e.g. desktop size, hidden from user if needed).
  */
 export async function downloadElementAsImage(
-	element: HTMLElement,
-	fileName: string,
+  element: HTMLElement,
+  fileName: string,
 ) {
-	const bgColor = '#ffffff'
+  const bgColor = "#ffffff";
 
-	try {
-		// Wait a tiny bit to ensure Recharts has layouted if it was just rendered
-		await new Promise((resolve) => setTimeout(resolve, 100))
+  try {
+    // Wait a tiny bit to ensure Recharts has layouted if it was just rendered
+    await new Promise((resolve) => setTimeout(resolve, 100));
 
-		const dataUrl = await toPng(element, {
-			backgroundColor: bgColor,
-			pixelRatio: 3,
-		})
+    const dataUrl = await toPng(element, {
+      backgroundColor: bgColor,
+      pixelRatio: 3,
+    });
 
-		const link = document.createElement('a')
-		link.download = `${fileName}.png`
-		link.href = dataUrl
-		link.click()
-	} catch (error) {
-		console.error('Error downloading graph:', error)
-	}
+    const link = document.createElement("a");
+    link.download = `${fileName}.png`;
+    link.href = dataUrl;
+    link.click();
+  } catch (error) {
+    console.error("Error downloading graph:", error);
+  }
 }

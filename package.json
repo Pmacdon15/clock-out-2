@@ -1,54 +1,54 @@
 {
-	"name": "clock-out",
-	"version": "0.1.0",
-	"private": true,
-	"scripts": {
-		"dev": "next dev",
-		"build": "next build",
-		"start": "next start",
-		"lint": "biome check --write --unsafe",
-		"format": "biome format --write",
-		"postbuild": "next-sitemap"
-	},
-	"dependencies": {
-		"@aws-sdk/client-ses": "^3.1088.0",
-		"@clerk/nextjs": "^7.5.19",
-		"@clerk/ui": "^1.25.4",
-		"@neondatabase/serverless": "^1.1.0",
-		"@radix-ui/react-alert-dialog": "^1.1.19",
-		"@react-email/components": "^1.0.12",
-		"@react-email/render": "^2.1.0",
-		"@tanstack/react-query": "^5.101.2",
-		"@vercel/analytics": "^2.0.1",
-		"clsx": "^2.1.1",
-		"date-fns": "^4.4.0",
-		"html-to-image": "^1.11.13",
-		"lucide-react": "^1.24.0",
-		"neverthrow": "^8.2.0",
-		"next": "^16.2.10",
-		"next-sitemap": "^4.2.3",
-		"react": "19.2.7",
-		"react-dom": "19.2.7",
-		"recharts": "^3.9.2",
-		"sonner": "^2.0.7",
-		"tailwind-merge": "^3.6.0"
-	},
-	"devDependencies": {
-		"@biomejs/biome": "^2.5.4",
-		"@tailwindcss/postcss": "^4.3.2",
-		"@types/node": "^26.1.1",
-		"@types/react": "^19.2.17",
-		"@types/react-dom": "^19.2.3",
-		"babel-plugin-react-compiler": "1.0.0",
-		"tailwindcss": "^4.3.2",
-		"typescript": "^6.0.3"
-	},
-	"ignoreScripts": [
-		"sharp",
-		"unrs-resolver"
-	],
-	"trustedDependencies": [
-		"sharp",
-		"unrs-resolver"
-	]
+  "name": "clock-out",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "biome check --write --unsafe",
+    "format": "biome format --write",
+    "postbuild": "next-sitemap"
+  },
+  "dependencies": {
+    "@aws-sdk/client-ses": "^3.1088.0",
+    "@clerk/nextjs": "^7.5.19",
+    "@clerk/ui": "^1.25.4",
+    "@neondatabase/serverless": "^1.1.0",
+    "@radix-ui/react-alert-dialog": "^1.1.19",
+    "@react-email/components": "^1.0.12",
+    "@react-email/render": "^2.1.0",
+    "@tanstack/react-query": "^5.101.2",
+    "@vercel/analytics": "^2.0.1",
+    "clsx": "^2.1.1",
+    "date-fns": "^4.4.0",
+    "html-to-image": "^1.11.13",
+    "lucide-react": "^1.24.0",
+    "neverthrow": "^8.2.0",
+    "next": "^16.2.10",
+    "next-sitemap": "^4.2.3",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "recharts": "^3.9.2",
+    "sonner": "^2.0.7",
+    "tailwind-merge": "^3.6.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.4",
+    "@tailwindcss/postcss": "^4.3.2",
+    "@types/node": "^26.1.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "babel-plugin-react-compiler": "1.0.0",
+    "tailwindcss": "^4.3.2",
+    "typescript": "^6.0.3"
+  },
+  "ignoreScripts": [
+    "sharp",
+    "unrs-resolver"
+  ],
+  "trustedDependencies": [
+    "sharp",
+    "unrs-resolver"
+  ]
 }
