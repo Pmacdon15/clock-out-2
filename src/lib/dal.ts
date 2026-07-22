@@ -25,7 +25,7 @@ import type {
   SerializableResult,
   TimeEntry,
 } from "./types";
-import { isOverMemberShipLimit } from "./utils-clerk";
+import { getProcessedMembers, isOverMemberShipLimit } from "./utils-clerk";
 
 export type { SerializableResult, TimeEntry };
 
@@ -93,14 +93,13 @@ return clerkClient()
             organizationId: orgId,
         })
     )
-    .then((response) => JSON.parse(JSON.stringify(response.data)))
+    .then((response) => getProcessedMembers(orgId,JSON.parse(JSON.stringify(response.data))))
     .catch((error) => {
         console.error('Error fetching members:', error)
         return []
     })
   
 }
-
 export async function getTimeEntries(
   targetUserId?: string,
   filters?: {
