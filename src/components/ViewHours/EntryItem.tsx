@@ -16,12 +16,14 @@ interface EntryItemProps {
 		type: 'ADD' | 'REMOVE' | 'UPDATE'
 		payload: any
 	}) => void
+	memberName?: string
 }
 
 export function EntryItem({
 	entry,
 	isAdmin,
 	setOptimisticEntries,
+	memberName,
 }: EntryItemProps) {
 	const [isEditing, setIsEditing] = useState(false)
 	const [editClockIn, setEditClockIn] = useState(
@@ -166,12 +168,19 @@ export function EntryItem({
 					)}
 				</div>
 			</div>
-			<div className="flex items-center gap-1.5 font-medium text-muted-foreground text-xs">
+			<div className="flex items-center flex-wrap gap-1.5 font-medium text-muted-foreground text-xs">
 				<Calendar className="h-3 w-3" />
-				{format(new Date(entry.clock_in), 'hh:mm a')} -{' '}
-				{entry.clock_out
-					? format(new Date(entry.clock_out), 'hh:mm a')
-					: '...'}
+				<span>
+					{format(new Date(entry.clock_in), 'hh:mm a')} -{' '}
+					{entry.clock_out
+						? format(new Date(entry.clock_out), 'hh:mm a')
+						: '...'}
+				</span>
+				{memberName && (
+					<span className="ml-1.5 rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-bold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+						{memberName}
+					</span>
+				)}
 			</div>
 		</div>
 	)

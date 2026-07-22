@@ -3,11 +3,11 @@
 import { useUser } from '@clerk/nextjs'
 import { use, useMemo, useState } from 'react'
 import type { SerializableResult, TimeEntry } from '@/lib/dal'
-import { MemberToggles } from './OrgStats/MemberToggles'
-import { OrgHoursChart } from './OrgStats/OrgHoursChart'
 import { DaysWorkedBreakdown } from './ViewHours/DaysWorkedBreakdown'
 import { EntryList } from './ViewHours/EntryList'
-import { HoursChart } from './ViewHours/HoursChart'
+import { HoursBarChart } from './ViewHours/HoursBarChart'
+import { HoursLineChart } from './ViewHours/HoursLineChart'
+import { MemberToggles } from './ViewHours/MemberToggles'
 import {
 	TimeframeSelector,
 	type TimeframeValue,
@@ -203,7 +203,7 @@ export default function ViewHours({
 			<div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
 				<div className="lg:col-span-3">
 					{chartType === 'bar' ? (
-						<HoursChart
+						<HoursBarChart
 							employeeName={employeeName}
 							filteredEntries={displayEntries}
 							isViewingAll={isViewingAll}
@@ -216,8 +216,10 @@ export default function ViewHours({
 							visibleMemberIds={visibleMemberIds}
 						/>
 					) : (
-						<OrgHoursChart
+						<HoursLineChart
+							employeeName={employeeName}
 							filteredEntries={displayEntries}
+							isViewingAll={isViewingAll}
 							members={lineChartMembers}
 							selectedMonth={selectedMonth}
 							selectedWeek={selectedWeek}
@@ -244,6 +246,8 @@ export default function ViewHours({
 					<EntryList
 						entries={displayEntries}
 						isAdmin={isAdmin}
+						isViewingAll={isViewingAll}
+						members={members}
 						setOptimisticEntries={setOptimisticEntries}
 					/>
 				</div>

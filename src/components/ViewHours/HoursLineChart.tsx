@@ -18,7 +18,7 @@ import type { TimeEntry } from '@/lib/dal'
 import { downloadElementAsImage } from '@/lib/download'
 import { Button, Card } from '../ui'
 
-interface OrgHoursChartProps {
+interface HoursLineChartProps {
 	filteredEntries: TimeEntry[]
 	members: { id: string; name: string }[]
 	visibleMemberIds: Set<string>
@@ -26,6 +26,8 @@ interface OrgHoursChartProps {
 	selectedYear?: number
 	selectedMonth?: number
 	selectedWeek?: number
+	isViewingAll?: boolean
+	employeeName?: string
 }
 
 export const COLORS = [
@@ -41,7 +43,7 @@ export const COLORS = [
 	'#10b981', // emerald-500
 ]
 
-export function OrgHoursChart(props: OrgHoursChartProps) {
+export function HoursLineChart(props: HoursLineChartProps) {
 	const { timeframe, selectedYear, selectedMonth, selectedWeek } = props
 	const { has } = useAuth()
 	const downloadRef = useRef<HTMLDivElement>(null)
@@ -83,7 +85,7 @@ export function OrgHoursChart(props: OrgHoursChartProps) {
 		<>
 			{/* On-screen version matches the bar graph style */}
 			<Card className="p-6">
-				<OrgHoursChartContent
+				<HoursLineChartContent
 					{...props}
 					isDownloading={isDownloading}
 					onDownload={canDownload ? handleDownload : undefined}
@@ -106,7 +108,7 @@ export function OrgHoursChart(props: OrgHoursChartProps) {
 						className="rounded-xl border border-zinc-200 bg-white p-12 text-zinc-950"
 						ref={downloadRef}
 					>
-						<OrgHoursChartContent
+						<HoursLineChartContent
 							{...props}
 							isDownloadMode
 							summaryText={summaryText}
@@ -118,7 +120,7 @@ export function OrgHoursChart(props: OrgHoursChartProps) {
 	)
 }
 
-function OrgHoursChartContent({
+function HoursLineChartContent({
 	filteredEntries,
 	members,
 	visibleMemberIds,
@@ -126,7 +128,9 @@ function OrgHoursChartContent({
 	isDownloading,
 	isDownloadMode = false,
 	summaryText,
-}: OrgHoursChartProps & {
+	isViewingAll = false,
+	employeeName,
+}: HoursLineChartProps & {
 	onDownload?: () => void
 	isDownloading?: boolean
 	isDownloadMode?: boolean
@@ -204,34 +208,50 @@ function OrgHoursChartContent({
 	return (
 		<>
 			<div className="mb-8 flex items-start justify-between">
-				<div>
+				<div className="flex flex-col gap-1">
+					{/* Uppercase Category Label */}
+					<span className="font-bold text-[10px] text-zinc-500 uppercase tracking-widest dark:text-zinc-400">
+						{isViewingAll ? 'Organization Hours' : 'Individual Hours'}
+					</span>
+
+					{/* Main Title */}
 					<h3
-						className={`font-bold text-xl tracking-tight ${isDownloadMode ? 'text-zinc-900' : 'text-zinc-900 dark:text-zinc-100'}`}
+						className={`font-black text-xl tracking-tight ${isDownloadMode ? 'text-zinc-900' : 'text-zinc-900 dark:text-zinc-100'}`}
 					>
-						{isDownloadMode
-							? `Organization Hours Report: ${summaryText}`
-							: 'Organization Hours'}
+						{isDownloadMode ? (
+							isViewingAll
+								? `Organization Hours Report: ${summaryText}`
+								: `${employeeName || 'Employee'} Hours Report: ${summaryText}`
+						) : isViewingAll ? (
+							'Team Hours Over Time'
+						) : (
+							`${employeeName || 'Employee'}'s Hours`
+						)}
 					</h3>
-					{!isDownloadMode && (
-						<p className="font-bold text-zinc-500 dark:text-zinc-400">
-							{summaryText}
-						</p>
-					)}
-					<div className="flex items-end gap-2">
+
+					{/* Timeframe Subtitle */}
+					<p className="font-semibold text-xs text-zinc-500 dark:text-zinc-400">
+						{summaryText}
+					</p>
+
+					{/* Metric (Total Hours) */}
+					<div className="mt-2 flex items-end gap-2">
 						<span
-							className={`font-black text-3xl ${isDownloadMode ? 'text-zinc-900' : 'text-zinc-900 dark:text-zinc-100'}`}
+							className={`font-black text-3xl tracking-tight ${isDownloadMode ? 'text-zinc-900' : 'text-zinc-900 dark:text-zinc-100'}`}
 						>
 							{totalOrgHours.toFixed(2)}h
 						</span>
-						{!isDownloadMode && (
-							<span className="mb-1 font-medium text-sm text-zinc-500 dark:text-zinc-400">
-								total hours
-							</span>
-						)}
+						<span className="mb-1 font-bold text-[10px] text-zinc-400 uppercase tracking-wider dark:text-zinc-500">
+							Total Logged
+						</span>
 					</div>
+
+					{/* Explanation paragraph */}
 					{!isDownloadMode && (
-						<p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-							Daily breakdown of hours per employee.
+						<p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+							{isViewingAll
+								? 'Comparative timeline showing daily hours logged by each team member.'
+								: 'Daily progression of logged hours over this period.'}
 						</p>
 					)}
 				</div>

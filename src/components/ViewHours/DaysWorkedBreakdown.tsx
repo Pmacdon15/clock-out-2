@@ -66,20 +66,24 @@ export function DaysWorkedBreakdown({
 
 	return (
 		<Card className="p-6">
-			<div className="mb-6 flex items-center justify-between">
+			<div className="mb-6 flex items-start justify-between">
 				<div>
-					<h3 className="font-bold text-lg">Days Worked</h3>
+					<h3 className="font-bold text-lg">Workday Distribution</h3>
 					<p className="text-xs text-zinc-500 dark:text-zinc-400">
 						{isViewingAll
-							? 'Total member-days worked by day of week'
-							: 'Frequency of workdays for this period'}
+							? 'Cumulative distribution of workdays completed by team members.'
+							: 'How your working days are distributed across the week.'}
 					</p>
 				</div>
-				<div className="flex items-center gap-2 rounded-lg bg-zinc-50 px-3 py-1.5 dark:bg-zinc-900">
-					<Calendar className="h-4 w-4 text-zinc-500 dark:text-zinc-400" />
-					<span className="font-black text-sm tabular-nums">
-						{totalDaysWorked}{' '}
-						{totalDaysWorked === 1 ? 'Day' : 'Days'}
+				<div className="flex flex-col items-end gap-1">
+					<div className="flex items-center gap-2 rounded-lg bg-zinc-50 px-3 py-1.5 dark:bg-zinc-900">
+						<Calendar className="h-4 w-4 text-zinc-500 dark:text-zinc-400" />
+						<span className="font-black text-sm tabular-nums">
+							{totalDaysWorked}
+						</span>
+					</div>
+					<span className="font-bold text-[9px] text-zinc-500 uppercase tracking-wider dark:text-zinc-400">
+						Total Active Days
 					</span>
 				</div>
 			</div>

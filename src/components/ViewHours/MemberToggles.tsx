@@ -2,7 +2,7 @@
 
 import { Check, Users } from 'lucide-react'
 import { Card } from '../ui'
-import { COLORS } from './OrgHoursChart'
+import { COLORS } from './HoursLineChart'
 
 interface MemberTogglesProps {
 	members: { id: string; name: string }[]
@@ -22,13 +22,18 @@ export function MemberToggles({
 
 	return (
 		<Card className="p-6">
-			<div className="mb-6 flex items-center justify-between">
-				<div className="flex items-center gap-2">
-					<Users className="h-5 w-5 text-zinc-500" />
-					<h3 className="font-bold text-lg">Team Members</h3>
+			<div className="mb-6 flex items-start justify-between">
+				<div>
+					<div className="flex items-center gap-2">
+						<Users className="h-5 w-5 text-zinc-500" />
+						<h3 className="font-bold text-lg">Team Members</h3>
+					</div>
+					<p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+						Toggle visibility of individual member lines on the charts.
+					</p>
 				</div>
 				<button
-					className="font-bold text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
+					className="shrink-0 font-bold text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
 					onClick={toggleAll}
 					type="button"
 				>

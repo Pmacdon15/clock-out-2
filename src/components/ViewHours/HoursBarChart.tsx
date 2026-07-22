@@ -17,10 +17,10 @@ import {
 } from 'recharts'
 import type { TimeEntry } from '@/lib/dal'
 import { downloadElementAsImage } from '@/lib/download'
-import { COLORS } from '../OrgStats/OrgHoursChart'
+import { COLORS } from './HoursLineChart'
 import { Button, Card } from '../ui'
 
-interface HoursChartProps {
+interface HoursBarChartProps {
 	filteredEntries: TimeEntry[]
 	timeframe: string
 	selectedYear: number
@@ -33,7 +33,7 @@ interface HoursChartProps {
 	isViewingAll?: boolean
 }
 
-export function HoursChart(props: HoursChartProps) {
+export function HoursBarChart(props: HoursBarChartProps) {
 	const {
 		timeframe,
 		selectedYear,
@@ -82,7 +82,7 @@ export function HoursChart(props: HoursChartProps) {
 	return (
 		<>
 			<Card className="p-6 md:col-span-2">
-				<HoursChartContent
+				<HoursBarChartContent
 					{...props}
 					isDownloading={isDownloading}
 					onDownload={canDownload ? handleDownload : undefined}
@@ -105,7 +105,7 @@ export function HoursChart(props: HoursChartProps) {
 						className="rounded-xl border border-zinc-200 bg-white p-12 text-zinc-950"
 						ref={downloadRef}
 					>
-						<HoursChartContent
+						<HoursBarChartContent
 							{...props}
 							isDownloadMode
 							summaryText={summaryText}
@@ -117,7 +117,7 @@ export function HoursChart(props: HoursChartProps) {
 	)
 }
 
-function HoursChartContent({
+function HoursBarChartContent({
 	filteredEntries,
 	employeeName,
 	onDownload,
@@ -129,7 +129,7 @@ function HoursChartContent({
 	members = [],
 	visibleMemberIds,
 	isViewingAll = false,
-}: HoursChartProps & {
+}: HoursBarChartProps & {
 	onDownload?: () => void
 	isDownloading?: boolean
 	isDownloadMode?: boolean
@@ -208,29 +208,40 @@ function HoursChartContent({
 		<>
 			<div className="mb-8 flex items-start justify-between">
 				<div className="flex flex-col gap-1">
-					<h3 className="font-medium text-sm text-zinc-500">
-						{employeeName && (
-							<span
-								className={`mb-1 block font-bold ${isDownloadMode ? 'text-zinc-900' : 'text-zinc-900 dark:text-zinc-100'}`}
-							>
-								{employeeName}
-							</span>
-						)}
+					{/* Uppercase Category Label */}
+					<span className="font-bold text-[10px] text-zinc-500 uppercase tracking-widest dark:text-zinc-400">
+						{isViewingAll ? 'Organization Hours' : 'Individual Hours'}
+					</span>
+
+					{/* Main Title */}
+					<h3
+						className={`font-black text-xl tracking-tight ${isDownloadMode ? 'text-zinc-900' : 'text-zinc-900 dark:text-zinc-100'}`}
+					>
 						{isDownloadMode ? (
-							<span className="font-bold text-zinc-900">
-								Hours Summary Report for {summaryText}
-							</span>
+							isViewingAll
+								? `Organization Hours Report: ${summaryText}`
+								: `${employeeName || 'Employee'} Hours Report: ${summaryText}`
+						) : isViewingAll ? (
+							'Team Hours Summary'
 						) : (
-							<span className="dark:text-zinc-100">
-								Summary hours for {summaryText}
-							</span>
+							`${employeeName || 'Employee'}'s Hours`
 						)}
 					</h3>
-					<div className="flex items-end gap-2">
+
+					{/* Timeframe Subtitle */}
+					<p className="font-semibold text-xs text-zinc-500 dark:text-zinc-400">
+						{summaryText}
+					</p>
+
+					{/* Metric (Total Hours) & Trend */}
+					<div className="mt-2 flex items-end gap-2">
 						<span
-							className={`font-black text-3xl ${isDownloadMode ? 'text-zinc-900' : 'text-zinc-900 dark:text-zinc-100'}`}
+							className={`font-black text-3xl tracking-tight ${isDownloadMode ? 'text-zinc-900' : 'text-zinc-900 dark:text-zinc-100'}`}
 						>
 							{totalHours.toFixed(2)}h
+						</span>
+						<span className="mb-1 font-bold text-[10px] text-zinc-400 uppercase tracking-wider dark:text-zinc-500">
+							Total Logged
 						</span>
 						{percentage !== null && !isDownloadMode && (
 							<span
@@ -248,6 +259,15 @@ function HoursChartContent({
 							</span>
 						)}
 					</div>
+
+					{/* Explanation paragraph */}
+					{!isDownloadMode && (
+						<p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+							{isViewingAll
+								? 'Stacked breakdown of total hours logged by all active team members per day.'
+								: 'Daily logged work hours for the selected timeframe.'}
+						</p>
+					)}
 				</div>
 
 				{onDownload && (
