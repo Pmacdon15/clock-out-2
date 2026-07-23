@@ -32,6 +32,7 @@ export default function Home(props: PageProps<"/">) {
                 getTimeEntries(parseParams(p.userId), {
                   start: parseParams(p.start),
                   end: parseParams(p.end),
+                  timezone: parseParams(p.timezone),
                 }),
               )}
               hasReportingPromise={hasPromise.then((has) =>
@@ -47,6 +48,7 @@ export default function Home(props: PageProps<"/">) {
                 getOrgTimeEntries({
                   start: parseParams(p.start),
                   end: parseParams(p.end),
+                  timezone: parseParams(p.timezone),
                 }),
               )}
               recentEntriesPromise={getTimeEntries()}

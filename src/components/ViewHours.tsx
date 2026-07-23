@@ -44,11 +44,10 @@ export default function ViewHours({
 
   const isViewingAll = selectedUserId === "all" && isAdmin;
 
-  const timeframe = (use(
-    timeframePromise || Promise.resolve(undefined),
-  )as TimeframeValue) || "week";
-  
-  
+  const timeframe =
+    (use(timeframePromise || Promise.resolve(undefined)) as TimeframeValue) ||
+    "week";
+
   const [chartType, setChartType] = useState<"bar" | "line">("bar");
 
   const selectedMember = useMemo(

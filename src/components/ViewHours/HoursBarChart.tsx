@@ -33,8 +33,7 @@ interface HoursBarChartProps {
 }
 
 export function HoursBarChart(props: HoursBarChartProps) {
-  const { timeframe, startDate, endDate, employeeName } =
-    props;
+  const { timeframe, startDate, endDate, employeeName } = props;
   const { has } = useAuth();
   const downloadRef = useRef<HTMLDivElement>(null);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -43,7 +42,7 @@ export function HoursBarChart(props: HoursBarChartProps) {
   const summaryText = useMemo(() => {
     if (!startDate) return timeframe;
     const start = new Date(startDate);
-    
+
     if (timeframe === "week") {
       const date = start.getDate();
       const weekNum = Math.min(4, Math.ceil(date / 7));

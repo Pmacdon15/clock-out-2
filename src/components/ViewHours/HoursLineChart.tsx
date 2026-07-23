@@ -52,7 +52,7 @@ export function HoursLineChart(props: HoursLineChartProps) {
   const summaryText = useMemo(() => {
     if (!startDate) return timeframe || "custom";
     const start = new Date(startDate);
-    
+
     if (timeframe === "week") {
       const date = start.getDate();
       const weekNum = Math.min(4, Math.ceil(date / 7));

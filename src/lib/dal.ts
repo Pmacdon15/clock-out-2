@@ -1,4 +1,5 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
+import { fromZonedTime } from "date-fns-tz";
 import { errAsync, okAsync } from "neverthrow";
 import {
   dbCheckActiveEntry,
@@ -42,7 +43,7 @@ export async function getOrgMembers() {
 }
 export async function getTimeEntries(
   targetUserId?: string,
-  filters?: { start?: string; end?: string },
+  filters?: { start?: string; end?: string; timezone?: string },
 ): Promise<SerializableResult<TimeEntry[], { reason: string }>> {
   const { userId, orgId, orgRole } = await auth.protect();
 
@@ -65,8 +66,11 @@ export async function getTimeEntries(
     };
   }
 
-  const startDate = filters?.start ? new Date(filters.start) : undefined;
-  const endDate = filters?.end ? new Date(filters.end) : undefined;
+  const tz = filters?.timezone || "UTC";
+  const startDate = filters?.start
+    ? fromZonedTime(filters.start, tz)
+    : undefined;
+  const endDate = filters?.end ? fromZonedTime(filters.end, tz) : undefined;
 
   return await dbGetTimeEntries(queryUserId, orgId, startDate, endDate)
     .then((data) => {
@@ -81,6 +85,7 @@ export async function getTimeEntries(
 export async function getOrgTimeEntries(filters?: {
   start?: string;
   end?: string;
+  timezone?: string;
 }): Promise<SerializableResult<TimeEntry[], { reason: string }>> {
   const { userId, orgId, orgRole } = await auth.protect();
   const isAdmin = orgRole === "org:admin";
@@ -94,8 +99,11 @@ export async function getOrgTimeEntries(filters?: {
     };
   }
 
-  const startDate = filters?.start ? new Date(filters.start) : undefined;
-  const endDate = filters?.end ? new Date(filters.end) : undefined;
+  const tz = filters?.timezone || "UTC";
+  const startDate = filters?.start
+    ? fromZonedTime(filters.start, tz)
+    : undefined;
+  const endDate = filters?.end ? fromZonedTime(filters.end, tz) : undefined;
 
   try {
     const rows = await dbGetOrgTimeEntries(orgId, startDate, endDate);

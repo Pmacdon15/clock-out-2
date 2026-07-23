@@ -1,9 +1,11 @@
 "use client";
 
-import { endOfMonth, format, startOfDay, endOfDay, startOfMonth, startOfYear, endOfYear } from "date-fns";
+import { endOfMonth, format } from "date-fns";
 import { Calendar, Users } from "lucide-react";
 import type { Route } from "next";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useTimeframeDefaults } from "@/hooks/useTimeframeDefaults";
+import { getMonthRange, getWeekRange, getYearRange } from "@/lib/date-utils";
 
 export type TimeframeValue = "week" | "month" | "year" | "custom" | "all";
 
@@ -18,9 +20,6 @@ interface TimeframeSelectorProps {
   currentUserId?: string | null | undefined;
 }
 
-// Formats date into local ISO format without UTC shift
-const toLocalISO = (date: Date) => format(date, "yyyy-MM-dd'T'HH:mm:ss.SSS");
-
 export function TimeframeSelector({
   timeframe,
   startDate,
@@ -31,6 +30,7 @@ export function TimeframeSelector({
   selectedUserId,
   currentUserId,
 }: TimeframeSelectorProps) {
+  useTimeframeDefaults();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -57,23 +57,6 @@ export function TimeframeSelector({
   const currentDate = currentStart.getDate();
   const currentWeek = Math.min(4, Math.ceil(currentDate / 7));
 
-  const getWeekRange = (year: number, month: number, weekNum: number) => {
-    const baseDate = new Date(year, month, 1);
-    const weekStart = new Date(year, month, (weekNum - 1) * 7 + 1);
-    const weekEnd = weekNum === 4 ? endOfMonth(baseDate) : endOfDay(new Date(year, month, weekNum * 7));
-    return `${toLocalISO(startOfDay(weekStart))}|${toLocalISO(weekEnd)}`;
-  };
-
-  const getMonthRange = (year: number, month: number) => {
-    const baseDate = new Date(year, month, 1);
-    return `${toLocalISO(startOfMonth(baseDate))}|${toLocalISO(endOfMonth(baseDate))}`;
-  };
-
-  const getYearRange = (year: number) => {
-    const baseDate = new Date(year, 0, 1);
-    return `${toLocalISO(startOfYear(baseDate))}|${toLocalISO(endOfYear(baseDate))}`;
-  };
-
   const handleDropdownChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const [start, end] = e.target.value.split("|");
     updateParams({ start, end });
@@ -83,7 +66,9 @@ export function TimeframeSelector({
     let start: string | undefined;
     let end: string | undefined;
     if (t === "week") {
-      [start, end] = getWeekRange(currentYear, currentMonth, currentWeek).split("|");
+      [start, end] = getWeekRange(currentYear, currentMonth, currentWeek).split(
+        "|",
+      );
     } else if (t === "month") {
       [start, end] = getMonthRange(currentYear, currentMonth).split("|");
     } else if (t === "year") {
@@ -183,8 +168,14 @@ export function TimeframeSelector({
               value={getWeekRange(currentYear, currentMonth, currentWeek)}
             >
               {[1, 2, 3, 4].map((w) => (
-                <option key={w} value={getWeekRange(currentYear, currentMonth, w)}>
-                  Week {w} {w === 4 ? `(24-${format(endOfMonth(new Date(currentYear, currentMonth, 1)), "d")})` : `(${1 + (w - 1) * 7}-${w * 7})`}
+                <option
+                  key={w}
+                  value={getWeekRange(currentYear, currentMonth, w)}
+                >
+                  Week {w}{" "}
+                  {w === 4
+                    ? `(24-${format(endOfMonth(new Date(currentYear, currentMonth, 1)), "d")})`
+                    : `(${1 + (w - 1) * 7}-${w * 7})`}
                 </option>
               ))}
             </select>
@@ -196,7 +187,10 @@ export function TimeframeSelector({
               {Array.from({ length: 12 }).map((_, i) => {
                 const monthName = format(new Date(2025, i, 1), "MMMM");
                 return (
-                  <option key={monthName} value={getWeekRange(currentYear, i, currentWeek)}>
+                  <option
+                    key={monthName}
+                    value={getWeekRange(currentYear, i, currentWeek)}
+                  >
                     {monthName}
                   </option>
                 );
@@ -208,7 +202,10 @@ export function TimeframeSelector({
               value={getWeekRange(currentYear, currentMonth, currentWeek)}
             >
               {availableYears.map((y) => (
-                <option key={y} value={getWeekRange(y, currentMonth, currentWeek)}>
+                <option
+                  key={y}
+                  value={getWeekRange(y, currentMonth, currentWeek)}
+                >
                   {y}
                 </option>
               ))}

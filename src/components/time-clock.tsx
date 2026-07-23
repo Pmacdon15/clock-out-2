@@ -4,6 +4,7 @@ import { useMutation } from "@tanstack/react-query";
 import { Clock, Loader2, Play, Square, Trash2 } from "lucide-react";
 import { startTransition, useEffect, useState } from "react";
 import { toast } from "sonner";
+import { useTimeframeDefaults } from "@/hooks/useTimeframeDefaults";
 import { clockInAction, clockOutAction } from "@/lib/actions";
 import type { TimeEntry } from "@/lib/dal";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
@@ -35,6 +36,7 @@ export default function TimeClock({
   isAdmin,
   setOptimisticEntries,
 }: ManageHoursProps) {
+  useTimeframeDefaults();
   const [elapsedTime, setElapsedTime] = useState<string>("");
 
   const activeEntry = initialEntries
