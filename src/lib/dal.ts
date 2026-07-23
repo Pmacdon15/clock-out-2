@@ -29,56 +29,6 @@ import { getProcessedMembers, isOverMemberShipLimit } from "./utils-clerk";
 
 export type { SerializableResult, TimeEntry };
 
-export function getDateRange(params: {
-  timeframe?: string;
-  week?: string;
-  month?: string;
-  year?: string;
-  start?: string;
-  end?: string;
-}) {
-  const now = new Date();
-  const timeframe = params.timeframe || "week";
-  const selectedYear = params.year
-    ? parseInt(params.year, 10)
-    : now.getFullYear();
-  const selectedMonth = params.month
-    ? parseInt(params.month, 10)
-    : now.getMonth();
-  const selectedWeek = params.week ? parseInt(params.week, 10) : 1;
-
-  let startDate: Date | undefined;
-  let endDate: Date | undefined;
-
-  if (timeframe === "week") {
-    if (selectedWeek === 1) {
-      startDate = startOfDay(new Date(selectedYear, selectedMonth, 1));
-      endDate = endOfDay(new Date(selectedYear, selectedMonth, 7));
-    } else if (selectedWeek === 2) {
-      startDate = startOfDay(new Date(selectedYear, selectedMonth, 8));
-      endDate = endOfDay(new Date(selectedYear, selectedMonth, 15));
-    } else if (selectedWeek === 3) {
-      startDate = startOfDay(new Date(selectedYear, selectedMonth, 16));
-      endDate = endOfDay(new Date(selectedYear, selectedMonth, 23));
-    } else {
-      startDate = startOfDay(new Date(selectedYear, selectedMonth, 24));
-      endDate = endOfMonth(new Date(selectedYear, selectedMonth, 1));
-    }
-  } else if (timeframe === "month") {
-    startDate = startOfMonth(new Date(selectedYear, selectedMonth, 1));
-    endDate = endOfMonth(new Date(selectedYear, selectedMonth, 1));
-  } else if (timeframe === "year") {
-    startDate = startOfYear(new Date(selectedYear, 0, 1));
-    endDate = endOfYear(new Date(selectedYear, 0, 1));
-  } else if (timeframe === "custom" && params.start && params.end) {
-    startDate = startOfDay(new Date(`${params.start}T00:00:00`));
-    endDate = endOfDay(new Date(`${params.end}T00:00:00`));
-  }
-
-  return { startDate, endDate };
-}
-
-
 export async function getOrgMembers() {
   const { orgId, orgRole } = await auth.protect();
 
@@ -86,36 +36,28 @@ export async function getOrgMembers() {
     return [];
   }
 
-
-return clerkClient()
+  return clerkClient()
     .then((client) =>
-        client.organizations.getOrganizationMembershipList({
-            organizationId: orgId,
-        })
+      client.organizations.getOrganizationMembershipList({
+        organizationId: orgId,
+      }),
     )
-    .then((response) => getProcessedMembers(orgId,JSON.parse(JSON.stringify(response.data))))
+    .then((response) => getProcessedMembers(orgId, response.data))
     .catch((error) => {
-        console.error('Error fetching members:', error)
-        return []
-    })
-  
+      console.error("Error fetching members:", error);
+      return [];
+    });
 }
 export async function getTimeEntries(
   targetUserId?: string,
-  filters?: {
-    timeframe?: string;
-    week?: string;
-    month?: string;
-    year?: string;
-    start?: string;
-    end?: string;
-  },
+  filters?: { start?: string; end?: string },
 ): Promise<SerializableResult<TimeEntry[], { reason: string }>> {
   const { userId, orgId, orgRole } = await auth.protect();
+
   if (!userId || !orgId) {
     return {
-      error: { reason: "Unauthorized or no organization selected" },
       ok: false,
+      error: { reason: "Unauthorized or no organization selected" },
     };
   }
 
@@ -124,31 +66,27 @@ export async function getTimeEntries(
 
   if (queryUserId !== userId && !isAdmin) {
     return {
+      ok: false,
       error: {
         reason: "Forbidden: You do not have permission to view these entries",
       },
-      ok: false,
     };
   }
 
-  const { startDate, endDate } = filters
-    ? getDateRange(filters)
-    : { startDate: undefined, endDate: undefined };
+  const startDate = filters?.start ? new Date(filters.start) : undefined;
+  const endDate = filters?.end ? new Date(filters.end) : undefined;
 
-  try {
-    const rows = await dbGetTimeEntries(queryUserId, orgId, startDate, endDate);
-    return { value: rows, ok: true };
-  } catch (error) {
-    console.error("DB error: ", error);
-    return { error: { reason: "Unknown DB error" }, ok: false };
-  }
+  return await dbGetTimeEntries(queryUserId, orgId, startDate, endDate)
+    .then((data) => {
+      return { ok: true as const, value: data };
+    })
+    .catch((_e) => {
+      console.error("Error fetching entries");
+      return { ok: false, error: { reason: "Unknown DB error" } };
+    });
 }
 
 export async function getOrgTimeEntries(filters?: {
-  timeframe?: string;
-  week?: string;
-  month?: string;
-  year?: string;
   start?: string;
   end?: string;
 }): Promise<SerializableResult<TimeEntry[], { reason: string }>> {
@@ -164,9 +102,8 @@ export async function getOrgTimeEntries(filters?: {
     };
   }
 
-  const { startDate, endDate } = filters
-    ? getDateRange(filters)
-    : { startDate: undefined, endDate: undefined };
+  const startDate = filters?.start ? new Date(filters.start) : undefined;
+  const endDate = filters?.end ? new Date(filters.end) : undefined;
 
   try {
     const rows = await dbGetOrgTimeEntries(orgId, startDate, endDate);

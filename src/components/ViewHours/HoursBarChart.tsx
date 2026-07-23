@@ -23,9 +23,8 @@ import { COLORS } from "./HoursLineChart";
 interface HoursBarChartProps {
   filteredEntries: TimeEntry[];
   timeframe: string;
-  selectedYear: number;
-  selectedMonth: number;
-  selectedWeek: number;
+  startDate: string;
+  endDate: string;
   previousTotalHours: number;
   employeeName?: string;
   members?: { id: string; name: string }[];
@@ -34,7 +33,7 @@ interface HoursBarChartProps {
 }
 
 export function HoursBarChart(props: HoursBarChartProps) {
-  const { timeframe, selectedYear, selectedMonth, selectedWeek, employeeName } =
+  const { timeframe, startDate, endDate, employeeName } =
     props;
   const { has } = useAuth();
   const downloadRef = useRef<HTMLDivElement>(null);
@@ -42,21 +41,27 @@ export function HoursBarChart(props: HoursBarChartProps) {
   const canDownload = has({ feature: "download_graph" });
 
   const summaryText = useMemo(() => {
+    if (!startDate) return timeframe;
+    const start = new Date(startDate);
+    
     if (timeframe === "week") {
-      const monthName = format(
-        new Date(selectedYear, selectedMonth, 1),
-        "MMMM",
-      );
-      return `Week ${selectedWeek} - ${monthName} ${selectedYear}`;
+      const date = start.getDate();
+      const weekNum = Math.min(4, Math.ceil(date / 7));
+      const monthName = format(start, "MMMM");
+      const year = start.getFullYear();
+      return `Week ${weekNum} - ${monthName} ${year}`;
     }
     if (timeframe === "month") {
-      return `${format(new Date(selectedYear, selectedMonth, 1), "MMMM")} ${selectedYear}`;
+      return format(start, "MMMM yyyy");
     }
     if (timeframe === "year") {
-      return `${selectedYear}`;
+      return format(start, "yyyy");
+    }
+    if (timeframe === "custom") {
+      return `${format(start, "MMM d, yyyy")} - ${endDate ? format(new Date(endDate), "MMM d, yyyy") : ""}`;
     }
     return timeframe;
-  }, [timeframe, selectedYear, selectedMonth, selectedWeek]);
+  }, [timeframe, startDate, endDate]);
 
   const handleDownload = async () => {
     setIsDownloading(true);

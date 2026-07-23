@@ -23,9 +23,8 @@ interface HoursLineChartProps {
   members: { id: string; name: string }[];
   visibleMemberIds: Set<string>;
   timeframe?: string;
-  selectedYear?: number;
-  selectedMonth?: number;
-  selectedWeek?: number;
+  startDate?: string;
+  endDate?: string;
   isViewingAll?: boolean;
   employeeName?: string;
 }
@@ -44,28 +43,34 @@ export const COLORS = [
 ];
 
 export function HoursLineChart(props: HoursLineChartProps) {
-  const { timeframe, selectedYear, selectedMonth, selectedWeek } = props;
+  const { timeframe, startDate, endDate } = props;
   const { has } = useAuth();
   const downloadRef = useRef<HTMLDivElement>(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const canDownload = has?.({ feature: "download_graph" });
 
   const summaryText = useMemo(() => {
+    if (!startDate) return timeframe || "custom";
+    const start = new Date(startDate);
+    
     if (timeframe === "week") {
-      const monthName = format(
-        new Date(selectedYear || 0, selectedMonth || 0, 1),
-        "MMMM",
-      );
-      return `Week ${selectedWeek} - ${monthName} ${selectedYear}`;
+      const date = start.getDate();
+      const weekNum = Math.min(4, Math.ceil(date / 7));
+      const monthName = format(start, "MMMM");
+      const year = start.getFullYear();
+      return `Week ${weekNum} - ${monthName} ${year}`;
     }
     if (timeframe === "month") {
-      return `${format(new Date(selectedYear || 0, selectedMonth || 0, 1), "MMMM")} ${selectedYear}`;
+      return format(start, "MMMM yyyy");
     }
     if (timeframe === "year") {
-      return `${selectedYear}`;
+      return format(start, "yyyy");
+    }
+    if (timeframe === "custom") {
+      return `${format(start, "MMM d, yyyy")} - ${endDate ? format(new Date(endDate), "MMM d, yyyy") : ""}`;
     }
     return timeframe || "custom";
-  }, [timeframe, selectedYear, selectedMonth, selectedWeek]);
+  }, [timeframe, startDate, endDate]);
 
   const handleDownload = async () => {
     setIsDownloading(true);

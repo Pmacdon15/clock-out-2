@@ -34,7 +34,7 @@ export default function DashboardTabs({
   const isAdmin = use(isAdminPromise);
   const result = use(entriesPromise);
   const recentEntriesResult = use(recentEntriesPromise);
-  const defaultTab = use(defaultTabPromise)|| 'time-clock';
+  const defaultTab = use(defaultTabPromise) || "time-clock";
 
   const [optimisticEntries, setOptimisticEntries] = useOptimistic(
     result.ok ? (result.value ?? []) : [],

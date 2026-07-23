@@ -30,10 +30,6 @@ export default function Home(props: PageProps<"/">) {
               )}
               entriesPromise={props.searchParams.then((p) =>
                 getTimeEntries(parseParams(p.userId), {
-                  timeframe: parseParams(p.timeframe),
-                  week: parseParams(p.week),
-                  month: parseParams(p.month),
-                  year: parseParams(p.year),
                   start: parseParams(p.start),
                   end: parseParams(p.end),
                 }),
@@ -49,11 +45,7 @@ export default function Home(props: PageProps<"/">) {
               orgSettingsPromise={getOrgReportingSettings()}
               orgTimeEntriesPromise={props.searchParams.then((p) =>
                 getOrgTimeEntries({
-                  timeframe: parseParams(p.timeframe),
-                  week: parseParams(p.week),
-                  month: parseParams(p.month),
-                  year: parseParams(p.year),
-                  start: parseParams(p.star),
+                  start: parseParams(p.start),
                   end: parseParams(p.end),
                 }),
               )}
@@ -76,7 +68,7 @@ export default function Home(props: PageProps<"/">) {
               timeframePromise={props.searchParams.then((p) =>
                 parseParams(p.timeframe),
               )}
-              userIdPromise={authPromise.then((data) => data.userId)}
+              userIdPromise={authPromise.then((auth) => auth.userId)}
             />
           </Suspense>
         </Show>

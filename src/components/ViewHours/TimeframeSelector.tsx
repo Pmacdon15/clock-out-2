@@ -1,6 +1,6 @@
 "use client";
 
-import { endOfMonth, format } from "date-fns";
+import { endOfMonth, format, startOfDay, endOfDay, startOfMonth, startOfYear, endOfYear } from "date-fns";
 import { Calendar, Users } from "lucide-react";
 import type { Route } from "next";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -12,9 +12,6 @@ interface TimeframeSelectorProps {
   timeframe: TimeframeValue;
   startDate: string;
   endDate: string;
-  selectedYear: number;
-  selectedMonth: number;
-  selectedWeek: number;
   availableYears: number[];
   isAdmin?: boolean;
   members?: { id: string; name: string }[];
@@ -26,9 +23,6 @@ export function TimeframeSelector({
   timeframe,
   startDate,
   endDate,
-  selectedYear,
-  selectedMonth,
-  selectedWeek,
   availableYears,
   isAdmin,
   members,
@@ -55,28 +49,46 @@ export function TimeframeSelector({
     updateParams({ userId: userId || null });
   };
 
-  const handleTimeframeChange = (t: TimeframeValue) => {
-    updateParams({ timeframe: t });
+  const currentStart = startDate ? new Date(startDate) : new Date();
+  const currentYear = currentStart.getFullYear();
+  const currentMonth = currentStart.getMonth();
+  const currentDate = currentStart.getDate();
+  const currentWeek = Math.min(4, Math.ceil(currentDate / 7));
+
+  const getWeekRange = (year: number, month: number, weekNum: number) => {
+    const baseDate = new Date(year, month, 1);
+    const weekStart = new Date(year, month, (weekNum - 1) * 7 + 1);
+    const weekEnd = weekNum === 4 ? endOfMonth(baseDate) : endOfDay(new Date(year, month, weekNum * 7));
+    return `${startOfDay(weekStart).toISOString()}|${weekEnd.toISOString()}`;
   };
 
-  useEffect(() => {
-    const params = new URLSearchParams(searchParams.toString());
+  const getMonthRange = (year: number, month: number) => {
+    const baseDate = new Date(year, month, 1);
+    return `${startOfMonth(baseDate).toISOString()}|${endOfMonth(baseDate).toISOString()}`;
+  };
 
-    const hasStart = params.has("start");
-    const hasEnd = params.has("end");
+  const getYearRange = (year: number) => {
+    const baseDate = new Date(year, 0, 1);
+    return `${startOfYear(baseDate).toISOString()}|${endOfYear(baseDate).toISOString()}`;
+  };
 
-    if (!hasStart || !hasEnd) {
-      if (!hasStart) {
-        params.set("start", startDate);
-      }
+  const handleDropdownChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const [start, end] = e.target.value.split("|");
+    updateParams({ start, end });
+  };
 
-      if (!hasEnd) {
-        params.set("end", endDate);
-      }
-
-      router.replace(`${pathname}?${params.toString()}` as Route);
+  const handleTimeframeChange = (t: TimeframeValue) => {
+    let start: string | undefined;
+    let end: string | undefined;
+    if (t === "week") {
+      [start, end] = getWeekRange(currentYear, currentMonth, currentWeek).split("|");
+    } else if (t === "month") {
+      [start, end] = getMonthRange(currentYear, currentMonth).split("|");
+    } else if (t === "year") {
+      [start, end] = getYearRange(currentYear).split("|");
     }
-  }, [searchParams, startDate, endDate, pathname, router]);
+    updateParams({ timeframe: t, ...(start && end ? { start, end } : {}) });
+  };
 
   return (
     <div className="flex flex-col gap-6">
@@ -165,30 +177,24 @@ export function TimeframeSelector({
             <Calendar className="h-4 w-4 text-zinc-400" />
             <select
               className="rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-xs outline-none focus:ring-1 focus:ring-zinc-400 dark:border-zinc-800 dark:bg-zinc-950"
-              onChange={(e) => updateParams({ week: e.target.value })}
-              value={selectedWeek}
+              onChange={handleDropdownChange}
+              value={getWeekRange(currentYear, currentMonth, currentWeek)}
             >
-              <option value={1}>Week 1 (1-7)</option>
-              <option value={2}>Week 2 (8-15)</option>
-              <option value={3}>Week 3 (16-23)</option>
-              <option value={4}>
-                Week 4 (24-
-                {format(
-                  endOfMonth(new Date(selectedYear, selectedMonth, 1)),
-                  "d",
-                )}
-                )
-              </option>
+              {[1, 2, 3, 4].map((w) => (
+                <option key={w} value={getWeekRange(currentYear, currentMonth, w)}>
+                  Week {w} {w === 4 ? `(24-${format(endOfMonth(new Date(currentYear, currentMonth, 1)), "d")})` : `(${1 + (w - 1) * 7}-${w * 7})`}
+                </option>
+              ))}
             </select>
             <select
               className="rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-xs outline-none focus:ring-1 focus:ring-zinc-400 dark:border-zinc-800 dark:bg-zinc-950"
-              onChange={(e) => updateParams({ month: e.target.value })}
-              value={selectedMonth}
+              onChange={handleDropdownChange}
+              value={getWeekRange(currentYear, currentMonth, currentWeek)}
             >
               {Array.from({ length: 12 }).map((_, i) => {
                 const monthName = format(new Date(2025, i, 1), "MMMM");
                 return (
-                  <option key={monthName} value={i}>
+                  <option key={monthName} value={getWeekRange(currentYear, i, currentWeek)}>
                     {monthName}
                   </option>
                 );
@@ -196,11 +202,11 @@ export function TimeframeSelector({
             </select>
             <select
               className="rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-xs outline-none focus:ring-1 focus:ring-zinc-400 dark:border-zinc-800 dark:bg-zinc-950"
-              onChange={(e) => updateParams({ year: e.target.value })}
-              value={selectedYear}
+              onChange={handleDropdownChange}
+              value={getWeekRange(currentYear, currentMonth, currentWeek)}
             >
               {availableYears.map((y) => (
-                <option key={y} value={y}>
+                <option key={y} value={getWeekRange(y, currentMonth, currentWeek)}>
                   {y}
                 </option>
               ))}
@@ -213,13 +219,13 @@ export function TimeframeSelector({
             <Calendar className="h-4 w-4 text-zinc-400" />
             <select
               className="rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-xs outline-none focus:ring-1 focus:ring-zinc-400 dark:border-zinc-800 dark:bg-zinc-950"
-              onChange={(e) => updateParams({ month: e.target.value })}
-              value={selectedMonth}
+              onChange={handleDropdownChange}
+              value={getMonthRange(currentYear, currentMonth)}
             >
               {Array.from({ length: 12 }).map((_, i) => {
                 const monthName = format(new Date(2025, i, 1), "MMMM");
                 return (
-                  <option key={monthName} value={i}>
+                  <option key={monthName} value={getMonthRange(currentYear, i)}>
                     {monthName}
                   </option>
                 );
@@ -227,11 +233,11 @@ export function TimeframeSelector({
             </select>
             <select
               className="rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-xs outline-none focus:ring-1 focus:ring-zinc-400 dark:border-zinc-800 dark:bg-zinc-950"
-              onChange={(e) => updateParams({ year: e.target.value })}
-              value={selectedYear}
+              onChange={handleDropdownChange}
+              value={getMonthRange(currentYear, currentMonth)}
             >
               {availableYears.map((y) => (
-                <option key={y} value={y}>
+                <option key={y} value={getMonthRange(y, currentMonth)}>
                   {y}
                 </option>
               ))}
@@ -244,11 +250,11 @@ export function TimeframeSelector({
             <Calendar className="h-4 w-4 text-zinc-400" />
             <select
               className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs outline-none focus:ring-1 focus:ring-zinc-400 dark:border-zinc-800 dark:bg-zinc-950"
-              onChange={(e) => updateParams({ year: e.target.value })}
-              value={selectedYear}
+              onChange={handleDropdownChange}
+              value={getYearRange(currentYear)}
             >
               {availableYears.map((y) => (
-                <option key={y} value={y}>
+                <option key={y} value={getYearRange(y)}>
                   {y}
                 </option>
               ))}

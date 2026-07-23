@@ -20,9 +20,6 @@ export default function ViewHours({
   membersPromise,
   orgTimeEntriesPromise,
   selectedUserIdPromise,
-  selectedWeekPromise,
-  selectedMonthPromise,
-  selectedYearPromise,
   timeframePromise,
   startDatePromise,
   endDatePromise,
@@ -47,27 +44,11 @@ export default function ViewHours({
 
   const isViewingAll = selectedUserId === "all" && isAdmin;
 
-  const initialWeekParsed = use(
-    selectedWeekPromise || Promise.resolve(undefined),
-  );
-  const initialMonthParsed = use(
-    selectedMonthPromise || Promise.resolve(undefined),
-  );
-  const initialYearParsed = use(
-    selectedYearPromise || Promise.resolve(undefined),
-  );
   const initialTimeframeParsed = use(
     timeframePromise || Promise.resolve(undefined),
   );
 
   const timeframe = (initialTimeframeParsed as TimeframeValue) || "week";
-  const selectedYear = initialYearParsed
-    ? parseInt(initialYearParsed, 10)
-    : new Date().getFullYear();
-  const selectedMonth = initialMonthParsed
-    ? parseInt(initialMonthParsed, 10)
-    : new Date().getMonth();
-  const selectedWeek = initialWeekParsed ? parseInt(initialWeekParsed, 10) : 1;
 
   const [chartType, setChartType] = useState<"bar" | "line">("bar");
 
@@ -137,10 +118,7 @@ export default function ViewHours({
           endDate={endDate}
           isAdmin={isAdmin}
           members={members}
-          selectedMonth={selectedMonth}
           selectedUserId={selectedUserId}
-          selectedWeek={selectedWeek}
-          selectedYear={selectedYear}
           startDate={startDate}
           timeframe={timeframe}
         />
@@ -182,9 +160,8 @@ export default function ViewHours({
               isViewingAll={isViewingAll}
               members={members}
               previousTotalHours={previousTotalHours}
-              selectedMonth={selectedMonth}
-              selectedWeek={selectedWeek}
-              selectedYear={selectedYear}
+              startDate={startDate}
+              endDate={endDate}
               timeframe={timeframe}
               visibleMemberIds={visibleMemberIds}
             />
@@ -194,9 +171,8 @@ export default function ViewHours({
               filteredEntries={displayEntries}
               isViewingAll={isViewingAll}
               members={lineChartMembers}
-              selectedMonth={selectedMonth}
-              selectedWeek={selectedWeek}
-              selectedYear={selectedYear}
+              startDate={startDate}
+              endDate={endDate}
               timeframe={timeframe}
               visibleMemberIds={lineChartVisibleIds}
             />
