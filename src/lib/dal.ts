@@ -22,6 +22,15 @@ import { getProcessedMembers, isOverMemberShipLimit } from "./utils-clerk";
 
 export type { SerializableResult, TimeEntry };
 
+function parseFilterDate(dateStr: string | undefined, tz: string, isEnd: boolean = false) {
+  if (!dateStr) return undefined;
+  // If the date is just YYYY-MM-DD, and it's the end date, make it the end of that day.
+  if (isEnd && dateStr.length === 10) {
+    return fromZonedTime(`${dateStr}T23:59:59.999`, tz);
+  }
+  return fromZonedTime(dateStr, tz);
+}
+
 export async function getOrgMembers() {
   const { orgId, orgRole } = await auth.protect();
 
@@ -67,10 +76,8 @@ export async function getTimeEntries(
   }
 
   const tz = filters?.timezone || "UTC";
-  const startDate = filters?.start
-    ? fromZonedTime(filters.start, tz)
-    : undefined;
-  const endDate = filters?.end ? fromZonedTime(filters.end, tz) : undefined;
+  const startDate = parseFilterDate(filters?.start, tz, false);
+  const endDate = parseFilterDate(filters?.end, tz, true);
 
   return await dbGetTimeEntries(queryUserId, orgId, startDate, endDate)
     .then((data) => {
@@ -100,10 +107,8 @@ export async function getOrgTimeEntries(filters?: {
   }
 
   const tz = filters?.timezone || "UTC";
-  const startDate = filters?.start
-    ? fromZonedTime(filters.start, tz)
-    : undefined;
-  const endDate = filters?.end ? fromZonedTime(filters.end, tz) : undefined;
+  const startDate = parseFilterDate(filters?.start, tz, false);
+  const endDate = parseFilterDate(filters?.end, tz, true);
 
   try {
     const rows = await dbGetOrgTimeEntries(orgId, startDate, endDate);
