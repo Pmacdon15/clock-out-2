@@ -4,7 +4,6 @@ import { endOfMonth, format, startOfDay, endOfDay, startOfMonth, startOfYear, en
 import { Calendar, Users } from "lucide-react";
 import type { Route } from "next";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect } from "react";
 
 export type TimeframeValue = "week" | "month" | "year" | "custom" | "all";
 
@@ -18,6 +17,9 @@ interface TimeframeSelectorProps {
   selectedUserId?: string;
   currentUserId?: string | null | undefined;
 }
+
+// Formats date into local ISO format without UTC shift
+const toLocalISO = (date: Date) => format(date, "yyyy-MM-dd'T'HH:mm:ss.SSS");
 
 export function TimeframeSelector({
   timeframe,
@@ -59,17 +61,17 @@ export function TimeframeSelector({
     const baseDate = new Date(year, month, 1);
     const weekStart = new Date(year, month, (weekNum - 1) * 7 + 1);
     const weekEnd = weekNum === 4 ? endOfMonth(baseDate) : endOfDay(new Date(year, month, weekNum * 7));
-    return `${startOfDay(weekStart).toISOString()}|${weekEnd.toISOString()}`;
+    return `${toLocalISO(startOfDay(weekStart))}|${toLocalISO(weekEnd)}`;
   };
 
   const getMonthRange = (year: number, month: number) => {
     const baseDate = new Date(year, month, 1);
-    return `${startOfMonth(baseDate).toISOString()}|${endOfMonth(baseDate).toISOString()}`;
+    return `${toLocalISO(startOfMonth(baseDate))}|${toLocalISO(endOfMonth(baseDate))}`;
   };
 
   const getYearRange = (year: number) => {
     const baseDate = new Date(year, 0, 1);
-    return `${startOfYear(baseDate).toISOString()}|${endOfYear(baseDate).toISOString()}`;
+    return `${toLocalISO(startOfYear(baseDate))}|${toLocalISO(endOfYear(baseDate))}`;
   };
 
   const handleDropdownChange = (e: React.ChangeEvent<HTMLSelectElement>) => {

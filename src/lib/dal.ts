@@ -1,12 +1,4 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
-import {
-  endOfDay,
-  endOfMonth,
-  endOfYear,
-  startOfDay,
-  startOfMonth,
-  startOfYear,
-} from "date-fns";
 import { errAsync, okAsync } from "neverthrow";
 import {
   dbCheckActiveEntry,
@@ -80,8 +72,8 @@ export async function getTimeEntries(
     .then((data) => {
       return { ok: true as const, value: data };
     })
-    .catch((_e) => {
-      console.error("Error fetching entries");
+    .catch((e) => {
+      console.error("Error fetching entries: ", e);
       return { ok: false, error: { reason: "Unknown DB error" } };
     });
 }
