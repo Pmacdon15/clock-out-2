@@ -8,6 +8,8 @@ import OrgSettings from "./OrgSettings";
 import { useOrgSwitcher } from "./OrgSwitcher";
 import { Card } from "./ui";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
+import { SettingsFallback } from "./fallbacks/settings-fallback";
+import { ViewHoursFallback } from "./fallbacks/view-hours-fallback";
 import ViewHours from "./ViewHours";
 
 export default function DashboardTabs({
@@ -75,7 +77,7 @@ export default function DashboardTabs({
 
       <TabsContent className="mt-0" value="view">
         <Suspense
-          fallback={<div className="p-8 text-center">Loading view...</div>}
+          fallback={<ViewHoursFallback />}
         >
           <ViewHours
             currentUserIdPromise={userIdPromise}
@@ -97,7 +99,7 @@ export default function DashboardTabs({
 
       {isAdmin && hasReporting && (
         <TabsContent className="mt-0" value="settings">
-          <Suspense>
+          <Suspense fallback={<SettingsFallback />}>
             <OrgSettings
               hasReporting={hasReporting}
               orgSettingsPromise={orgSettingsPromise}
