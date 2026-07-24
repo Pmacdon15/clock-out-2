@@ -6,12 +6,12 @@ import {
 	dbClockIn,
 	dbClockOut,
 	dbDeleteTimeEntry,
+	dbGetActiveEntry,
 	dbGetOrgTimeEntries,
 	dbGetReportingSettings,
 	dbGetTimeEntries,
 	dbUpdateReportingSettings,
 	dbUpdateTimeEntry,
-	sql,
 } from './db'
 import type {
 	ReportingSettingsData,
@@ -218,16 +218,14 @@ export async function deleteTimeEntry(id: number) {
 		return errAsync({ reason: 'Unauthorized' } as const)
 	}
 
-	try {
-		const deleted = await dbDeleteTimeEntry(id, orgId)
-
-		return deleted
-			? okAsync(deleted)
-			: errAsync({ reason: 'Entry not found or unauthorized' } as const)
-	} catch (error) {
-		console.error('Delete error: ', error)
-		return errAsync({ reason: 'Failed to delete entry' } as const)
-	}
+	return await dbDeleteTimeEntry(id, orgId)
+		.then((deleted) => {
+			return okAsync(deleted)
+		})
+		.catch((e) => {
+			console.error('Delete error: ', e)
+			return errAsync({ reason: 'Failed to delete entry' } as const)
+		})
 }
 
 export async function updateTimeEntry(
@@ -239,24 +237,21 @@ export async function updateTimeEntry(
 	if (!userId || !orgId) {
 		return errAsync({ reason: 'Unauthorized' } as const)
 	}
-	const isAdmin = orgRole === 'org:admin'
 
-	try {
-		const updated = await dbUpdateTimeEntry(
-			id,
-			clock_in,
-			clock_out,
-			orgId,
-			isAdmin,
-		)
-
-		return updated
-			? okAsync(updated)
-			: errAsync({ reason: 'Entry not found or unauthorized' } as const)
-	} catch (error) {
-		console.error('Update error: ', error)
-		return errAsync({ reason: 'Failed to update entry' } as const)
-	}
+	return await dbUpdateTimeEntry(
+		id,
+		clock_in,
+		clock_out,
+		orgId,
+		orgRole === 'org:admin',
+	)
+		.then((updated) => {
+			return okAsync(updated)
+		})
+		.catch((e) => {
+			console.error('Update error: ', e)
+			return errAsync({ reason: 'Failed to update entry' } as const)
+		})
 }
 
 export async function getActiveEntry(): Promise<
@@ -270,20 +265,20 @@ export async function getActiveEntry(): Promise<
 		}
 	}
 
-	try {
-		const [activeEntry] = await sql`
-            SELECT * FROM time_entries 
-            WHERE user_id = ${userId} AND org_id = ${orgId} AND clock_out IS NULL
-            LIMIT 1
-        `
-		return {
-			value: (activeEntry as unknown as TimeEntry) || null,
-			ok: true,
-		}
-	} catch (error) {
-		console.error('DB error: ', error)
-		return { error: { reason: 'Unknown DB error' }, ok: false }
-	}
+	return await dbGetActiveEntry(userId, orgId)
+		.then((activeEntry) => {
+			return {
+				value: activeEntry || null,
+				ok: true as const,
+			}
+		})
+		.catch((error) => {
+			console.error('Error fetching active entries: ', error)
+			return {
+				error: { reason: 'Error fetching active entries' },
+				ok: false,
+			}
+		})
 }
 
 export async function updateReportingSettingsDal(
@@ -291,34 +286,30 @@ export async function updateReportingSettingsDal(
 	day: string | null = null,
 	interval: number = 1,
 ) {
-	const { userId, orgId, orgRole, has } = await auth.protect()
-	const isAdmin = orgRole === 'org:admin'
-	const hasReporting = has({ feature: 'reporting' })
-
-	if (!userId || !orgId || !isAdmin || !hasReporting) {
+	const authUser = await auth.protect()
+	if (
+		!authUser.userId ||
+		!authUser.orgId ||
+		authUser.orgRole !== 'org:admin' ||
+		!authUser.has({ feature: 'reporting' })
+	) {
 		return errAsync({ reason: 'Unauthorized' } as const)
 	}
-
-	// const isPaidPlan = !has({ plan: 'free' })
-
-	// if (!isPaidPlan) {
-	// 	return errAsync({
-	// 		reason: 'Reports settings are only available on paid plans',
-	// 	} as const)
-	// }
-
-	try {
-		const updated = await dbUpdateReportingSettings(
-			orgId,
-			frequency,
-			day,
-			interval,
-		)
-		return okAsync(updated)
-	} catch (error) {
-		console.error('Update settings error: ', error)
-		return errAsync({ reason: 'Failed to update settings' } as const)
-	}
+	return await dbUpdateReportingSettings(
+		authUser.orgId,
+		frequency,
+		day,
+		interval,
+	)
+		.then((updated) => {
+			return okAsync(updated)
+		})
+		.catch((e) => {
+			console.error('Update settings error: ', e)
+			return errAsync({
+				reason: 'Failed to update settings',
+			} as const)
+		})
 }
 
 export async function getOrgReportingSettings(): Promise<
@@ -332,14 +323,15 @@ export async function getOrgReportingSettings(): Promise<
 		}
 	}
 
-	try {
-		const settings = await dbGetReportingSettings(orgId)
-		return {
-			value: (settings as unknown as ReportingSettingsData) || null,
-			ok: true,
-		}
-	} catch (error) {
-		console.error('DB error: ', error)
-		return { error: { reason: 'Unknown DB error' }, ok: false }
-	}
+	return await dbGetReportingSettings(orgId)
+		.then((settings) => {
+			return {
+				value: (settings as ReportingSettingsData) || null,
+				ok: true as const,
+			}
+		})
+		.catch((e) => {
+			console.error('Error fetching settings.: ', e)
+			return { error: { reason: 'Error fetching settings.' }, ok: false }
+		})
 }

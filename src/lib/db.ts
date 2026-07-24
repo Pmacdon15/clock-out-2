@@ -80,6 +80,15 @@ export async function dbCheckActiveEntry(userId: string, orgId: string) {
   return activeEntry;
 }
 
+export async function dbGetActiveEntry(userId: string, orgId: string) {
+  const [activeEntry] = await sql`
+        SELECT * FROM time_entries 
+        WHERE user_id = ${userId} AND org_id = ${orgId} AND clock_out IS NULL
+        LIMIT 1
+    `;
+  return (activeEntry as unknown as TimeEntry) || null;
+}
+
 export async function dbClockIn(userId: string, orgId: string) {
   const [newEntry] = await sql`
         INSERT INTO time_entries (user_id, org_id, clock_in)
