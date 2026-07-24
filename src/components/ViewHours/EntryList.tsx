@@ -1,16 +1,14 @@
 "use client";
 
-import type { TimeEntry } from "@/lib/dal";
+import type { EntryAction } from "@/lib/reducers/time-entries";
+import type { TimeEntry } from "@/lib/types";
 import { Card } from "../ui";
 import { EntryItem } from "./EntryItem";
 
 interface EntryListProps {
   entries: TimeEntry[];
   isAdmin: boolean;
-  setOptimisticEntries: (action: {
-    type: "ADD" | "REMOVE" | "UPDATE";
-    payload: any;
-  }) => void;
+  setOptimisticEntries: (action: EntryAction) => void;
   isViewingAll?: boolean;
   members?: { id: string; name: string }[];
 }

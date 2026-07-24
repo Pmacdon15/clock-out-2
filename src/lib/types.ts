@@ -12,6 +12,8 @@ export type SerializableResult<T, E> =
   | { value: T; ok: true }
   | { error: E; ok: false };
 
+import type { EntryAction } from "./reducers/time-entries";
+
 export type ReportingSettingsData = {
   org_id: string;
   report_frequency: string;
@@ -63,10 +65,7 @@ export interface DashboardTabsProps {
 }
 export interface ViewHoursProps {
   entries: TimeEntry[];
-  setOptimisticEntries: (action: {
-    type: "ADD" | "REMOVE" | "UPDATE";
-    payload: any;
-  }) => void;
+  setOptimisticEntries: (action: EntryAction) => void;
   isAdmin?: boolean;
   membersPromise?: Promise<
     {

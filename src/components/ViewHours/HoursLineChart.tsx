@@ -142,7 +142,10 @@ function HoursLineChartContent({
   summaryText: string;
 }) {
   const chartData = useMemo(() => {
-    const dataMap: Record<string, { date: Date; [userId: string]: any }> = {};
+    const dataMap: Record<
+      string,
+      { date: Date; [userId: string]: number | Date }
+    > = {};
 
     filteredEntries.forEach((e) => {
       const clockIn = new Date(e.clock_in);
@@ -159,19 +162,22 @@ function HoursLineChartContent({
       if (!dataMap[dayKey][e.user_id]) {
         dataMap[dayKey][e.user_id] = 0;
       }
-      dataMap[dayKey][e.user_id] += hours;
+      dataMap[dayKey][e.user_id] =
+        ((dataMap[dayKey][e.user_id] as number) || 0) + hours;
     });
 
     return Object.values(dataMap)
       .sort((a, b) => a.date.getTime() - b.date.getTime())
       .map((val) => {
-        const entry: any = {
+        const entry: Record<string, string | number> = {
           name: format(val.date, "MMM dd"),
           fullLabel: format(val.date, "MMM dd, yyyy"),
         };
         for (const member of members) {
           if (val[member.id] !== undefined) {
-            entry[member.id] = parseFloat(val[member.id].toFixed(2));
+            entry[member.id] = parseFloat(
+              ((val[member.id] as number) || 0).toFixed(2),
+            );
           } else {
             entry[member.id] = 0;
           }

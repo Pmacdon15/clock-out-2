@@ -6,7 +6,8 @@ import { startTransition, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useTimeframeDefaults } from "@/hooks/useTimeframeDefaults";
 import { clockInAction, clockOutAction } from "@/lib/actions";
-import type { TimeEntry } from "@/lib/dal";
+import type { EntryAction } from "@/lib/reducers/time-entries";
+import type { TimeEntry } from "@/lib/types";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 import { Button, Card } from "./ui";
 
@@ -25,10 +26,7 @@ const formatDuration = (start: Date, end: Date = new Date()) => {
 interface ManageHoursProps {
   initialEntries: TimeEntry[];
   isAdmin: boolean;
-  setOptimisticEntries: (action: {
-    type: "ADD" | "REMOVE" | "UPDATE";
-    payload: any;
-  }) => void;
+  setOptimisticEntries: (action: EntryAction) => void;
 }
 
 export default function TimeClock({

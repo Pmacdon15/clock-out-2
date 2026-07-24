@@ -1,3 +1,4 @@
+import type { OrganizationMembership } from "@clerk/nextjs/server";
 import { clerkClient } from "@clerk/nextjs/server";
 
 export async function isOverMemberShipLimit(orgId: string) {
@@ -24,7 +25,7 @@ export async function isOverMemberShipLimit(orgId: string) {
 
 export async function getProcessedMembers(
   _orgId: string,
-  rawMembersArray: any[],
+  rawMembersArray: OrganizationMembership[],
 ) {
   return rawMembersArray.map((m) => {
     const userData = m.publicUserData;

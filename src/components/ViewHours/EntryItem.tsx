@@ -6,16 +6,14 @@ import { Calendar, Check, Edit3, Loader2, X } from "lucide-react";
 import { startTransition, useState } from "react";
 import { toast } from "sonner";
 import { updateTimeEntryAction } from "@/lib/actions";
-import type { TimeEntry } from "@/lib/dal";
+import type { EntryAction } from "@/lib/reducers/time-entries";
+import type { TimeEntry } from "@/lib/types";
 import { DeleteConfirmDialog } from "../DeleteConfirmDialog";
 
 interface EntryItemProps {
   entry: TimeEntry;
   isAdmin: boolean;
-  setOptimisticEntries: (action: {
-    type: "ADD" | "REMOVE" | "UPDATE";
-    payload: any;
-  }) => void;
+  setOptimisticEntries: (action: EntryAction) => void;
   memberName?: string;
 }
 

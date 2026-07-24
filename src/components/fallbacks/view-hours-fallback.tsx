@@ -7,7 +7,10 @@ export function ViewHoursFallback() {
         <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
           <div className="flex max-w-full gap-2 overflow-x-auto rounded-lg bg-zinc-100 p-1 dark:bg-zinc-900">
             {[1, 2, 3, 4, 5].map((i) => (
-              <div key={i} className="h-8 w-16 rounded-md bg-zinc-200 dark:bg-zinc-800" />
+              <div
+                key={i}
+                className="h-8 w-16 rounded-md bg-zinc-200 dark:bg-zinc-800"
+              />
             ))}
           </div>
           <div className="flex w-full items-center gap-2 sm:w-auto">

@@ -109,9 +109,9 @@ export const WeeklyReportEmail = ({
                     <Text className="m-0 mb-2 border-gray-200 border-b pb-1 font-bold text-[14px] text-black">
                       {day.date}
                     </Text>
-                    {day.shifts.map((shift, idx) => (
+                    {day.shifts.map((shift) => (
                       <div
-                        key={idx}
+                        key={shift.start}
                         style={{
                           display: "flex",
                           justifyContent: "space-between",

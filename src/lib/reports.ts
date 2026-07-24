@@ -57,8 +57,11 @@ export async function sendWeeklyReports(
     try {
       const subscription =
         await client.billing.getOrganizationBillingSubscription(orgId);
-      hasReportingFeature = subscription.subscriptionItems.some((item: any) =>
-        item.plan?.features?.some((f: any) => f.slug === "reporting"),
+      hasReportingFeature = subscription.subscriptionItems.some(
+        (item: { plan?: { features?: { slug: string }[] } | null }) =>
+          item.plan?.features?.some(
+            (f: { slug: string }) => f.slug === "reporting",
+          ),
       );
     } catch (_error) {
       // If no billing or error, assume no feature

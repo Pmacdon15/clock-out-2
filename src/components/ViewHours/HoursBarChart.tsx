@@ -134,7 +134,10 @@ function HoursBarChartContent({
   summaryText: string;
 }) {
   const chartData = useMemo(() => {
-    const dataMap: Record<string, { date: Date; [key: string]: any }> = {};
+    const dataMap: Record<
+      string,
+      { date: Date; [key: string]: number | Date }
+    > = {};
 
     filteredEntries.forEach((e) => {
       const clockIn = new Date(e.clock_in);
@@ -151,17 +154,19 @@ function HoursBarChartContent({
       if (isViewingAll) {
         const memberId = e.user_id;
         if (visibleMemberIds?.has(memberId)) {
-          dataMap[dayKey][memberId] = (dataMap[dayKey][memberId] || 0) + hours;
+          dataMap[dayKey][memberId] =
+            ((dataMap[dayKey][memberId] as number) || 0) + hours;
         }
       } else {
-        dataMap[dayKey].hours = (dataMap[dayKey].hours || 0) + hours;
+        dataMap[dayKey].hours =
+          ((dataMap[dayKey].hours as number) || 0) + hours;
       }
     });
 
     return Object.values(dataMap)
       .sort((a, b) => a.date.getTime() - b.date.getTime())
       .map((val) => {
-        const row: any = {
+        const row: Record<string, string | number> = {
           name: format(val.date, "MMM dd"),
           fullLabel: format(val.date, "MMM dd, yyyy"),
         };
@@ -169,14 +174,14 @@ function HoursBarChartContent({
           let dayTotal = 0;
           members.forEach((m) => {
             if (visibleMemberIds?.has(m.id)) {
-              const h = parseFloat((val[m.id] || 0).toFixed(2));
+              const h = parseFloat(((val[m.id] as number) || 0).toFixed(2));
               row[m.id] = h;
               dayTotal += h;
             }
           });
           row.total = parseFloat(dayTotal.toFixed(2));
         } else {
-          row.hours = parseFloat((val.hours || 0).toFixed(2));
+          row.hours = parseFloat(((val.hours as number) || 0).toFixed(2));
         }
         return row;
       });
@@ -184,9 +189,15 @@ function HoursBarChartContent({
 
   const totalHours = useMemo(() => {
     if (isViewingAll) {
-      return chartData.reduce((acc, curr) => acc + (curr.total || 0), 0);
+      return chartData.reduce(
+        (acc, curr) => acc + ((curr.total as number) || 0),
+        0,
+      );
     }
-    return chartData.reduce((acc, curr) => acc + (curr.hours || 0), 0);
+    return chartData.reduce(
+      (acc, curr) => acc + ((curr.hours as number) || 0),
+      0,
+    );
   }, [chartData, isViewingAll]);
 
   const percentage = useMemo(() => {
