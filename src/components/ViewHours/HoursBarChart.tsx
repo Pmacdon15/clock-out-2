@@ -356,6 +356,7 @@ function HoursBarChartContent({
                     hide={!visibleMemberIds?.has(m.id)}
                     isAnimationActive={!isDownloadMode}
                     key={m.id}
+                    name={m.name}
                     radius={isLast ? [6, 6, 0, 0] : 0}
                     stackId="a"
                   />
