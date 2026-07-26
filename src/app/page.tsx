@@ -1,141 +1,101 @@
-import { Show, SignInButton } from '@clerk/nextjs'
-import { Suspense } from 'react'
-import DashboardTabs from '@/components/DashboardTabs'
-import MainPageHeader from '@/components/headers/main-page-header'
+import { Show, SignInButton } from "@clerk/nextjs";
+import { auth } from "@clerk/nextjs/server";
+import { Suspense } from "react";
+import DashboardTabs from "@/components/DashboardTabs";
+import DashboardSkeleton from "@/components/fallbacks/home-page-fallback";
+import MainPageHeader from "@/components/headers/main-page-header";
 import {
-	getOrgMembers,
-	getOrgReportingSettings,
-	getOrgTimeEntries,
-	getTimeEntries,
-} from '@/lib/dal'
+  getOrgMembers,
+  getOrgReportingSettings,
+  getOrgTimeEntries,
+  getTimeEntries,
+} from "@/lib/dal";
+import { parseParams } from "@/lib/utils";
 
-export default function Home(props: PageProps<'/'>) {
-	const userIdPromise = props.searchParams.then((params) =>
-		Array.isArray(params.userId) ? params.userId[0] : params.userId,
-	)
-
-	const defaultTabPromise = props.searchParams.then((params) =>
-		Array.isArray(params.defaultTab)
-			? params.defaultTab[0]
-			: params.defaultTab,
-	)
-
-	const selectedWeekPromise = props.searchParams.then((params) =>
-		Array.isArray(params.week) ? params.week[0] : params.week,
-	)
-
-	const selectedMonthPromise = props.searchParams.then((params) =>
-		Array.isArray(params.month) ? params.month[0] : params.month,
-	)
-
-	const selectedYearPromise = props.searchParams.then((params) =>
-		Array.isArray(params.year) ? params.year[0] : params.year,
-	)
-
-	const timeframePromise = props.searchParams.then((params) =>
-		Array.isArray(params.timeframe)
-			? params.timeframe[0]
-			: params.timeframe,
-	)
-	const startDatePromise = props.searchParams.then((params) =>
-		Array.isArray(params.start) ? params.start[0] : params.start,
-	)
-	const endDatePromise = props.searchParams.then((params) =>
-		Array.isArray(params.end) ? params.end[0] : params.end,
-	)
-
-	const timeEntriesPromise = props.searchParams.then((params) =>
-		getTimeEntries(
-			Array.isArray(params.userId) ? params.userId[0] : params.userId,
-			{
-				timeframe: Array.isArray(params.timeframe)
-					? params.timeframe[0]
-					: params.timeframe,
-				week: Array.isArray(params.week) ? params.week[0] : params.week,
-				month: Array.isArray(params.month)
-					? params.month[0]
-					: params.month,
-				year: Array.isArray(params.year) ? params.year[0] : params.year,
-				start: Array.isArray(params.start)
-					? params.start[0]
-					: params.start,
-				end: Array.isArray(params.end) ? params.end[0] : params.end,
-			},
-		),
-	)
-
-	const membersPromise = getOrgMembers()
-	const orgSettingsPromise = getOrgReportingSettings()
-	const orgTimeEntriesPromise = props.searchParams.then((params) =>
-		getOrgTimeEntries({
-			timeframe: Array.isArray(params.timeframe)
-				? params.timeframe[0]
-				: params.timeframe,
-			week: Array.isArray(params.week) ? params.week[0] : params.week,
-			month: Array.isArray(params.month) ? params.month[0] : params.month,
-			year: Array.isArray(params.year) ? params.year[0] : params.year,
-			start: Array.isArray(params.start) ? params.start[0] : params.start,
-			end: Array.isArray(params.end) ? params.end[0] : params.end,
-		}),
-	)
-
-	const recentEntriesPromise = getTimeEntries()
-
-	return (
-		<main className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-4 py-8">
-			<MainPageHeader />
-			<Suspense>
-				<Show when="signed-in">
-					<Suspense fallback={<DashboardSkeleton />}>
-						<DashboardTabs
-							defaultTabPromise={defaultTabPromise}
-							endDatePromise={endDatePromise}
-							entriesPromise={timeEntriesPromise}
-							membersPromise={membersPromise}
-							orgSettingsPromise={orgSettingsPromise}
-							orgTimeEntriesPromise={orgTimeEntriesPromise}
-							recentEntriesPromise={recentEntriesPromise}
-							selectedMonthPromise={selectedMonthPromise}
-							selectedUserIdPromise={userIdPromise}
-							selectedWeekPromise={selectedWeekPromise}
-							selectedYearPromise={selectedYearPromise}
-							startDatePromise={startDatePromise}
-							timeframePromise={timeframePromise}
-						/>
-					</Suspense>
-				</Show>
-			</Suspense>
-			<Suspense>
-				<Show when="signed-out">
-					<div className="flex flex-1 flex-col items-center justify-center py-20 text-center">
-						<h2 className="mb-4 font-extrabold text-4xl tracking-tight">
-							Time tracking, simplified.
-						</h2>
-						<p className="mb-8 max-w-lg text-muted-foreground text-xl">
-							Clock in, clock out, and manage your hours with
-							ease. Built for teams that value simplicity and
-							precision.
-						</p>
-						<SignInButton>
-							<button
-								className="rounded-xl bg-zinc-900 px-8 py-4 font-semibold text-lg text-zinc-50 transition-all hover:bg-zinc-800 active:scale-95 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
-								type="button"
-							>
-								Get Started Now
-							</button>
-						</SignInButton>
-					</div>
-				</Show>
-			</Suspense>
-		</main>
-	)
-}
-
-function DashboardSkeleton() {
-	return (
-		<div className="animate-pulse space-y-8">
-			<div className="h-10 w-1/3 rounded-md bg-zinc-200 dark:bg-zinc-800"></div>
-			<div className="h-[400px] rounded-xl bg-zinc-200 dark:bg-zinc-800"></div>
-		</div>
-	)
+export default function Home(props: PageProps<"/">) {
+  const authPromise = auth.protect();
+  const hasPromise = authPromise.then((data) => data.has);
+  return (
+    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-4 py-8">
+      <MainPageHeader />
+      <Suspense>
+        <Show when="signed-in">
+          <Suspense fallback={<DashboardSkeleton />}>
+            <DashboardTabs
+              defaultTabPromise={props.searchParams.then((p) =>
+                parseParams(p.defaultTab),
+              )}
+              endDatePromise={props.searchParams.then((p) =>
+                parseParams(p.end),
+              )}
+              entriesPromise={props.searchParams.then((p) =>
+                getTimeEntries(parseParams(p.userId), {
+                  start: parseParams(p.start),
+                  end: parseParams(p.end),
+                  timezone: parseParams(p.timezone),
+                }),
+              )}
+              hasReportingPromise={hasPromise.then((has) =>
+                has({ feature: "reporting" }),
+              )}
+              isAdminPromise={hasPromise.then((has) =>
+                has({ role: "org:admin" }),
+              )}
+              membersPromise={getOrgMembers()}
+              orgIdPromise={authPromise.then((auth) => auth.orgId)}
+              orgSettingsPromise={getOrgReportingSettings()}
+              orgTimeEntriesPromise={props.searchParams.then((p) =>
+                getOrgTimeEntries({
+                  start: parseParams(p.start),
+                  end: parseParams(p.end),
+                  timezone: parseParams(p.timezone),
+                }),
+              )}
+              recentEntriesPromise={getTimeEntries()}
+              selectedMonthPromise={props.searchParams.then((p) =>
+                parseParams(p.month),
+              )}
+              selectedUserIdPromise={props.searchParams.then((p) =>
+                parseParams(p.userId),
+              )}
+              selectedWeekPromise={props.searchParams.then((p) =>
+                parseParams(p.week),
+              )}
+              selectedYearPromise={props.searchParams.then((p) =>
+                parseParams(p.year),
+              )}
+              startDatePromise={props.searchParams.then((p) =>
+                parseParams(p.start),
+              )}
+              timeframePromise={props.searchParams.then((p) =>
+                parseParams(p.timeframe),
+              )}
+              userIdPromise={authPromise.then((auth) => auth.userId)}
+            />
+          </Suspense>
+        </Show>
+      </Suspense>
+      <Suspense>
+        <Show when="signed-out">
+          <div className="flex flex-1 flex-col items-center justify-center py-20 text-center">
+            <h2 className="mb-4 font-extrabold text-4xl tracking-tight">
+              Time tracking, simplified.
+            </h2>
+            <p className="mb-8 max-w-lg text-muted-foreground text-xl">
+              Clock in, clock out, and manage your hours with ease. Built for
+              teams that value simplicity and precision.
+            </p>
+            <SignInButton>
+              <button
+                className="rounded-xl bg-zinc-900 px-8 py-4 font-semibold text-lg text-zinc-50 transition-all hover:bg-zinc-800 active:scale-95 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+                type="button"
+              >
+                Get Started Now
+              </button>
+            </SignInButton>
+          </div>
+        </Show>
+      </Suspense>
+    </main>
+  );
 }

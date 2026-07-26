@@ -1,390 +1,334 @@
-import { auth, clerkClient } from '@clerk/nextjs/server'
+import { auth, clerkClient } from "@clerk/nextjs/server";
+import { fromZonedTime } from "date-fns-tz";
+import { errAsync, okAsync } from "neverthrow";
 import {
-	endOfDay,
-	endOfMonth,
-	endOfYear,
-	startOfDay,
-	startOfMonth,
-	startOfYear,
-} from 'date-fns'
-import { errAsync, okAsync } from 'neverthrow'
-import { connection } from 'next/server'
-import {
-	dbCheckActiveEntry,
-	dbClockIn,
-	dbClockOut,
-	dbDeleteTimeEntry,
-	dbGetOrgTimeEntries,
-	dbGetReportingSettings,
-	dbGetTimeEntries,
-	dbUpdateReportingSettings,
-	dbUpdateTimeEntry,
-	sql,
-} from './db'
+  dbCheckActiveEntry,
+  dbClockIn,
+  dbClockOut,
+  dbDeleteTimeEntry,
+  dbGetActiveEntry,
+  dbGetOrgTimeEntries,
+  dbGetReportingSettings,
+  dbGetTimeEntries,
+  dbUpdateReportingSettings,
+  dbUpdateTimeEntry,
+} from "./db";
 import type {
-	ReportingSettingsData,
-	SerializableResult,
-	TimeEntry,
-} from './types'
-import { getProcessedMembers, isOverMemberShipLimit } from './utils-clerk'
+  ReportingSettingsData,
+  SerializableResult,
+  TimeEntry,
+} from "./types";
+import { getProcessedMembers, isOverMemberShipLimit } from "./utils-clerk";
 
-export type { SerializableResult, TimeEntry }
+export type { SerializableResult, TimeEntry };
 
-export function getDateRange(params: {
-	timeframe?: string
-	week?: string
-	month?: string
-	year?: string
-	start?: string
-	end?: string
-}) {
-	const now = new Date()
-	const timeframe = params.timeframe || 'week'
-	const selectedYear = params.year
-		? parseInt(params.year, 10)
-		: now.getFullYear()
-	const selectedMonth = params.month
-		? parseInt(params.month, 10)
-		: now.getMonth()
-	const selectedWeek = params.week ? parseInt(params.week, 10) : 1
-
-	let startDate: Date | undefined
-	let endDate: Date | undefined
-
-	if (timeframe === 'week') {
-		if (selectedWeek === 1) {
-			startDate = startOfDay(new Date(selectedYear, selectedMonth, 1))
-			endDate = endOfDay(new Date(selectedYear, selectedMonth, 7))
-		} else if (selectedWeek === 2) {
-			startDate = startOfDay(new Date(selectedYear, selectedMonth, 8))
-			endDate = endOfDay(new Date(selectedYear, selectedMonth, 15))
-		} else if (selectedWeek === 3) {
-			startDate = startOfDay(new Date(selectedYear, selectedMonth, 16))
-			endDate = endOfDay(new Date(selectedYear, selectedMonth, 23))
-		} else {
-			startDate = startOfDay(new Date(selectedYear, selectedMonth, 24))
-			endDate = endOfMonth(new Date(selectedYear, selectedMonth, 1))
-		}
-	} else if (timeframe === 'month') {
-		startDate = startOfMonth(new Date(selectedYear, selectedMonth, 1))
-		endDate = endOfMonth(new Date(selectedYear, selectedMonth, 1))
-	} else if (timeframe === 'year') {
-		startDate = startOfYear(new Date(selectedYear, 0, 1))
-		endDate = endOfYear(new Date(selectedYear, 0, 1))
-	} else if (timeframe === 'custom' && params.start && params.end) {
-		startDate = startOfDay(new Date(`${params.start}T00:00:00`))
-		endDate = endOfDay(new Date(`${params.end}T00:00:00`))
-	}
-
-	return { startDate, endDate }
-}
-
-export async function getAuthSession(): Promise<
-	SerializableResult<
-		{
-			userId: string
-			orgId: string
-			isAdmin: boolean
-			isPaidPlan: boolean
-		},
-		{ reason: string }
-	>
-> {
-	const { userId, orgId, orgRole, has } = await auth()
-	if (!userId || !orgId) {
-		return {
-			error: { reason: 'Unauthorized or no organization selected' },
-			ok: false,
-		}
-	}
-	const isPaidPlan = !has({ plan: 'free_org' })
-
-	return {
-		value: { userId, orgId, isAdmin: orgRole === 'org:admin', isPaidPlan },
-		ok: true,
-	}
+function parseFilterDate(
+  dateStr: string | undefined,
+  tz: string,
+  isEnd: boolean = false,
+) {
+  if (!dateStr) return undefined;
+  // If the date is just YYYY-MM-DD, and it's the end date, make it the end of that day.
+  if (isEnd && dateStr.length === 10) {
+    return fromZonedTime(`${dateStr}T23:59:59.999`, tz);
+  }
+  return fromZonedTime(dateStr, tz);
 }
 
 export async function getOrgMembers() {
-	const { orgId, orgRole } = await auth()
+  const { orgId, orgRole } = await auth.protect();
 
-	if (!orgId || orgRole !== 'org:admin') {
-		return []
-	}
+  if (!orgId || orgRole !== "org:admin") {
+    return [];
+  }
 
-	const client = await clerkClient()
-	const response = await client.organizations.getOrganizationMembershipList({
-		organizationId: orgId,
-	})
-
-	const plainMembers = JSON.parse(JSON.stringify(response.data))
-
-	return await getProcessedMembers(orgId, plainMembers)
+  return clerkClient()
+    .then((client) =>
+      client.organizations.getOrganizationMembershipList({
+        organizationId: orgId,
+      }),
+    )
+    .then((response) => getProcessedMembers(orgId, response.data))
+    .catch((error) => {
+      console.error("Error fetching members:", error);
+      return [];
+    });
 }
-
 export async function getTimeEntries(
-	targetUserId?: string,
-	filters?: {
-		timeframe?: string
-		week?: string
-		month?: string
-		year?: string
-		start?: string
-		end?: string
-	},
+  targetUserId?: string,
+  filters?: { start?: string; end?: string; timezone?: string },
 ): Promise<SerializableResult<TimeEntry[], { reason: string }>> {
-	const { userId, orgId, orgRole } = await auth()
-	if (!userId || !orgId) {
-		return {
-			error: { reason: 'Unauthorized or no organization selected' },
-			ok: false,
-		}
-	}
+  const { userId, orgId, orgRole } = await auth.protect();
 
-	const queryUserId = targetUserId || userId
-	const isAdmin = orgRole === 'org:admin'
+  if (!userId || !orgId) {
+    return {
+      ok: false,
+      error: { reason: "Unauthorized or no organization selected" },
+    };
+  }
 
-	if (queryUserId !== userId && !isAdmin) {
-		return {
-			error: {
-				reason: 'Forbidden: You do not have permission to view these entries',
-			},
-			ok: false,
-		}
-	}
+  const queryUserId = targetUserId || userId;
+  const isAdmin = orgRole === "org:admin";
 
-	const { startDate, endDate } = filters
-		? getDateRange(filters)
-		: { startDate: undefined, endDate: undefined }
+  if (queryUserId !== userId && !isAdmin) {
+    return {
+      ok: false,
+      error: {
+        reason: "Forbidden: You do not have permission to view these entries",
+      },
+    };
+  }
 
-	try {
-		const rows = await dbGetTimeEntries(
-			queryUserId,
-			orgId,
-			startDate,
-			endDate,
-		)
-		return { value: rows, ok: true }
-	} catch (error) {
-		console.error('DB error: ', error)
-		return { error: { reason: 'Unknown DB error' }, ok: false }
-	}
+  const tz = filters?.timezone || "UTC";
+  const startDate = parseFilterDate(filters?.start, tz, false);
+  const endDate = parseFilterDate(filters?.end, tz, true);
+
+  return await dbGetTimeEntries(queryUserId, orgId, startDate, endDate)
+    .then((data) => {
+      return { ok: true as const, value: data };
+    })
+    .catch((e) => {
+      console.error("Error user fetching entries: ", e);
+      return {
+        ok: false,
+        error: { reason: "Error user fetching entries" },
+      };
+    });
 }
 
 export async function getOrgTimeEntries(filters?: {
-	timeframe?: string
-	week?: string
-	month?: string
-	year?: string
-	start?: string
-	end?: string
+  start?: string;
+  end?: string;
+  timezone?: string;
 }): Promise<SerializableResult<TimeEntry[], { reason: string }>> {
-	
-	const { userId, orgId, orgRole } = await auth.protect()
-	const isAdmin = orgRole === 'org:admin'
+  const { userId, orgId, orgRole } = await auth.protect();
+  const isAdmin = orgRole === "org:admin";
 
-	if (!userId || !orgId || !isAdmin) {
-		return {
-			error: {
-				reason: 'Unauthorized: You must be an admin to view organization stats',
-			},
-			ok: false,
-		}
-	}
+  if (!userId || !orgId || !isAdmin) {
+    return {
+      error: {
+        reason: "Unauthorized: You must be an admin to view organization stats",
+      },
+      ok: false,
+    };
+  }
 
-	const { startDate, endDate } = filters
-		? getDateRange(filters)
-		: { startDate: undefined, endDate: undefined }
+  const tz = filters?.timezone || "UTC";
+  const startDate = parseFilterDate(filters?.start, tz, false);
+  const endDate = parseFilterDate(filters?.end, tz, true);
 
-	try {
-		const rows = await dbGetOrgTimeEntries(orgId, startDate, endDate)
-		return { value: rows, ok: true }
-	} catch (error) {
-		console.error('DB error: ', error)
-		return { error: { reason: 'Unknown DB error' }, ok: false }
-	}
+  return await dbGetOrgTimeEntries(orgId, startDate, endDate)
+    .then((data) => {
+      return { value: data, ok: true as const };
+    })
+    .catch((e) => {
+      console.error("Error fetching org entries: ", e);
+      return {
+        error: { reason: "Error fetching org entries" },
+        ok: false,
+      };
+    });
 }
 
 export async function clockIn() {
-	const { userId, orgId } = await auth.protect()
-	if (!userId || !orgId) {
-		return errAsync({
-			reason: 'Unauthorized or no organization selected',
-		} as const)
-	}
+  const { userId, orgId } = await auth.protect();
+  if (!userId || !orgId) {
+    return errAsync({
+      reason: "Unauthorized or no organization selected",
+    } as const);
+  }
 
-	const isOverMemberShipLimitValue = await isOverMemberShipLimit(orgId)
-	if (isOverMemberShipLimitValue)
-		return errAsync({
-			reason: 'Over organization membership limit.',
-		} as const)
+  const [membershipLimitResult, activeEntry] = await Promise.all([
+    isOverMemberShipLimit(orgId)
+      .then((membershipLimit) => {
+        if (membershipLimit) {
+          return Promise.resolve(
+            errAsync({
+              reason: "Over organization membership limit.",
+            } as const),
+          );
+        }
+      })
+      .catch((e) => {
+        console.error("Unable to verify organization membership limit: ", e);
+        return Promise.resolve(
+          errAsync({
+            reason: "Unable to verify organization membership limit.",
+          } as const),
+        );
+      }),
+    //////////////
+    dbCheckActiveEntry(userId, orgId).catch((e) => {
+      console.error("Error checking active clock-in entry: ", e);
+      return errAsync({
+        reason: "Error checking active clock-in entry",
+      } as const);
+    }),
+  ]);
 
-	try {
-		const activeEntry = await dbCheckActiveEntry(userId, orgId)
+  if (membershipLimitResult) {
+    return membershipLimitResult;
+  }
 
-		if (activeEntry.length > 0) {
-			return errAsync({ reason: 'Already clocked in' } as const)
-		}
+  if (!Array.isArray(activeEntry)) {
+    return activeEntry;
+  }
 
-		const newEntry = await dbClockIn(userId, orgId)
+  if (activeEntry.length > 0) {
+    return errAsync({ reason: "Already clocked in" } as const);
+  }
 
-		return okAsync(newEntry)
-	} catch (error) {
-		console.error('DB error: ', error)
-		return errAsync({ reason: 'Unknown DB error' } as const)
-	}
+  return await dbClockIn(userId, orgId)
+    .then((activeEntry) => {
+      return okAsync(activeEntry);
+    })
+    .catch((e) => {
+      console.error("Error clocking in: ", e);
+      return errAsync({ reason: "Error clocking in." } as const);
+    });
 }
 
 export async function clockOut() {
-	const { userId, orgId } = await auth.protect()
-	if (!userId || !orgId) {
-		return errAsync({
-			reason: 'Unauthorized or no organization selected',
-		} as const)
-	}
-	try {
-		const activeEntry = await dbClockOut(userId, orgId)
+  const { userId, orgId } = await auth.protect();
+  if (!userId || !orgId) {
+    return errAsync({
+      reason: "Unauthorized or no organization selected",
+    } as const);
+  }
 
-		if (!activeEntry) {
-			return errAsync({ reason: 'No active clock-in found' } as const)
-		}
-
-		return okAsync(activeEntry)
-	} catch (error) {
-		console.error('DB error: ', error)
-		return errAsync({ reason: 'Unknown DB error' } as const)
-	}
+  return await dbClockOut(userId, orgId)
+    .then((clockedOutEntry) => {
+      return okAsync(clockedOutEntry);
+    })
+    .catch((e) => {
+      console.error("Error clocking out entry: ", e);
+      return errAsync({
+        reason: "Error clocking out.",
+      } as const);
+    });
 }
 
 export async function deleteTimeEntry(id: number) {
-	const { userId, orgId, orgRole } = await auth.protect()
-	const isAdmin = orgRole === 'org:admin'
-	if (!userId || !orgId || !isAdmin) {
-		return errAsync({ reason: 'Unauthorized' } as const)
-	}
+  const { userId, orgId, orgRole } = await auth.protect();
+  const isAdmin = orgRole === "org:admin";
+  if (!userId || !orgId || !isAdmin) {
+    return errAsync({ reason: "Unauthorized" } as const);
+  }
 
-	try {
-		const deleted = await dbDeleteTimeEntry(id, orgId)
-
-		return deleted
-			? okAsync(deleted)
-			: errAsync({ reason: 'Entry not found or unauthorized' } as const)
-	} catch (error) {
-		console.error('Delete error: ', error)
-		return errAsync({ reason: 'Failed to delete entry' } as const)
-	}
+  return await dbDeleteTimeEntry(id, orgId)
+    .then((deleted) => {
+      return okAsync(deleted);
+    })
+    .catch((e) => {
+      console.error("Delete error: ", e);
+      return errAsync({ reason: "Failed to delete entry" } as const);
+    });
 }
 
 export async function updateTimeEntry(
-	id: number,
-	clock_in: Date,
-	clock_out: Date | null,
+  id: number,
+  clock_in: Date,
+  clock_out: Date | null,
 ) {
-	const { userId, orgId, orgRole } = await auth.protect()
-	if (!userId || !orgId) {
-		return errAsync({ reason: 'Unauthorized' } as const)
-	}
-	const isAdmin = orgRole === 'org:admin'
+  const { userId, orgId, orgRole } = await auth.protect();
+  if (!userId || !orgId) {
+    return errAsync({ reason: "Unauthorized" } as const);
+  }
 
-	try {
-		const updated = await dbUpdateTimeEntry(
-			id,
-			clock_in,
-			clock_out,
-			orgId,
-			isAdmin,
-		)
-
-		return updated
-			? okAsync(updated)
-			: errAsync({ reason: 'Entry not found or unauthorized' } as const)
-	} catch (error) {
-		console.error('Update error: ', error)
-		return errAsync({ reason: 'Failed to update entry' } as const)
-	}
+  return await dbUpdateTimeEntry(
+    id,
+    clock_in,
+    clock_out,
+    orgId,
+    orgRole === "org:admin",
+  )
+    .then((updated) => {
+      return okAsync(updated);
+    })
+    .catch((e) => {
+      console.error("Update error: ", e);
+      return errAsync({ reason: "Failed to update entry" } as const);
+    });
 }
 
 export async function getActiveEntry(): Promise<
-	SerializableResult<TimeEntry | null, { reason: string }>
+  SerializableResult<TimeEntry | null, { reason: string }>
 > {
-	const { userId, orgId } = await auth()
-	if (!userId || !orgId) {
-		return {
-			error: { reason: 'Unauthorized or no organization selected' },
-			ok: false,
-		}
-	}
+  const { userId, orgId } = await auth.protect();
+  if (!userId || !orgId) {
+    return {
+      error: { reason: "Unauthorized or no organization selected" },
+      ok: false,
+    };
+  }
 
-	try {
-		const [activeEntry] = await sql`
-            SELECT * FROM time_entries 
-            WHERE user_id = ${userId} AND org_id = ${orgId} AND clock_out IS NULL
-            LIMIT 1
-        `
-		return {
-			value: (activeEntry as unknown as TimeEntry) || null,
-			ok: true,
-		}
-	} catch (error) {
-		console.error('DB error: ', error)
-		return { error: { reason: 'Unknown DB error' }, ok: false }
-	}
+  return await dbGetActiveEntry(userId, orgId)
+    .then((activeEntry) => {
+      return {
+        value: activeEntry || null,
+        ok: true as const,
+      };
+    })
+    .catch((error) => {
+      console.error("Error fetching active entries: ", error);
+      return {
+        error: { reason: "Error fetching active entries" },
+        ok: false,
+      };
+    });
 }
 
 export async function updateReportingSettingsDal(
-	frequency: string,
-	day: string | null = null,
-	interval: number = 1,
+  frequency: string,
+  day: string | null = null,
+  interval: number = 1,
 ) {
-	const { userId, orgId, orgRole, has } = await auth.protect()
-	const isAdmin = orgRole === 'org:admin'
-	const hasReporting = has({ feature: 'reporting' })
-
-	if (!userId || !orgId || !isAdmin || !hasReporting) {
-		return errAsync({ reason: 'Unauthorized' } as const)
-	}
-
-	// const isPaidPlan = !has({ plan: 'free' })
-
-	// if (!isPaidPlan) {
-	// 	return errAsync({
-	// 		reason: 'Reports settings are only available on paid plans',
-	// 	} as const)
-	// }
-
-	try {
-		const updated = await dbUpdateReportingSettings(
-			orgId,
-			frequency,
-			day,
-			interval,
-		)
-		return okAsync(updated)
-	} catch (error) {
-		console.error('Update settings error: ', error)
-		return errAsync({ reason: 'Failed to update settings' } as const)
-	}
+  const authUser = await auth.protect();
+  if (
+    !authUser.userId ||
+    !authUser.orgId ||
+    authUser.orgRole !== "org:admin" ||
+    !authUser.has({ feature: "reporting" })
+  ) {
+    return errAsync({ reason: "Unauthorized" } as const);
+  }
+  return await dbUpdateReportingSettings(
+    authUser.orgId,
+    frequency,
+    day,
+    interval,
+  )
+    .then((updated) => {
+      return okAsync(updated);
+    })
+    .catch((e) => {
+      console.error("Update settings error: ", e);
+      return errAsync({
+        reason: "Failed to update settings",
+      } as const);
+    });
 }
 
 export async function getOrgReportingSettings(): Promise<
-	SerializableResult<ReportingSettingsData | null, { reason: string }>
+  SerializableResult<ReportingSettingsData | null, { reason: string }>
 > {
-	const { userId, orgId } = await auth()
-	if (!userId || !orgId) {
-		return {
-			error: { reason: 'Unauthorized or no organization selected' },
-			ok: false,
-		}
-	}
+  const { userId, orgId } = await auth.protect();
+  if (!userId || !orgId) {
+    return {
+      error: { reason: "Unauthorized or no organization selected" },
+      ok: false,
+    };
+  }
 
-	try {
-		const settings = await dbGetReportingSettings(orgId)
-		return {
-			value: (settings as unknown as ReportingSettingsData) || null,
-			ok: true,
-		}
-	} catch (error) {
-		console.error('DB error: ', error)
-		return { error: { reason: 'Unknown DB error' }, ok: false }
-	}
+  return await dbGetReportingSettings(orgId)
+    .then((settings) => {
+      return {
+        value: (settings as ReportingSettingsData) || null,
+        ok: true as const,
+      };
+    })
+    .catch((e) => {
+      console.error("Error fetching settings.: ", e);
+      return { error: { reason: "Error fetching settings." }, ok: false };
+    });
 }
