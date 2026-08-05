@@ -51,7 +51,7 @@ export function TimeframeSelector({
     updateParams({ userId: userId || null });
   };
 
-  const currentStart = startDate ? new Date(startDate) : new Date();
+  const currentStart = startDate ? new Date(startDate.includes('T') ? startDate : `${startDate}T00:00:00`) : new Date();
   const currentYear = currentStart.getFullYear();
   const currentMonth = currentStart.getMonth();
   const currentDate = currentStart.getDate();
