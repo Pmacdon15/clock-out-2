@@ -51,7 +51,7 @@ export function HoursLineChart(props: HoursLineChartProps) {
 
   const summaryText = useMemo(() => {
     if (!startDate) return timeframe || "custom";
-    const start = new Date(startDate);
+    const start = new Date(startDate.includes('T') ? startDate : `${startDate}T00:00:00`);
 
     if (timeframe === "week") {
       const date = start.getDate();
@@ -67,7 +67,7 @@ export function HoursLineChart(props: HoursLineChartProps) {
       return format(start, "yyyy");
     }
     if (timeframe === "custom") {
-      return `${format(start, "MMM d, yyyy")} - ${endDate ? format(new Date(endDate), "MMM d, yyyy") : ""}`;
+      return `${format(start, "MMM d, yyyy")} - ${endDate ? format(new Date(endDate.includes('T') ? endDate : `${endDate}T00:00:00`), "MMM d, yyyy") : ""}`;
     }
     return timeframe || "custom";
   }, [timeframe, startDate, endDate]);
