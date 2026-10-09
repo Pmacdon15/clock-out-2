@@ -1,0 +1,63 @@
+diff --git a/src/components/ViewHours/HoursBarChart.tsx b/src/components/ViewHours/HoursBarChart.tsx
+index 6655199..6b0a7bd 100644
+--- a/src/components/ViewHours/HoursBarChart.tsx
++++ b/src/components/ViewHours/HoursBarChart.tsx
+@@ -41,7 +41,9 @@ export function HoursBarChart(props: HoursBarChartProps) {
+ 
+   const summaryText = useMemo(() => {
+     if (!startDate) return timeframe;
+-    const start = new Date(startDate.includes('T') ? startDate : `${startDate}T00:00:00`);
++    const start = new Date(
++      startDate.includes("T") ? startDate : `${startDate}T00:00:00`,
++    );
+ 
+     if (timeframe === "week") {
+       const date = start.getDate();
+@@ -57,7 +59,7 @@ export function HoursBarChart(props: HoursBarChartProps) {
+       return format(start, "yyyy");
+     }
+     if (timeframe === "custom") {
+-      return `${format(start, "MMM d, yyyy")} - ${endDate ? format(new Date(endDate.includes('T') ? endDate : `${endDate}T00:00:00`), "MMM d, yyyy") : ""}`;
++      return `${format(start, "MMM d, yyyy")} - ${endDate ? format(new Date(endDate.includes("T") ? endDate : `${endDate}T00:00:00`), "MMM d, yyyy") : ""}`;
+     }
+     return timeframe;
+   }, [timeframe, startDate, endDate]);
+diff --git a/src/components/ViewHours/HoursLineChart.tsx b/src/components/ViewHours/HoursLineChart.tsx
+index 46aec09..cca3153 100644
+--- a/src/components/ViewHours/HoursLineChart.tsx
++++ b/src/components/ViewHours/HoursLineChart.tsx
+@@ -51,7 +51,9 @@ export function HoursLineChart(props: HoursLineChartProps) {
+ 
+   const summaryText = useMemo(() => {
+     if (!startDate) return timeframe || "custom";
+-    const start = new Date(startDate.includes('T') ? startDate : `${startDate}T00:00:00`);
++    const start = new Date(
++      startDate.includes("T") ? startDate : `${startDate}T00:00:00`,
++    );
+ 
+     if (timeframe === "week") {
+       const date = start.getDate();
+@@ -67,7 +69,7 @@ export function HoursLineChart(props: HoursLineChartProps) {
+       return format(start, "yyyy");
+     }
+     if (timeframe === "custom") {
+-      return `${format(start, "MMM d, yyyy")} - ${endDate ? format(new Date(endDate.includes('T') ? endDate : `${endDate}T00:00:00`), "MMM d, yyyy") : ""}`;
++      return `${format(start, "MMM d, yyyy")} - ${endDate ? format(new Date(endDate.includes("T") ? endDate : `${endDate}T00:00:00`), "MMM d, yyyy") : ""}`;
+     }
+     return timeframe || "custom";
+   }, [timeframe, startDate, endDate]);
+diff --git a/src/components/ViewHours/TimeframeSelector.tsx b/src/components/ViewHours/TimeframeSelector.tsx
+index c3b0db6..5402b84 100644
+--- a/src/components/ViewHours/TimeframeSelector.tsx
++++ b/src/components/ViewHours/TimeframeSelector.tsx
+@@ -51,7 +51,9 @@ export function TimeframeSelector({
+     updateParams({ userId: userId || null });
+   };
+ 
+-  const currentStart = startDate ? new Date(startDate.includes('T') ? startDate : `${startDate}T00:00:00`) : new Date();
++  const currentStart = startDate
++    ? new Date(startDate.includes("T") ? startDate : `${startDate}T00:00:00`)
++    : new Date();
+   const currentYear = currentStart.getFullYear();
+   const currentMonth = currentStart.getMonth();
+   const currentDate = currentStart.getDate();

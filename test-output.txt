@@ -1,0 +1,131 @@
+[33m(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - ESM syntax in a file loaded as CommonJS (vitest.config.ts:1:1). Use a `.mjs` extension or set `"type": "module"` in the closest package.json
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.[39m
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.11 [39m[90m/home/runner/work/clock-out-2/clock-out-2[39m
+      [2mCoverage enabled with [22m[33mv8[39m
+
+ [32m✓[39m tests/lib/dal.test.ts [2m([22m[2m51 tests[22m[2m)[22m[32m 37[2mms[22m[39m
+ [32m✓[39m tests/lib/reports.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 23[2mms[22m[39m
+ [32m✓[39m tests/components/ViewHours/HoursBarChart.test.tsx [2m([22m[2m21 tests[22m[2m)[22m[33m 669[2mms[22m[39m
+     [33m[2m✓[22m[39m renders a printable report and downloads it [33m 303[2mms[22m[39m
+[90mstderr[2m | tests/components/ViewHours.test.tsx[2m > [22m[2mViewHours for the current user[2m > [22m[2mfalls back to defaults when optional promises are missing
+[22m[39mA component was suspended by an uncached promise. Creating promises inside a Client Component or hook is not yet supported, except via a Suspense-compatible library or framework.
+
+ [32m✓[39m tests/components/ViewHours.test.tsx [2m([22m[2m11 tests[22m[2m)[22m[33m 622[2mms[22m[39m
+     [33m[2m✓[22m[39m switches between bar and line charts [33m 364[2mms[22m[39m
+ [32m✓[39m tests/components/time-clock.test.tsx [2m([22m[2m18 tests[22m[2m)[22m[33m 1279[2mms[22m[39m
+     [33m[2m✓[22m[39m adds an optimistic entry and clocks in [33m 339[2mms[22m[39m
+ [32m✓[39m tests/app/api/cron/weekly-report.test.ts [2m([22m[2m19 tests[22m[2m)[22m[32m 40[2mms[22m[39m
+ [32m✓[39m tests/components/ViewHours/HoursLineChart.test.tsx [2m([22m[2m22 tests[22m[2m)[22m[33m 841[2mms[22m[39m
+       [33m[2m✓[22m[39m renders a printable org report and downloads it [33m 407[2mms[22m[39m
+ [32m✓[39m tests/lib/db.test.ts [2m([22m[2m17 tests[22m[2m)[22m[32m 71[2mms[22m[39m
+ [32m✓[39m tests/lib/actions.test.ts [2m([22m[2m21 tests[22m[2m)[22m[32m 23[2mms[22m[39m
+ [32m✓[39m tests/components/ViewHours/TimeframeSelector.test.tsx [2m([22m[2m16 tests[22m[2m)[22m[33m 1174[2mms[22m[39m
+     [33m[2m✓[22m[39m lists other members and selects one [33m 393[2mms[22m[39m
+ [32m✓[39m tests/components/DashboardTabs.test.tsx [2m([22m[2m7 tests[22m[2m)[22m[33m 470[2mms[22m[39m
+ [32m✓[39m tests/components/ViewHours/EntryItem.test.tsx [2m([22m[2m12 tests[22m[2m)[22m[33m 868[2mms[22m[39m
+ [32m✓[39m tests/components/ReportingSettings.test.tsx [2m([22m[2m14 tests[22m[2m)[22m[33m 3242[2mms[22m[39m
+     [33m[2m✓[22m[39m defaults to weekly and allows saving when nothing is stored [33m 335[2mms[22m[39m
+ [32m✓[39m tests/app/home-page.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[32m 277[2mms[22m[39m
+ [32m✓[39m tests/components/DeleteConfirmDialog.test.tsx [2m([22m[2m9 tests[22m[2m)[22m[33m 1488[2mms[22m[39m
+     [33m[2m✓[22m[39m opens a confirmation from the default trigger [33m 360[2mms[22m[39m
+ [32m✓[39m tests/app/api/webhooks/clerk.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 26[2mms[22m[39m
+ [32m✓[39m tests/components/ui/ui.test.tsx [2m([22m[2m18 tests[22m[2m)[22m[33m 605[2mms[22m[39m
+ [32m✓[39m tests/components/emails/WeeklyReportEmail.test.tsx [2m([22m[2m6 tests[22m[2m)[22m[33m 908[2mms[22m[39m
+     [33m[2m✓[22m[39m summarises the period and lists each day's shifts [33m 544[2mms[22m[39m
+ [32m✓[39m tests/app/pages.test.tsx [2m([22m[2m5 tests[22m[2m)[22m[33m 728[2mms[22m[39m
+     [33m[2m✓[22m[39m shows the organization pricing table and a way back [33m 355[2mms[22m[39m
+ [32m✓[39m tests/components/OrgSwitcher.test.tsx [2m([22m[2m7 tests[22m[2m)[22m[32m 114[2mms[22m[39m
+ [32m✓[39m tests/lib/utils-clerk.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+ [32m✓[39m tests/hooks/useTimeframeDefaults.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 104[2mms[22m[39m
+ [32m✓[39m tests/components/OrgSettings.test.tsx [2m([22m[2m3 tests[22m[2m)[22m[32m 60[2mms[22m[39m
+ [32m✓[39m tests/components/static.test.tsx [2m([22m[2m5 tests[22m[2m)[22m[33m 585[2mms[22m[39m
+     [33m[2m✓[22m[39m links to every public page and the contact address [33m 424[2mms[22m[39m
+ [32m✓[39m tests/components/ViewHours/EntryList.test.tsx [2m([22m[2m4 tests[22m[2m)[22m[32m 92[2mms[22m[39m
+ [32m✓[39m tests/components/ui/alert-dialog.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[33m 448[2mms[22m[39m
+     [33m[2m✓[22m[39m renders every part with merged classes [33m 413[2mms[22m[39m
+ [32m✓[39m tests/components/ViewHours/DaysWorkedBreakdown.test.tsx [2m([22m[2m3 tests[22m[2m)[22m[32m 143[2mms[22m[39m
+ [32m✓[39m tests/components/ViewHours/MemberToggles.test.tsx [2m([22m[2m4 tests[22m[2m)[22m[33m 1134[2mms[22m[39m
+     [33m[2m✓[22m[39m offers to deselect all when every member is visible [33m 675[2mms[22m[39m
+ [32m✓[39m tests/lib/download.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 31[2mms[22m[39m
+ [32m✓[39m tests/proxy.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 37[2mms[22m[39m
+ [32m✓[39m tests/lib/reducers/time-entries.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 18[2mms[22m[39m
+ [32m✓[39m tests/components/Providers.test.tsx [2m([22m[2m1 test[22m[2m)[22m[32m 54[2mms[22m[39m
+ [32m✓[39m tests/lib/webhooks/clerk.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 11[2mms[22m[39m
+ [32m✓[39m tests/lib/date-utils.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m tests/lib/utils.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 15[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m35 passed[39m[22m[90m (35)[39m
+[2m      Tests [22m [1m[32m359 passed[39m[22m[90m (359)[39m
+[2m   Start at [22m 05:28:30
+[2m   Duration [22m 28.09s[2m (transform 1.58s, setup 11.49s, import 21.35s, tests 16.26s, environment 24.06s)[22m
+
+[34m % [39m[2mCoverage report from [22m[33mv8[39m
+-------------------|---------|----------|---------|---------|-------------------
+File               | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+-------------------|---------|----------|---------|---------|-------------------
+All files          |     100 |      100 |     100 |     100 |                   
+ src               |     100 |      100 |     100 |     100 |                   
+  proxy.ts         |     100 |      100 |     100 |     100 |                   
+ src/app           |     100 |      100 |     100 |     100 |                   
+  layout.tsx       |     100 |      100 |     100 |     100 |                   
+  page.tsx         |     100 |      100 |     100 |     100 |                   
+ .../weekly-report |     100 |      100 |     100 |     100 |                   
+  route.ts         |     100 |      100 |     100 |     100 |                   
+ ...webhooks/clerk |     100 |      100 |     100 |     100 |                   
+  route.ts         |     100 |      100 |     100 |     100 |                   
+ src/app/plans     |     100 |      100 |     100 |     100 |                   
+  page.tsx         |     100 |      100 |     100 |     100 |                   
+ src/app/privacy   |     100 |      100 |     100 |     100 |                   
+  page.tsx         |     100 |      100 |     100 |     100 |                   
+ src/app/tos       |     100 |      100 |     100 |     100 |                   
+  page.tsx         |     100 |      100 |     100 |     100 |                   
+ src/components    |     100 |      100 |     100 |     100 |                   
+  ...boardTabs.tsx |     100 |      100 |     100 |     100 |                   
+  ...irmDialog.tsx |     100 |      100 |     100 |     100 |                   
+  Footer.tsx       |     100 |      100 |     100 |     100 |                   
+  OrgSettings.tsx  |     100 |      100 |     100 |     100 |                   
+  OrgSwitcher.tsx  |     100 |      100 |     100 |     100 |                   
+  Providers.tsx    |     100 |      100 |     100 |     100 |                   
+  ...gSettings.tsx |     100 |      100 |     100 |     100 |                   
+  ViewHours.tsx    |     100 |      100 |     100 |     100 |                   
+  time-clock.tsx   |     100 |      100 |     100 |     100 |                   
+ ...ents/ViewHours |     100 |      100 |     100 |     100 |                   
+  ...Breakdown.tsx |     100 |      100 |     100 |     100 |                   
+  EntryItem.tsx    |     100 |      100 |     100 |     100 |                   
+  EntryList.tsx    |     100 |      100 |     100 |     100 |                   
+  ...sBarChart.tsx |     100 |      100 |     100 |     100 |                   
+  ...LineChart.tsx |     100 |      100 |     100 |     100 |                   
+  ...erToggles.tsx |     100 |      100 |     100 |     100 |                   
+  ...eSelector.tsx |     100 |      100 |     100 |     100 |                   
+ ...ponents/emails |     100 |      100 |     100 |     100 |                   
+  ...portEmail.tsx |     100 |      100 |     100 |     100 |                   
+ ...ents/fallbacks |     100 |      100 |     100 |     100 |                   
+  ...-fallback.tsx |     100 |      100 |     100 |     100 |                   
+  ...-fallback.tsx |     100 |      100 |     100 |     100 |                   
+  ...-fallback.tsx |     100 |      100 |     100 |     100 |                   
+ ...onents/headers |     100 |      100 |     100 |     100 |                   
+  ...ge-header.tsx |     100 |      100 |     100 |     100 |                   
+ src/components/ui |     100 |      100 |     100 |     100 |                   
+  Icons.tsx        |     100 |      100 |     100 |     100 |                   
+  alert-dialog.tsx |     100 |      100 |     100 |     100 |                   
+  index.tsx        |     100 |      100 |     100 |     100 |                   
+  tabs.tsx         |     100 |      100 |     100 |     100 |                   
+ src/hooks         |     100 |      100 |     100 |     100 |                   
+  ...meDefaults.ts |     100 |      100 |     100 |     100 |                   
+ src/lib           |     100 |      100 |     100 |     100 |                   
+  actions.ts       |     100 |      100 |     100 |     100 |                   
+  dal.ts           |     100 |      100 |     100 |     100 |                   
+  date-utils.ts    |     100 |      100 |     100 |     100 |                   
+  db.ts            |     100 |      100 |     100 |     100 |                   
+  download.ts      |     100 |      100 |     100 |     100 |                   
+  reports.ts       |     100 |      100 |     100 |     100 |                   
+  utils-clerk.ts   |     100 |      100 |     100 |     100 |                   
+  utils.ts         |     100 |      100 |     100 |     100 |                   
+ src/lib/reducers  |     100 |      100 |     100 |     100 |                   
+  time-entries.ts  |     100 |      100 |     100 |     100 |                   
+ src/lib/webhooks  |     100 |      100 |     100 |     100 |                   
+  clerk.ts         |     100 |      100 |     100 |     100 |                   
+-------------------|---------|----------|---------|---------|-------------------
+exit=0
