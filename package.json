@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
+    "test": "bun test",
     "lint": "biome check --write --unsafe",
     "format": "biome format --write",
     "postbuild": "next-sitemap",
