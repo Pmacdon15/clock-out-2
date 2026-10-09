@@ -21,6 +21,7 @@ export default defineConfig({
       include: ["src/**/*.{ts,tsx}"],
       exclude: ["src/lib/types.ts"],
       reporter: ["text", "json-summary", "html"],
+      reportOnFailure: true,
       thresholds: {
         lines: 100,
         functions: 100,

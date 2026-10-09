@@ -15,6 +15,7 @@ vi.mock("next/cache", () => ({ cacheTag, cacheLife }));
 
 type Db = typeof import("@/lib/db");
 let db: Db;
+let neonCalls: unknown[][] = [];
 
 /** The interpolated values passed to the nth `sql` tagged-template call. */
 const valuesOf = (call = 0) => sql.mock.calls[call].slice(1);
@@ -28,6 +29,8 @@ const end = new Date("2026-01-08T00:00:00Z");
 beforeAll(async () => {
   vi.stubEnv("DATABASE_URL", "postgres://test");
   db = await import("@/lib/db");
+  // Snapshot now: call history is cleared before every test.
+  neonCalls = [...neon.mock.calls];
 });
 
 beforeEach(() => {
@@ -36,7 +39,7 @@ beforeEach(() => {
 
 describe("module setup", () => {
   it("creates the neon client from DATABASE_URL", () => {
-    expect(neon).toHaveBeenCalledWith("postgres://test");
+    expect(neonCalls).toEqual([["postgres://test"]]);
     expect(db.sql).toBe(sql);
   });
 

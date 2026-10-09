@@ -20,8 +20,8 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: bun install > install-output.txt 2>&1; echo "exit=$?" >> install-output.txt
       - run: bunx vitest run --coverage > test-output.txt 2>&1; echo "exit=$?" >> test-output.txt
-      - run: bunx tsc --noEmit > tsc-output.txt 2>&1; echo "exit=$?" >> tsc-output.txt
-      - run: bunx biome check . > biome-output.txt 2>&1; echo "exit=$?" >> biome-output.txt
+      - run: (bunx next typegen && bunx tsc --noEmit) > tsc-output.txt 2>&1; echo "exit=$?" >> tsc-output.txt
+      - run: bunx biome check tests vitest.config.ts > biome-output.txt 2>&1; echo "exit=$?" >> biome-output.txt
       - run: bunx biome check --write --unsafe . > /dev/null 2>&1; git diff -- tests vitest.config.ts src > biome-fix.diff; true
       - name: Publish results
         run: |

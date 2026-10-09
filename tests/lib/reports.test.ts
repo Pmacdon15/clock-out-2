@@ -52,6 +52,9 @@ vi.mock("@/lib/db", () => ({
 
 import { sendWeeklyReports } from "@/lib/reports";
 
+// Snapshot the constructor call now: call history is cleared before every test.
+const initialSesConfig = mocks.sesConfig.mock.calls[0]?.[0];
+
 const org = { id: "org_1", name: "Acme" };
 const withReporting = {
   subscriptionItems: [
@@ -114,7 +117,7 @@ beforeEach(() => {
 
 describe("SES client", () => {
   it("defaults to us-east-1", () => {
-    expect(mocks.sesConfig).toHaveBeenCalledWith({ region: "us-east-1" });
+    expect(initialSesConfig).toEqual({ region: "us-east-1" });
   });
 
   it("uses AWS_REGION when set", async () => {
