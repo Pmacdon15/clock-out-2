@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { type EntryAction, timeEntriesReducer } from "@/lib/reducers/time-entries";
+import {
+  type EntryAction,
+  timeEntriesReducer,
+} from "@/lib/reducers/time-entries";
 import { makeEntry } from "../../utils";
 
 describe("timeEntriesReducer", () => {

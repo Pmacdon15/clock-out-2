@@ -7,11 +7,16 @@ on:
 permissions:
   contents: write
 
+defaults:
+  run:
+    # No -e: every step should run and record its output even if a check fails.
+    shell: bash {0}
+
 jobs:
   debug:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
       - run: bun install > install-output.txt 2>&1; echo "exit=$?" >> install-output.txt
       - run: bunx vitest run --coverage > test-output.txt 2>&1; echo "exit=$?" >> test-output.txt
