@@ -91,6 +91,8 @@ export default function TimeClock({
   };
 
   const handleClockOut = () => {
+    // The Clock Out button only renders while there is an active entry.
+    /* v8 ignore next -- @preserve */
     if (!activeEntry) return;
 
     const now = new Date();

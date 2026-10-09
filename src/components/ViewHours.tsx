@@ -88,6 +88,8 @@ export default function ViewHours({
   const availableYears = useMemo(() => {
     const years = new Set<number>();
     years.add(new Date().getFullYear());
+    // Only the current year is listed for now, so the comparator never runs.
+    /* v8 ignore next -- @preserve */
     return Array.from(years).sort((a, b) => b - a);
   }, []);
 

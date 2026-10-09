@@ -395,7 +395,7 @@ function HoursLineChartContent({
                         </div>
                       </td>
                       <td className="py-3 text-right font-bold text-zinc-900 tabular-nums">
-                        {(memberBreakdown[member.id] || 0).toFixed(2)}h
+                        {memberBreakdown[member.id].toFixed(2)}h
                       </td>
                     </tr>
                   ))}

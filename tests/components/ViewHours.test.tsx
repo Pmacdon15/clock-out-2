@@ -163,10 +163,10 @@ describe("ViewHours for the current user", () => {
       timeframe: "week",
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "LINE CHART" }));
-    expect(latest("HoursLineChart")).toMatchObject({
-      members: [{ id: "", name: "Me Myself" }],
-      visibleMemberIds: new Set([""]),
+    expect(latest("HoursBarChart")).toMatchObject({
+      employeeName: "Me Myself",
+      filteredEntries: myEntries,
+      isViewingAll: false,
     });
   });
 

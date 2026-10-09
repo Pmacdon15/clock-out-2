@@ -149,23 +149,18 @@ export async function sendWeeklyReports(
         totalMs += durationMs;
 
         const dateKey = format(inDate, "MMM d, yyyy");
-        if (!dailyBreakdownMap.has(dateKey)) {
-          dailyBreakdownMap.set(dateKey, {
-            date: dateKey,
-            rawMs: 0,
-            shifts: [],
-          });
+        let dayData = dailyBreakdownMap.get(dateKey);
+        if (!dayData) {
+          dayData = { date: dateKey, rawMs: 0, shifts: [] };
+          dailyBreakdownMap.set(dateKey, dayData);
         }
 
-        const dayData = dailyBreakdownMap.get(dateKey);
-        if (dayData) {
-          dayData.rawMs += durationMs;
-          dayData.shifts.push({
-            start: format(inDate, "h:mm a"),
-            end: format(outDate, "h:mm a"),
-            duration: formatDuration(durationMs),
-          });
-        }
+        dayData.rawMs += durationMs;
+        dayData.shifts.push({
+          start: format(inDate, "h:mm a"),
+          end: format(outDate, "h:mm a"),
+          duration: formatDuration(durationMs),
+        });
       }
 
       console.log(
