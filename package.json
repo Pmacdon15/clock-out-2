@@ -9,7 +9,10 @@
     "typecheck": "tsc --noEmit",
     "lint": "biome check --write --unsafe",
     "format": "biome format --write",
-    "postbuild": "next-sitemap"
+    "postbuild": "next-sitemap",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@aws-sdk/client-ses": "^3.1127.0",
@@ -38,12 +41,18 @@
   "devDependencies": {
     "@biomejs/biome": "^2.5.12",
     "@tailwindcss/postcss": "^4.3.3",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.0",
     "@types/node": "^26.5.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
+    "@vitest/coverage-v8": "^4.0.0",
     "babel-plugin-react-compiler": "1.0.0",
+    "jsdom": "^27.0.0",
     "tailwindcss": "^4.3.3",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vitest": "^4.0.0"
   },
   "ignoreScripts": [
     "sharp",
