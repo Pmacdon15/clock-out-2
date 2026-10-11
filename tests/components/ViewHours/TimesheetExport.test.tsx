@@ -36,7 +36,7 @@ describe("TimesheetExport", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Spreadsheet" }));
     expect(exportTimesheet).toHaveBeenLastCalledWith(
-      "csv",
+      "xlsx",
       expect.any(Array),
       expect.any(Object),
     );

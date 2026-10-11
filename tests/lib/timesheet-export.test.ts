@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildExportRows,
   buildPdf,
+  buildSheetXml,
+  buildZip,
+  crc32,
   downloadFile,
   type ExportRow,
   exportFileName,
@@ -11,9 +14,11 @@ import {
   formatTime,
   layoutPdfPages,
   pdfText,
-  toCsv,
   toPdf,
   totalHours,
+  toXlsx,
+  XLSX_MIME,
+  xmlText,
 } from "@/lib/timesheet-export";
 import { makeEntry } from "../utils";
 
@@ -51,8 +56,8 @@ describe("formatting helpers", () => {
     expect(exportFileName(meta, "pdf")).toBe(
       "timesheet-ada-lovelace-2026-03-08-to-2026-03-14.pdf",
     );
-    expect(exportFileName({ ...meta, employee: "!!" }, "csv")).toBe(
-      "timesheet-employee-2026-03-08-to-2026-03-14.csv",
+    expect(exportFileName({ ...meta, employee: "!!" }, "xlsx")).toBe(
+      "timesheet-employee-2026-03-08-to-2026-03-14.xlsx",
     );
   });
 });
@@ -98,23 +103,104 @@ describe("buildExportRows", () => {
   });
 });
 
-describe("toCsv", () => {
-  it("writes a quoted, Excel-friendly table with totals", () => {
-    const csv = toCsv(
-      [row({ employee: 'Ada "The Count", Jr.' }), row({ hours: null })],
+/** Minimal reader for the stored (uncompressed) zips that buildZip writes. */
+function readZip(zip: Uint8Array): Record<string, string> {
+  const view = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
+  const endAt = zip.length - 22;
+  expect(view.getUint32(endAt, true)).toBe(0x06054b50);
+  const count = view.getUint16(endAt + 10, true);
+  let at = view.getUint32(endAt + 16, true);
+  const files: Record<string, string> = {};
+  for (let i = 0; i < count; i++) {
+    expect(view.getUint32(at, true)).toBe(0x02014b50);
+    const crc = view.getUint32(at + 16, true);
+    const size = view.getUint32(at + 24, true);
+    const nameLength = view.getUint16(at + 28, true);
+    const local = view.getUint32(at + 42, true);
+    const name = new TextDecoder().decode(
+      zip.subarray(at + 46, at + 46 + nameLength),
+    );
+    expect(view.getUint32(local, true)).toBe(0x04034b50);
+    const start = local + 30 + view.getUint16(local + 26, true);
+    const data = zip.subarray(start, start + size);
+    expect(crc32(data)).toBe(crc);
+    files[name] = new TextDecoder().decode(data);
+    at += 46 + nameLength;
+  }
+  return files;
+}
+
+describe("XLSX output", () => {
+  it("computes standard CRC-32 checksums", () => {
+    expect(crc32(new TextEncoder().encode("123456789"))).toBe(0xcbf43926);
+    expect(crc32(new Uint8Array())).toBe(0);
+  });
+
+  it("writes a readable zip archive", () => {
+    const files = readZip(
+      buildZip([
+        { name: "a.txt", content: "hello" },
+        { name: "dir/ü.xml", content: "<x>é</x>" },
+      ]),
+    );
+    expect(files).toEqual({ "a.txt": "hello", "dir/ü.xml": "<x>é</x>" });
+  });
+
+  it("escapes XML and strips forbidden control characters", () => {
+    expect(xmlText(`a & <b> "c"\u0001\tz`)).toBe(
+      "a &amp; &lt;b&gt; &quot;c&quot;\tz",
+    );
+  });
+
+  it("lays out the sheet with header, styled rows and a live total", () => {
+    const xml = buildSheetXml(
+      [
+        row({ employee: "Ada & Co", hours: 25 / 3 }),
+        row({ clockOut: "In progress", hours: null }),
+      ],
       meta,
     );
-    expect(csv.startsWith("﻿")).toBe(true);
-    expect(csv.slice(1).split("\r\n")).toEqual([
-      "Employee,Date,Clock In,Clock Out,Hours",
-      '"Ada ""The Count"", Jr.",2026-03-09,9:00 AM,5:00 PM,8.00',
-      "Ada,2026-03-09,9:00 AM,5:00 PM,",
-      "",
-      "Total,,,,8.00",
-      "Report for,Ada Lovelace",
-      'Period,"Mar 8, 2026 - Mar 14, 2026"',
-      "",
+    expect(xml).toContain(
+      '<c r="A1" s="2" t="inlineStr"><is><t xml:space="preserve">Timesheet</t></is></c>',
+    );
+    expect(xml).toContain(
+      '<c r="B2" t="inlineStr"><is><t xml:space="preserve">Ada Lovelace</t></is></c>',
+    );
+    expect(xml).toContain("Mar 8, 2026 - Mar 14, 2026");
+    expect(xml).toContain('<row r="4"></row>');
+    expect(xml).toContain(
+      '<c r="E5" s="5" t="inlineStr"><is><t xml:space="preserve">Hours</t></is></c>',
+    );
+    expect(xml).toContain("Ada &amp; Co");
+    expect(xml).toContain(`<c r="E6" s="3"><v>${25 / 3}</v></c>`);
+    expect(xml).toMatch(/<row r="7">(?:(?!<c r="E7").)*<\/row>/);
+    expect(xml).toContain(
+      `<c r="E8" s="4"><f>SUM(E6:E7)</f><v>${25 / 3}</v></c>`,
+    );
+    expect(xml).toContain('<pane ySplit="5" topLeftCell="A6"');
+  });
+
+  it("writes a zero total when there are no entries", () => {
+    const xml = buildSheetXml([], meta);
+    expect(xml).toContain('<c r="E6" s="4"><v>0</v></c>');
+    expect(xml).not.toContain("<f>");
+  });
+
+  it("packages a complete workbook", () => {
+    const files = readZip(toXlsx([row()], meta));
+    expect(Object.keys(files)).toEqual([
+      "[Content_Types].xml",
+      "_rels/.rels",
+      "xl/workbook.xml",
+      "xl/_rels/workbook.xml.rels",
+      "xl/styles.xml",
+      "xl/worksheets/sheet1.xml",
     ]);
+    expect(files["xl/workbook.xml"]).toContain('<sheet name="Timesheet"');
+    expect(files["xl/styles.xml"]).toContain('<cellXfs count="6">');
+    expect(files["xl/worksheets/sheet1.xml"]).toBe(
+      buildSheetXml([row()], meta),
+    );
   });
 });
 
@@ -216,7 +302,7 @@ describe("downloads", () => {
     createSpy.mockRestore();
   });
 
-  it("exports PDF and CSV files", () => {
+  it("exports PDF and Excel files", () => {
     const createSpy = vi.spyOn(document, "createElement");
 
     exportTimesheet("pdf", [row()], meta);
@@ -227,12 +313,12 @@ describe("downloads", () => {
       "timesheet-ada-lovelace-2026-03-08-to-2026-03-14.pdf",
     );
 
-    exportTimesheet("csv", [row()], meta);
+    exportTimesheet("xlsx", [row()], meta);
     blob = createObjectURL.mock.calls.at(-1)?.[0] as Blob;
-    expect(blob.type).toBe("text/csv;charset=utf-8");
+    expect(blob.type).toBe(XLSX_MIME);
     link = createSpy.mock.results.at(-1)?.value as HTMLAnchorElement;
     expect(link.download).toBe(
-      "timesheet-ada-lovelace-2026-03-08-to-2026-03-14.csv",
+      "timesheet-ada-lovelace-2026-03-08-to-2026-03-14.xlsx",
     );
     createSpy.mockRestore();
   });

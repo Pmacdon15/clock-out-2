@@ -1,7 +1,8 @@
 /**
- * Timesheet export: turns time entries into a downloadable CSV spreadsheet or
- * PDF. Dependency-free on purpose — the PDF is written by hand using the
- * built-in Helvetica fonts, so nothing extra ships in the client bundle.
+ * Timesheet export: turns time entries into a downloadable Excel spreadsheet
+ * (.xlsx) or PDF. Dependency-free on purpose — both files are written by hand
+ * (the PDF with the built-in Helvetica fonts), so nothing extra ships in the
+ * client bundle.
  */
 
 type ExportableEntry = {
@@ -11,7 +12,7 @@ type ExportableEntry = {
   clock_out: Date | string | null;
 };
 
-export type ExportFormat = "pdf" | "csv";
+export type ExportFormat = "pdf" | "xlsx";
 
 export type ExportRow = {
   employee: string;
@@ -102,29 +103,216 @@ export const exportFileName = (meta: ExportMeta, format: ExportFormat) => {
   return `timesheet-${who}-${meta.startDate.slice(0, 10)}-to-${meta.endDate.slice(0, 10)}.${format}`;
 };
 
-/* ------------------------------------------------------------------ CSV -- */
+/* ----------------------------------------------------------------- XLSX -- */
 
-const csvCell = (value: string) =>
-  /[",\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+/*
+ * An .xlsx file is a zip of XML parts. We write the smallest valid workbook:
+ * one sheet with inline strings, a few cell styles, and a live SUM formula
+ * for the total. Parts are stored uncompressed, which every spreadsheet app
+ * (Excel, Google Sheets, Numbers, LibreOffice) accepts.
+ */
 
-export function toCsv(rows: ExportRow[], meta: ExportMeta): string {
-  const lines = [
-    ["Employee", "Date", "Clock In", "Clock Out", "Hours"],
-    ...rows.map((r) => [
-      r.employee,
-      r.date,
-      r.clockIn,
-      r.clockOut,
-      r.hours === null ? "" : formatHours(r.hours),
-    ]),
-    [],
-    ["Total", "", "", "", formatHours(totalHours(rows))],
-    ["Report for", meta.employee],
-    ["Period", formatPeriod(meta)],
-  ];
-  // Leading BOM so Excel opens it as UTF-8 (names with accents survive).
-  return `﻿${lines.map((cells) => cells.map(csvCell).join(",")).join("\r\n")}\r\n`;
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
+  let c = n;
+  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  return c >>> 0;
+});
+
+export function crc32(bytes: Uint8Array): number {
+  let crc = 0xffffffff;
+  for (const byte of bytes) crc = CRC_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
 }
+
+const utf8 = (text: string) => Uint8Array.from(new TextEncoder().encode(text));
+
+/** Build a zip archive using the "stored" (no compression) method. */
+export function buildZip(
+  files: { name: string; content: string }[],
+): Uint8Array {
+  const chunks: Uint8Array[] = [];
+  const central: Uint8Array[] = [];
+  let offset = 0;
+
+  const header = (size: number) => {
+    const bytes = new Uint8Array(size);
+    return { bytes, view: new DataView(bytes.buffer) };
+  };
+
+  for (const file of files) {
+    const name = utf8(file.name);
+    const data = utf8(file.content);
+    const crc = crc32(data);
+
+    // Local file header. Timestamps are fixed (1980-01-01) so output is stable.
+    const local = header(30);
+    local.view.setUint32(0, 0x04034b50, true);
+    local.view.setUint16(4, 20, true); // version needed
+    local.view.setUint16(12, 0x21, true); // DOS date: 1980-01-01
+    local.view.setUint32(14, crc, true);
+    local.view.setUint32(18, data.length, true);
+    local.view.setUint32(22, data.length, true);
+    local.view.setUint16(26, name.length, true);
+    chunks.push(local.bytes, name, data);
+
+    // Central directory entry pointing back at the local header.
+    const entry = header(46);
+    entry.view.setUint32(0, 0x02014b50, true);
+    entry.view.setUint16(4, 20, true); // version made by
+    entry.view.setUint16(6, 20, true); // version needed
+    entry.view.setUint16(14, 0x21, true);
+    entry.view.setUint32(16, crc, true);
+    entry.view.setUint32(20, data.length, true);
+    entry.view.setUint32(24, data.length, true);
+    entry.view.setUint16(28, name.length, true);
+    entry.view.setUint32(42, offset, true);
+    central.push(entry.bytes, name);
+
+    offset += 30 + name.length + data.length;
+  }
+
+  const centralSize = central.reduce((sum, c) => sum + c.length, 0);
+  const end = header(22);
+  end.view.setUint32(0, 0x06054b50, true);
+  end.view.setUint16(8, files.length, true);
+  end.view.setUint16(10, files.length, true);
+  end.view.setUint32(12, centralSize, true);
+  end.view.setUint32(16, offset, true);
+
+  const parts = [...chunks, ...central, end.bytes];
+  const out = new Uint8Array(parts.reduce((sum, p) => sum + p.length, 0));
+  let position = 0;
+  for (const part of parts) {
+    out.set(part, position);
+    position += part.length;
+  }
+  return out;
+}
+
+/** Escape XML special characters and drop control characters XML forbids. */
+export const xmlText = (value: string) =>
+  value
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping them is the point
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+
+// Cell style ids, matching <cellXfs> in STYLES_XML.
+const STYLE = { plain: 0, bold: 1, title: 2, hours: 3, boldHours: 4, header: 5 };
+
+const STYLES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<fonts count="3"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="16"/><name val="Calibri"/></font></fonts>
+<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>
+<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left/><right/><top/><bottom style="thin"/><diagonal/></border></borders>
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+<cellXfs count="6"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="2" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="2" fontId="1" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/><xf numFmtId="0" fontId="1" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1"/></cellXfs>
+<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+</styleSheet>`;
+
+type Cell =
+  | { text: string; style?: number }
+  | { number: number; style?: number }
+  | { formula: string; cached: number; style?: number }
+  | null;
+
+const COLUMN_LETTERS = "ABCDE";
+
+const cellXml = (cell: Cell, ref: string) => {
+  if (!cell) return "";
+  const s = cell.style ? ` s="${cell.style}"` : "";
+  if ("text" in cell) {
+    return `<c r="${ref}"${s} t="inlineStr"><is><t xml:space="preserve">${xmlText(cell.text)}</t></is></c>`;
+  }
+  if ("number" in cell) return `<c r="${ref}"${s}><v>${cell.number}</v></c>`;
+  return `<c r="${ref}"${s}><f>${cell.formula}</f><v>${cell.cached}</v></c>`;
+};
+
+export function buildSheetXml(rows: ExportRow[], meta: ExportMeta): string {
+  const HEADER_ROW = 5;
+  const firstData = HEADER_ROW + 1;
+  const lastData = HEADER_ROW + rows.length;
+  // Full precision in the cells; the 0.00 number format handles display, so
+  // a recalculated SUM matches the PDF total exactly.
+  const total = totalHours(rows);
+
+  const grid: Cell[][] = [
+    [{ text: "Timesheet", style: STYLE.title }],
+    [{ text: "Report for", style: STYLE.bold }, { text: meta.employee }],
+    [{ text: "Period", style: STYLE.bold }, { text: formatPeriod(meta) }],
+    [],
+    ["Employee", "Date", "Clock In", "Clock Out", "Hours"].map((text) => ({
+      text,
+      style: STYLE.header,
+    })),
+    ...rows.map((r): Cell[] => [
+      { text: r.employee },
+      { text: r.date },
+      { text: r.clockIn },
+      { text: r.clockOut },
+      r.hours === null
+        ? null
+        : { number: r.hours, style: STYLE.hours },
+    ]),
+    [
+      { text: "Total hours", style: STYLE.bold },
+      null,
+      null,
+      null,
+      rows.length
+        ? {
+            formula: `SUM(E${firstData}:E${lastData})`,
+            cached: total,
+            style: STYLE.boldHours,
+          }
+        : { number: 0, style: STYLE.boldHours },
+    ],
+  ];
+
+  const sheetRows = grid
+    .map((cells, i) => {
+      const r = i + 1;
+      const xml = cells.map((c, j) => cellXml(c, `${COLUMN_LETTERS[j]}${r}`));
+      return `<row r="${r}">${xml.join("")}</row>`;
+    })
+    .join("");
+
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheetViews><sheetView workbookViewId="0"><pane ySplit="${HEADER_ROW}" topLeftCell="A${firstData}" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
+<cols><col min="1" max="1" width="28" customWidth="1"/><col min="2" max="2" width="13" customWidth="1"/><col min="3" max="4" width="12" customWidth="1"/><col min="5" max="5" width="10" customWidth="1"/></cols>
+<sheetData>${sheetRows}</sheetData>
+</worksheet>`;
+}
+
+export function toXlsx(rows: ExportRow[], meta: ExportMeta): Uint8Array {
+  const xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
+  return buildZip([
+    {
+      name: "[Content_Types].xml",
+      content: `${xml}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`,
+    },
+    {
+      name: "_rels/.rels",
+      content: `${xml}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`,
+    },
+    {
+      name: "xl/workbook.xml",
+      content: `${xml}<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Timesheet" sheetId="1" r:id="rId1"/></sheets></workbook>`,
+    },
+    {
+      name: "xl/_rels/workbook.xml.rels",
+      content: `${xml}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`,
+    },
+    { name: "xl/styles.xml", content: STYLES_XML },
+    { name: "xl/worksheets/sheet1.xml", content: buildSheetXml(rows, meta) },
+  ]);
+}
+
+export const XLSX_MIME =
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 /* ------------------------------------------------------------------ PDF -- */
 
@@ -319,6 +507,6 @@ export function exportTimesheet(
   if (format === "pdf") {
     downloadFile(toPdf(rows, meta) as BlobPart, "application/pdf", fileName);
   } else {
-    downloadFile(toCsv(rows, meta), "text/csv;charset=utf-8", fileName);
+    downloadFile(toXlsx(rows, meta) as BlobPart, XLSX_MIME, fileName);
   }
 }

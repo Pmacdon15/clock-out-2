@@ -69,7 +69,7 @@ export function TimesheetExport({
         </Button>
         <Button
           disabled={isEmpty}
-          onClick={() => handleExport("csv")}
+          onClick={() => handleExport("xlsx")}
           size="sm"
           variant="outline"
         >
