@@ -1,8 +1,9 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join, relative, resolve } from "node:path";
 
-export const APP_DIR = fileURLToPath(new URL("../../src/app", import.meta.url));
+// Vitest runs from the project root. (jsdom swaps out the global URL, so
+// fileURLToPath(import.meta.url) can't be used here.)
+export const APP_DIR = resolve(process.cwd(), "src", "app");
 
 /**
  * Next.js route-segment files that render a React component.
