@@ -36,6 +36,9 @@ vi.mock("@/components/ViewHours/DaysWorkedBreakdown", () => ({
 vi.mock("@/components/ViewHours/EntryList", () => ({
   EntryList: (p: Captured) => capture("EntryList")(p),
 }));
+vi.mock("@/components/ViewHours/TimesheetExport", () => ({
+  TimesheetExport: (p: Captured) => capture("TimesheetExport")(p),
+}));
 
 import ViewHours from "@/components/ViewHours";
 
@@ -260,6 +263,37 @@ describe("ViewHours for the whole org", () => {
       employeeName: "Employee",
       filteredEntries: myEntries,
       isViewingAll: false,
+    });
+  });
+});
+
+describe("ViewHours timesheet export", () => {
+  it("is hidden outside the custom timeframe", () => {
+    renderView();
+    expect(screen.queryByTestId("TimesheetExport")).not.toBeInTheDocument();
+  });
+
+  it("offers the export for a custom period", () => {
+    renderView({ timeframePromise: resolved("custom") });
+    expect(latest("TimesheetExport")).toMatchObject({
+      employeeName: "Me Myself",
+      entries: myEntries,
+      isViewingAll: false,
+      startDate: "2026-03-08",
+      endDate: "2026-03-14",
+    });
+  });
+
+  it("exports the whole org's entries when viewing all", () => {
+    renderView({
+      selectedUserIdPromise: resolved("all"),
+      timeframePromise: resolved("custom"),
+    });
+    expect(latest("TimesheetExport")).toMatchObject({
+      employeeName: "Entire Organization",
+      entries: orgEntries,
+      isViewingAll: true,
+      members,
     });
   });
 });
