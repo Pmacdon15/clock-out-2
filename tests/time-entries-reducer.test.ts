@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { timeEntriesReducer } from "@/lib/reducers/time-entries";
 import type { TimeEntry } from "@/lib/types";
 

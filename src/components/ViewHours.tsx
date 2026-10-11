@@ -12,6 +12,7 @@ import {
   TimeframeSelector,
   type TimeframeValue,
 } from "./ViewHours/TimeframeSelector";
+import { TimesheetExport } from "./ViewHours/TimesheetExport";
 
 export default function ViewHours({
   entries,
@@ -122,6 +123,17 @@ export default function ViewHours({
           startDate={startDate}
           timeframe={timeframe}
         />
+
+        {timeframe === "custom" && (
+          <TimesheetExport
+            employeeName={employeeName}
+            endDate={endDate}
+            entries={displayEntries}
+            isViewingAll={isViewingAll}
+            members={members}
+            startDate={startDate}
+          />
+        )}
 
         <div className="flex w-full justify-center">
           <div className="flex rounded-lg bg-zinc-100 p-1 dark:bg-zinc-900">

@@ -1,8 +1,9 @@
-import { readFileSync } from "node:fs";
-import { join, relative } from "node:path";
-import { Glob } from "bun";
+import { readdirSync, readFileSync } from "node:fs";
+import { join, relative, resolve } from "node:path";
 
-export const APP_DIR = join(import.meta.dir, "..", "..", "src", "app");
+// Vitest runs from the project root. (jsdom swaps out the global URL, so
+// fileURLToPath(import.meta.url) can't be used here.)
+export const APP_DIR = resolve(process.cwd(), "src", "app");
 
 /**
  * Next.js route-segment files that render a React component.
@@ -24,9 +25,11 @@ const EXTENSIONS = ["tsx", "ts", "jsx", "js"];
 
 /** Finds every route component file under src/app (e.g. app/plans/page.tsx). */
 export function findRouteFiles(appDir = APP_DIR): string[] {
-  const pattern = `**/{${ROUTE_COMPONENT_FILES.join(",")}}.{${EXTENSIONS.join(",")}}`;
-  const glob = new Glob(pattern);
-  return [...glob.scanSync({ cwd: appDir })]
+  const pattern = new RegExp(
+    `(^|[/\\\\])(${ROUTE_COMPONENT_FILES.join("|")})\\.(${EXTENSIONS.join("|")})$`,
+  );
+  return readdirSync(appDir, { recursive: true, encoding: "utf8" })
+    .filter((file) => pattern.test(file))
     .map((file) => join(appDir, file))
     .sort();
 }
