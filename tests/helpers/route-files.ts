@@ -1,8 +1,8 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
-import { Glob } from "bun";
+import { fileURLToPath } from "node:url";
 
-export const APP_DIR = join(import.meta.dir, "..", "..", "src", "app");
+export const APP_DIR = fileURLToPath(new URL("../../src/app", import.meta.url));
 
 /**
  * Next.js route-segment files that render a React component.
@@ -24,9 +24,11 @@ const EXTENSIONS = ["tsx", "ts", "jsx", "js"];
 
 /** Finds every route component file under src/app (e.g. app/plans/page.tsx). */
 export function findRouteFiles(appDir = APP_DIR): string[] {
-  const pattern = `**/{${ROUTE_COMPONENT_FILES.join(",")}}.{${EXTENSIONS.join(",")}}`;
-  const glob = new Glob(pattern);
-  return [...glob.scanSync({ cwd: appDir })]
+  const pattern = new RegExp(
+    `(^|[/\\\\])(${ROUTE_COMPONENT_FILES.join("|")})\\.(${EXTENSIONS.join("|")})$`,
+  );
+  return readdirSync(appDir, { recursive: true, encoding: "utf8" })
+    .filter((file) => pattern.test(file))
     .map((file) => join(appDir, file))
     .sort();
 }
