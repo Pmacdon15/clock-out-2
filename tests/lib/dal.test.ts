@@ -276,6 +276,15 @@ describe("clockIn", () => {
     expect(mocks.dbClockIn).toHaveBeenCalledWith("user_1", "org_1");
   });
 
+  it("refuses when a concurrent clock-in won the race", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.isOverMemberShipLimit.mockResolvedValue(false);
+    mocks.dbCheckActiveEntry.mockResolvedValue([]);
+    mocks.dbClockIn.mockResolvedValue(undefined);
+    const result = await clockIn();
+    expect(result._unsafeUnwrapErr()).toEqual({ reason: "Already clocked in" });
+  });
+
   it("returns an error when the insert fails", async () => {
     mocks.protect.mockResolvedValue(member);
     mocks.isOverMemberShipLimit.mockResolvedValue(false);

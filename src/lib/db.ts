@@ -89,13 +89,26 @@ export async function dbGetActiveEntry(userId: string, orgId: string) {
   return (activeEntry as unknown as TimeEntry) || null;
 }
 
+/**
+ * Opens a new entry only if the user has no open entry in the org.
+ * The advisory lock serialises concurrent clock-ins for the same user/org,
+ * so two simultaneous requests cannot both insert. Returns undefined when
+ * an open entry already exists.
+ */
 export async function dbClockIn(userId: string, orgId: string) {
-  const [newEntry] = await sql`
+  const [, inserted] = await sql.transaction([
+    sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${userId}:${orgId}`}::text, 0))`,
+    sql`
         INSERT INTO time_entries (user_id, org_id, clock_in)
-        VALUES (${userId}, ${orgId}, NOW())
+        SELECT ${userId}, ${orgId}, NOW()
+        WHERE NOT EXISTS (
+            SELECT 1 FROM time_entries
+            WHERE user_id = ${userId} AND org_id = ${orgId} AND clock_out IS NULL
+        )
         RETURNING *
-    `;
-  return newEntry as unknown as TimeEntry;
+    `,
+  ]);
+  return inserted[0] as unknown as TimeEntry | undefined;
 }
 
 export async function dbClockOut(userId: string, orgId: string) {

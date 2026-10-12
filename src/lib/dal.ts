@@ -1,6 +1,6 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { fromZonedTime } from "date-fns-tz";
-import { errAsync, okAsync } from "neverthrow";
+import { errAsync, okAsync, type ResultAsync } from "neverthrow";
 import {
   dbCheckActiveEntry,
   dbClockIn,
@@ -179,9 +179,17 @@ export async function clockIn() {
   }
 
   return await dbClockIn(userId, orgId)
-    .then((activeEntry) => {
-      return okAsync(activeEntry);
-    })
+    .then(
+      (
+        newEntry,
+      ): ResultAsync<TimeEntry, { readonly reason: "Already clocked in" }> => {
+        // A concurrent request may have clocked in between check and insert.
+        if (!newEntry) {
+          return errAsync({ reason: "Already clocked in" } as const);
+        }
+        return okAsync(newEntry);
+      },
+    )
     .catch((e) => {
       console.error("Error clocking in: ", e);
       return errAsync({ reason: "Error clocking in." } as const);
