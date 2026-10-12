@@ -79,6 +79,17 @@ describe("GET /api/cron/weekly-report", () => {
     expect(mocks.getOrganizationList).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["unset", undefined],
+    ["empty", ""],
+  ])("rejects every request when CRON_SECRET is %s", async (_label, secret) => {
+    if (secret === undefined) delete process.env.CRON_SECRET;
+    else vi.stubEnv("CRON_SECRET", secret);
+    const res = await GET(cronRequest("Bearer undefined"));
+    expect(res.status).toBe(401);
+    expect(mocks.getOrganizationList).not.toHaveBeenCalled();
+  });
+
   it("skips orgs without billing or without the reporting feature", async () => {
     mocks.getOrganizationList.mockResolvedValue({
       data: [
