@@ -1,6 +1,6 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { fromZonedTime } from "date-fns-tz";
-import { errAsync, okAsync } from "neverthrow";
+import { errAsync, okAsync, type ResultAsync } from "neverthrow";
 import {
   dbCheckActiveEntry,
   dbClockIn,
@@ -252,13 +252,17 @@ export async function updateTimeEntry(
     orgId,
     orgRole === "org:admin",
   )
-    .then((updated) => {
-      // No row matched: unknown id, another org's entry, or not an admin.
-      if (!updated) {
-        return errAsync({ reason: "Time entry not found" } as const);
-      }
-      return okAsync(updated);
-    })
+    .then(
+      (
+        updated,
+      ): ResultAsync<TimeEntry, { readonly reason: "Time entry not found" }> => {
+        // No row matched: unknown id, another org's entry, or not an admin.
+        if (!updated) {
+          return errAsync({ reason: "Time entry not found" } as const);
+        }
+        return okAsync(updated);
+      },
+    )
     .catch((e) => {
       console.error("Update error: ", e);
       return errAsync({ reason: "Failed to update entry" } as const);
