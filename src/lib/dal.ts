@@ -179,8 +179,12 @@ export async function clockIn() {
   }
 
   return await dbClockIn(userId, orgId)
-    .then((activeEntry) => {
-      return okAsync(activeEntry);
+    .then((newEntry) => {
+      // A concurrent request may have clocked in between the check and insert.
+      if (!newEntry) {
+        return errAsync({ reason: "Already clocked in" } as const);
+      }
+      return okAsync(newEntry);
     })
     .catch((e) => {
       console.error("Error clocking in: ", e);

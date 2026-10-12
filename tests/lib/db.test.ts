@@ -1,7 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { sql, neon, cacheTag, cacheLife } = vi.hoisted(() => {
-  const sql = vi.fn();
+  const sql = Object.assign(vi.fn(), { transaction: vi.fn() });
   return {
     sql,
     neon: vi.fn(() => sql),
@@ -35,6 +35,7 @@ beforeAll(async () => {
 
 beforeEach(() => {
   sql.mockReset();
+  sql.transaction.mockReset();
 });
 
 describe("module setup", () => {
@@ -129,11 +130,25 @@ describe("active entries", () => {
 });
 
 describe("mutations", () => {
-  it("dbClockIn inserts and returns the new row", async () => {
-    sql.mockResolvedValue([{ id: 5 }]);
+  it("dbClockIn locks, inserts atomically and returns the new row", async () => {
+    sql.mockReturnValueOnce("lock-query").mockReturnValueOnce("insert-query");
+    sql.transaction.mockResolvedValue([[{}], [{ id: 5 }]]);
     await expect(db.dbClockIn("u1", "o1")).resolves.toEqual({ id: 5 });
-    expect(textOf()).toContain("INSERT INTO time_entries");
-    expect(valuesOf()).toEqual(["u1", "o1"]);
+    expect(sql.transaction).toHaveBeenCalledWith([
+      "lock-query",
+      "insert-query",
+    ]);
+    expect(textOf(0)).toContain("pg_advisory_xact_lock");
+    expect(valuesOf(0)).toEqual(["u1:o1"]);
+    expect(textOf(1)).toContain("INSERT INTO time_entries");
+    expect(textOf(1)).toContain("WHERE NOT EXISTS");
+    expect(textOf(1)).toContain("clock_out IS NULL");
+    expect(valuesOf(1)).toEqual(["u1", "o1", "u1", "o1"]);
+  });
+
+  it("dbClockIn returns undefined when an open entry already exists", async () => {
+    sql.transaction.mockResolvedValue([[{}], []]);
+    await expect(db.dbClockIn("u1", "o1")).resolves.toBeUndefined();
   });
 
   it("dbClockOut closes the open entry", async () => {
