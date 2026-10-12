@@ -235,6 +235,16 @@ export async function updateTimeEntry(
     return errAsync({ reason: "Unauthorized" } as const);
   }
 
+  const hasInvalidTime =
+    Number.isNaN(clock_in.getTime()) ||
+    (clock_out !== null && Number.isNaN(clock_out.getTime()));
+  if (hasInvalidTime) {
+    return errAsync({ reason: "Invalid clock-in or clock-out time" } as const);
+  }
+  if (clock_out !== null && clock_out.getTime() <= clock_in.getTime()) {
+    return errAsync({ reason: "Clock out must be after clock in" } as const);
+  }
+
   return await dbUpdateTimeEntry(
     id,
     clock_in,
@@ -243,6 +253,10 @@ export async function updateTimeEntry(
     orgRole === "org:admin",
   )
     .then((updated) => {
+      // No row matched: unknown id, another org's entry, or not an admin.
+      if (!updated) {
+        return errAsync({ reason: "Time entry not found" } as const);
+      }
       return okAsync(updated);
     })
     .catch((e) => {

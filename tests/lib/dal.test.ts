@@ -375,6 +375,36 @@ describe("updateTimeEntry", () => {
     );
   });
 
+  it("returns an error instead of success when no row was updated", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbUpdateTimeEntry.mockResolvedValue(undefined);
+    expect(
+      (await updateTimeEntry(1, clockInAt, clockOutAt))._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Time entry not found" });
+  });
+
+  it.each([
+    ["clock-in", new Date("not a date"), clockOutAt],
+    ["clock-out", clockInAt, new Date("not a date")],
+  ])("rejects an invalid %s time", async (_label, inAt, outAt) => {
+    mocks.protect.mockResolvedValue(admin);
+    expect((await updateTimeEntry(1, inAt, outAt))._unsafeUnwrapErr()).toEqual(
+      { reason: "Invalid clock-in or clock-out time" },
+    );
+    expect(mocks.dbUpdateTimeEntry).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["before", new Date("2026-01-05T08:00:00Z")],
+    ["equal to", clockInAt],
+  ])("rejects a clock-out %s the clock-in", async (_label, outAt) => {
+    mocks.protect.mockResolvedValue(admin);
+    expect(
+      (await updateTimeEntry(1, clockInAt, outAt))._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Clock out must be after clock in" });
+    expect(mocks.dbUpdateTimeEntry).not.toHaveBeenCalled();
+  });
+
   it("returns an error when the update fails", async () => {
     mocks.protect.mockResolvedValue(admin);
     mocks.dbUpdateTimeEntry.mockRejectedValue(new Error("db"));
