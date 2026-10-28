@@ -410,6 +410,40 @@ export const manageReportingSettingsInputSchema = z.object({
     .describe("Interval in weeks (1 or 2) when report_frequency is 'custom'."),
 });
 
+export const inviteMemberInputSchema = z.object({
+  org_id: orgIdField,
+  action: z
+    .enum(["send", "list", "revoke"])
+    .optional()
+    .describe(
+      "Action to perform: 'send' (send new email invitation(s) to join the organization), 'list' (list pending invitations), or 'revoke' (cancel a pending invitation by email or invitation_id). Defaults to 'send'.",
+    ),
+  email: z
+    .string()
+    .optional()
+    .describe(
+      "Email address to invite (when action is 'send') or whose pending invitation should be revoked (when action is 'revoke').",
+    ),
+  emails: z
+    .array(z.string())
+    .optional()
+    .describe(
+      "Batch of email addresses to invite at once (when action is 'send').",
+    ),
+  role: z
+    .enum(["org:member", "org:admin", "member", "admin"])
+    .optional()
+    .describe(
+      "Organization role for invited user(s): 'org:member' (default) or 'org:admin'.",
+    ),
+  invitation_id: z
+    .string()
+    .optional()
+    .describe(
+      "Pending invitation ID (orginv_...) to revoke when action is 'revoke'. Optional if email is provided.",
+    ),
+});
+
 /*
  * ============================================================================
  * Helpers: Organization, Member, Time & Duration Resolution
@@ -2251,5 +2285,298 @@ export async function manageReportingSettingsTool(
       organization: { org_id: org.orgId, name: org.orgName },
       settings: updated,
     },
+  };
+}
+
+const APP_ORIGIN_FOR_INVITES =
+  process.env.NEXT_PUBLIC_APP_URL?.replace(/\/+$/, "") ||
+  "https://clockout.patmac.ca";
+
+function normalizeInviteRole(
+  role?: "org:member" | "org:admin" | "member" | "admin",
+): "org:member" | "org:admin" {
+  if (role === "org:admin" || role === "admin") return "org:admin";
+  return "org:member";
+}
+
+function isValidEmailAddress(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+export async function inviteMemberTool(
+  caller: McpCaller,
+  input: z.infer<typeof inviteMemberInputSchema>,
+): Promise<ToolResult> {
+  const orgRes = await resolveOrg(caller.userId, input.org_id);
+  if (!orgRes.ok) return orgRes.result;
+  const { org } = orgRes;
+
+  if (!org.isAdmin) {
+    return {
+      summary:
+        "Only organization admins (org:admin) can invite users or manage organization invitations.",
+      data: { status: "forbidden" },
+      isError: true,
+    };
+  }
+
+  const action = input.action ?? "send";
+  const client = await clerkClient();
+
+  if (action === "list") {
+    const invitationsRes =
+      await client.organizations.getOrganizationInvitationList({
+        organizationId: org.orgId,
+        status: ["pending"],
+        limit: 100,
+      });
+
+    const invitations = invitationsRes.data.map((inv) => ({
+      invitation_id: inv.id,
+      email_address: inv.emailAddress,
+      role: inv.role,
+      status: inv.status ?? "pending",
+      created_at: new Date(inv.createdAt).toISOString(),
+      updated_at: new Date(inv.updatedAt).toISOString(),
+    }));
+
+    return {
+      summary:
+        invitations.length === 0
+          ? `There are no pending invitations for ${org.orgName}.`
+          : `${org.orgName} has ${invitations.length} pending invitation${invitations.length === 1 ? "" : "s"}: ${invitations.map((i) => `${i.email_address} (${i.role}, ${i.invitation_id})`).join(", ")}.`,
+      data: {
+        status: "ok",
+        organization: { org_id: org.orgId, name: org.orgName },
+        pending_count: invitations.length,
+        invitations,
+      },
+    };
+  }
+
+  if (action === "revoke") {
+    let targetInvitationId = input.invitation_id?.trim() || null;
+    const targetEmail = input.email?.trim().toLowerCase() || null;
+
+    if (!targetInvitationId && !targetEmail) {
+      return {
+        summary:
+          "Provide either invitation_id (orginv_...) or email to revoke a pending invitation.",
+        data: { status: "missing_identifier" },
+        isError: true,
+      };
+    }
+
+    if (!targetInvitationId && targetEmail) {
+      const pendingRes =
+        await client.organizations.getOrganizationInvitationList({
+          organizationId: org.orgId,
+          status: ["pending"],
+          limit: 100,
+        });
+      const matched = pendingRes.data.find(
+        (inv) => inv.emailAddress.toLowerCase() === targetEmail,
+      );
+      if (!matched) {
+        return {
+          summary: `No pending invitation found for "${targetEmail}" in ${org.orgName}.`,
+          data: {
+            status: "invitation_not_found",
+            email: targetEmail,
+            organization: { org_id: org.orgId, name: org.orgName },
+          },
+          isError: true,
+        };
+      }
+      targetInvitationId = matched.id;
+    }
+
+    try {
+      const revoked = await client.organizations.revokeOrganizationInvitation({
+        organizationId: org.orgId,
+        invitationId: targetInvitationId as string,
+        requestingUserId: caller.userId,
+      });
+
+      return {
+        summary: `Revoked pending invitation for ${revoked.emailAddress} (${revoked.id}) in ${org.orgName}.`,
+        data: {
+          status: "revoked",
+          organization: { org_id: org.orgId, name: org.orgName },
+          invitation: {
+            invitation_id: revoked.id,
+            email_address: revoked.emailAddress,
+            role: revoked.role,
+            status: revoked.status ?? "revoked",
+          },
+        },
+      };
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Could not revoke invitation";
+      return {
+        summary: `Failed to revoke invitation ${targetInvitationId}: ${message}`,
+        data: {
+          status: "revoke_failed",
+          invitation_id: targetInvitationId,
+          error: message,
+        },
+        isError: true,
+      };
+    }
+  }
+
+  // action === "send"
+  const rawEmails = [
+    ...(input.email ? [input.email] : []),
+    ...(input.emails ?? []),
+  ];
+  const uniqueEmails = Array.from(
+    new Set(
+      rawEmails.map((e) => e.trim().toLowerCase()).filter((e) => e.length > 0),
+    ),
+  );
+
+  if (uniqueEmails.length === 0) {
+    return {
+      summary:
+        "Provide an email (or emails array) to invite to the organization.",
+      data: { status: "missing_email" },
+      isError: true,
+    };
+  }
+
+  const invalidEmails = uniqueEmails.filter((e) => !isValidEmailAddress(e));
+  if (invalidEmails.length > 0) {
+    return {
+      summary: `Invalid email address${invalidEmails.length === 1 ? "" : "es"}: ${invalidEmails.join(", ")}.`,
+      data: { status: "invalid_email", invalid_emails: invalidEmails },
+      isError: true,
+    };
+  }
+
+  if (await isOverMemberShipLimit(org.orgId)) {
+    return {
+      summary: `${org.orgName} has reached its membership limit. Upgrade the organization plan on Clock Out before inviting more members.`,
+      data: { status: "membership_limit_reached", org_id: org.orgId },
+      isError: true,
+    };
+  }
+
+  const role = normalizeInviteRole(input.role);
+
+  const [existingMembers, pendingInvitationsRes] = await Promise.all([
+    fetchOrgMembers(org.orgId),
+    client.organizations.getOrganizationInvitationList({
+      organizationId: org.orgId,
+      status: ["pending"],
+      limit: 100,
+    }),
+  ]);
+
+  const memberEmails = new Set(
+    existingMembers
+      .map((m) => m.email?.toLowerCase())
+      .filter((e): e is string => Boolean(e)),
+  );
+  const pendingByEmail = new Map(
+    pendingInvitationsRes.data.map((inv) => [
+      inv.emailAddress.toLowerCase(),
+      inv,
+    ]),
+  );
+
+  const sent: Array<{
+    invitation_id: string;
+    email_address: string;
+    role: string;
+    status: string;
+    created_at: string;
+  }> = [];
+  const skipped: Array<{
+    email_address: string;
+    reason: string;
+    invitation_id?: string;
+  }> = [];
+  const failed: Array<{ email_address: string; error: string }> = [];
+
+  for (const email of uniqueEmails) {
+    if (memberEmails.has(email)) {
+      skipped.push({
+        email_address: email,
+        reason: "already_member",
+      });
+      continue;
+    }
+
+    const existingPending = pendingByEmail.get(email);
+    if (existingPending) {
+      skipped.push({
+        email_address: email,
+        reason: "already_invited",
+        invitation_id: existingPending.id,
+      });
+      continue;
+    }
+
+    try {
+      const invitation =
+        await client.organizations.createOrganizationInvitation({
+          organizationId: org.orgId,
+          inviterUserId: caller.userId,
+          emailAddress: email,
+          role,
+          redirectUrl: APP_ORIGIN_FOR_INVITES,
+        });
+
+      sent.push({
+        invitation_id: invitation.id,
+        email_address: invitation.emailAddress,
+        role: invitation.role,
+        status: invitation.status ?? "pending",
+        created_at: new Date(invitation.createdAt).toISOString(),
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to send invitation";
+      failed.push({ email_address: email, error: message });
+    }
+  }
+
+  const parts: string[] = [];
+  if (sent.length > 0) {
+    parts.push(
+      `Invited ${sent.map((s) => `${s.email_address} (${s.role})`).join(", ")} to ${org.orgName}`,
+    );
+  }
+  if (skipped.length > 0) {
+    parts.push(
+      `Skipped ${skipped.map((s) => `${s.email_address} (${s.reason === "already_member" ? "already a member" : "invitation already pending"})`).join(", ")}`,
+    );
+  }
+  if (failed.length > 0) {
+    parts.push(
+      `Failed ${failed.map((f) => `${f.email_address} (${f.error})`).join(", ")}`,
+    );
+  }
+
+  const isError = sent.length === 0 && failed.length > 0;
+
+  return {
+    summary: `${parts.join(". ")}.`,
+    data: {
+      status:
+        sent.length > 0
+          ? "invited"
+          : skipped.length > 0
+            ? "skipped"
+            : "invite_failed",
+      organization: { org_id: org.orgId, name: org.orgName },
+      role,
+      sent,
+      skipped,
+      failed,
+    },
+    ...(isError ? { isError: true } : {}),
   };
 }

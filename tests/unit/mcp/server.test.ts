@@ -2,6 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockGetOrgMemberships = vi.fn();
 const mockGetUserOrgMemberships = vi.fn();
+const mockCreateOrganizationInvitation = vi.fn();
+const mockGetOrganizationInvitationList = vi.fn();
+const mockRevokeOrganizationInvitation = vi.fn();
 
 vi.mock("@clerk/nextjs/server", () => ({
   clerkClient: vi.fn(async () => ({
@@ -10,6 +13,9 @@ vi.mock("@clerk/nextjs/server", () => ({
     },
     organizations: {
       getOrganizationMembershipList: mockGetOrgMemberships,
+      createOrganizationInvitation: mockCreateOrganizationInvitation,
+      getOrganizationInvitationList: mockGetOrganizationInvitationList,
+      revokeOrganizationInvitation: mockRevokeOrganizationInvitation,
     },
   })),
 }));
@@ -65,6 +71,7 @@ import {
 import {
   addTimeEntryTool,
   exportTimesheetTool,
+  inviteMemberTool,
   updateTimeEntryTool,
 } from "@/mcp/tools";
 
@@ -101,6 +108,7 @@ describe("Clock Out MCP server", () => {
       "export_timesheet",
       "get_clock_status",
       "get_weekly_timecard",
+      "invite_member",
       "list_members",
       "list_organizations",
       "list_time_entries",
@@ -384,5 +392,136 @@ describe("Double / overlapping time prevention & cache invalidation", () => {
 
     expect(res.isError).toBe(true);
     expect(res.data.status).toBe("forbidden");
+  });
+
+  it("allows admins to invite new members by email and skips existing members/pending invites", async () => {
+    mockGetOrganizationInvitationList.mockResolvedValueOnce({
+      data: [
+        {
+          id: "orginv_existing",
+          emailAddress: "pending@patmac.ca",
+          role: "org:member",
+          status: "pending",
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        },
+      ],
+    });
+    mockCreateOrganizationInvitation.mockResolvedValueOnce({
+      id: "orginv_new_1",
+      emailAddress: "newhire@patmac.ca",
+      role: "org:member",
+      status: "pending",
+      createdAt: 1730000000000,
+      updatedAt: 1730000000000,
+    });
+
+    const res = await inviteMemberTool(
+      { userId: "user_admin", client: "Claude" },
+      {
+        emails: ["newhire@patmac.ca", "alex@patmac.ca", "pending@patmac.ca"],
+        role: "member",
+      },
+    );
+
+    expect(res.isError).toBeUndefined();
+    expect(res.data.status).toBe("invited");
+    expect(mockCreateOrganizationInvitation).toHaveBeenCalledTimes(1);
+    expect(mockCreateOrganizationInvitation).toHaveBeenCalledWith({
+      organizationId: "org_1",
+      inviterUserId: "user_admin",
+      emailAddress: "newhire@patmac.ca",
+      role: "org:member",
+      redirectUrl: "https://clockout.patmac.ca",
+    });
+    expect(res.data.sent).toHaveLength(1);
+    expect(res.data.skipped).toEqual([
+      { email_address: "alex@patmac.ca", reason: "already_member" },
+      {
+        email_address: "pending@patmac.ca",
+        reason: "already_invited",
+        invitation_id: "orginv_existing",
+      },
+    ]);
+  });
+
+  it("lists and revokes pending organization invitations for admins", async () => {
+    mockGetOrganizationInvitationList.mockResolvedValueOnce({
+      data: [
+        {
+          id: "orginv_42",
+          emailAddress: "invitee@patmac.ca",
+          role: "org:admin",
+          status: "pending",
+          createdAt: 1730000000000,
+          updatedAt: 1730000000000,
+        },
+      ],
+    });
+
+    const listRes = await inviteMemberTool(
+      { userId: "user_admin", client: "Claude" },
+      { action: "list" },
+    );
+
+    expect(listRes.isError).toBeUndefined();
+    expect(listRes.data.pending_count).toBe(1);
+
+    mockGetOrganizationInvitationList.mockResolvedValueOnce({
+      data: [
+        {
+          id: "orginv_42",
+          emailAddress: "invitee@patmac.ca",
+          role: "org:admin",
+          status: "pending",
+          createdAt: 1730000000000,
+          updatedAt: 1730000000000,
+        },
+      ],
+    });
+    mockRevokeOrganizationInvitation.mockResolvedValueOnce({
+      id: "orginv_42",
+      emailAddress: "invitee@patmac.ca",
+      role: "org:admin",
+      status: "revoked",
+    });
+
+    const revokeRes = await inviteMemberTool(
+      { userId: "user_admin", client: "Claude" },
+      { action: "revoke", email: "invitee@patmac.ca" },
+    );
+
+    expect(revokeRes.isError).toBeUndefined();
+    expect(revokeRes.data.status).toBe("revoked");
+    expect(mockRevokeOrganizationInvitation).toHaveBeenCalledWith({
+      organizationId: "org_1",
+      invitationId: "orginv_42",
+      requestingUserId: "user_admin",
+    });
+  });
+
+  it("forbids non-admin members from inviting users", async () => {
+    mockGetUserOrgMemberships.mockResolvedValueOnce({
+      data: [
+        {
+          role: "org:member",
+          organization: {
+            id: "org_1",
+            name: "PatMac Org",
+            slug: "patmac-org",
+            membersCount: 2,
+          },
+        },
+      ],
+    });
+
+    const res = await inviteMemberTool(
+      { userId: "user_worker", client: "Claude" },
+      { email: "someone@patmac.ca" },
+    );
+
+    expect(res.isError).toBe(true);
+    expect(res.data.status).toBe("forbidden");
+    expect(mockCreateOrganizationInvitation).not.toHaveBeenCalled();
   });
 });

@@ -17,6 +17,8 @@ import {
   getClockStatusInputSchema,
   getWeeklyTimecardInputSchema,
   getWeeklyTimecardTool,
+  inviteMemberInputSchema,
+  inviteMemberTool,
   listMembers,
   listMembersInputSchema,
   listOrganizations,
@@ -351,6 +353,26 @@ export function registerClockOutTools(server: McpServer) {
     (args, ctx) =>
       run(server, ctx.http?.authInfo, (caller) =>
         manageReportingSettingsTool(caller, args),
+      ),
+  );
+
+  server.registerTool(
+    "invite_member",
+    {
+      title: "Invite users to the organization or manage pending invitations",
+      description:
+        "Admin tool ('org:admin') to invite one or more users by email to join the Clock Out organization (action: 'send', with role 'org:member' or 'org:admin'), list pending organization invitations (action: 'list'), or revoke a pending invitation by email or invitation_id (action: 'revoke').",
+      inputSchema: portable(inviteMemberInputSchema),
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    },
+    (args, ctx) =>
+      run(server, ctx.http?.authInfo, (caller) =>
+        inviteMemberTool(caller, args),
       ),
   );
 }
