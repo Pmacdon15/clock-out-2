@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import DashboardTabs from "@/components/DashboardTabs";
 import DashboardSkeleton from "@/components/fallbacks/home-page-fallback";
 import MainPageHeader from "@/components/headers/main-page-header";
+import McpConnectCard from "@/components/McpConnectCard";
 import {
   getOrgMembers,
   getOrgReportingSettings,
@@ -96,6 +97,7 @@ export default function Home(props: PageProps<"/">) {
           </div>
         </Show>
       </Suspense>
+      <McpConnectCard />
     </main>
   );
 }

@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <title>Clock Out</title>
+  <style>
+    .tile { fill: #171717; }
+    .ring { stroke: #fafafa; }
+    .hand { stroke: #fafafa; }
+    .dot { fill: #3b82f6; }
+    @media (prefers-color-scheme: dark) {
+      .tile { fill: #e5e5e5; }
+      .ring { stroke: #171717; }
+      .hand { stroke: #171717; }
+      .dot { fill: #2563eb; }
+    }
+  </style>
+  <rect class="tile" width="32" height="32" rx="9" />
+  <circle class="ring" cx="16" cy="16" r="8.5" stroke-width="2.4" />
+  <path class="hand" d="M16 11.5V16l3.2 2.2" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+  <circle class="dot" cx="22.5" cy="9.5" r="2.2" />
+</svg>
