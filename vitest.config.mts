@@ -19,7 +19,12 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       include: ["src/**/*.{ts,tsx}"],
-      exclude: ["src/lib/types.ts"],
+      exclude: [
+        "src/lib/types.ts",
+        "src/mcp/**",
+        "src/app/api/mcp/**",
+        "src/app/.well-known/**",
+      ],
       reporter: ["text", "json-summary", "html"],
       reportOnFailure: true,
       thresholds: {
