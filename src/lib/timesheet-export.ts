@@ -79,7 +79,10 @@ export function buildExportRows(
       clockIn: new Date(entry.clock_in),
       clockOut: entry.clock_out ? new Date(entry.clock_out) : null,
     }))
-    .sort((a, b) => a.clockIn.getTime() - b.clockIn.getTime() || a.entry.id - b.entry.id)
+    .sort(
+      (a, b) =>
+        a.clockIn.getTime() - b.clockIn.getTime() || a.entry.id - b.entry.id,
+    )
     .map(({ entry, clockIn, clockOut }) => ({
       employee: getEmployeeName(entry.user_id),
       date: formatDate(clockIn),
@@ -200,7 +203,14 @@ export const xmlText = (value: string) =>
     .replace(/"/g, "&quot;");
 
 // Cell style ids, matching <cellXfs> in STYLES_XML.
-const STYLE = { plain: 0, bold: 1, title: 2, hours: 3, boldHours: 4, header: 5 };
+const STYLE = {
+  plain: 0,
+  bold: 1,
+  title: 2,
+  hours: 3,
+  boldHours: 4,
+  header: 5,
+};
 
 const STYLES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
@@ -252,9 +262,7 @@ export function buildSheetXml(rows: ExportRow[], meta: ExportMeta): string {
       { text: r.date },
       { text: r.clockIn },
       { text: r.clockOut },
-      r.hours === null
-        ? null
-        : { number: r.hours, style: STYLE.hours },
+      r.hours === null ? null : { number: r.hours, style: STYLE.hours },
     ]),
     [
       { text: "Total hours", style: STYLE.bold },
@@ -359,9 +367,7 @@ const write = (
 };
 
 const line = (pen: Pen, y: number, gray = 0.8) => {
-  pen.push(
-    `${gray} G 0.75 w ${MARGIN} ${y} m ${PAGE_WIDTH - MARGIN} ${y} l S`,
-  );
+  pen.push(`${gray} G 0.75 w ${MARGIN} ${y} m ${PAGE_WIDTH - MARGIN} ${y} l S`);
 };
 
 const writeCell = (
@@ -398,7 +404,14 @@ export function layoutPdfPages(rows: ExportRow[], meta: ExportMeta): string[] {
       write(pen, formatPeriod(meta), MARGIN, y - 52, 11);
       y -= 84;
     } else {
-      write(pen, `Timesheet - ${meta.employee} (continued)`, MARGIN, y - 10, 10, true);
+      write(
+        pen,
+        `Timesheet - ${meta.employee} (continued)`,
+        MARGIN,
+        y - 10,
+        10,
+        true,
+      );
       y -= 34;
     }
     writeHeaderRow(pen, y);
@@ -418,7 +431,12 @@ export function layoutPdfPages(rows: ExportRow[], meta: ExportMeta): string[] {
     writeCell(pen, COLUMNS[1], row.date, y);
     writeCell(pen, COLUMNS[2], row.clockIn, y);
     writeCell(pen, COLUMNS[3], row.clockOut, y);
-    writeCell(pen, COLUMNS[4], row.hours === null ? "-" : formatHours(row.hours), y);
+    writeCell(
+      pen,
+      COLUMNS[4],
+      row.hours === null ? "-" : formatHours(row.hours),
+      y,
+    );
     line(pen, y - 6);
     y -= ROW_HEIGHT;
   }

@@ -263,7 +263,10 @@ export async function updateTimeEntry(
     .then(
       (
         updated,
-      ): ResultAsync<TimeEntry, { readonly reason: "Time entry not found" }> => {
+      ): ResultAsync<
+        TimeEntry,
+        { readonly reason: "Time entry not found" }
+      > => {
         // No row matched: unknown id, another org's entry, or not an admin.
         if (!updated) {
           return errAsync({ reason: "Time entry not found" } as const);
