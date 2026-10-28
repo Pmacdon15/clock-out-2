@@ -101,6 +101,31 @@ describe("buildExportRows", () => {
     ]);
     expect(totalHours(rows)).toBe(12.5);
   });
+
+  it("formats dates and times in the requested IANA timezone when provided", () => {
+    const rows = buildExportRows(
+      [
+        makeEntry({
+          id: 1,
+          user_id: "u1",
+          clock_in: new Date("2026-10-26T15:00:00Z"),
+          clock_out: new Date("2026-10-26T23:30:00Z"),
+        }),
+      ],
+      () => "Ada",
+      "America/Edmonton",
+    );
+
+    expect(rows).toEqual([
+      {
+        employee: "Ada",
+        date: "2026-10-26",
+        clockIn: "9:00 AM",
+        clockOut: "5:30 PM",
+        hours: 8.5,
+      },
+    ]);
+  });
 });
 
 /** Minimal reader for the stored (uncompressed) zips that buildZip writes. */

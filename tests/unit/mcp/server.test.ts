@@ -19,6 +19,8 @@ const mockDbInsertTimeEntry = vi.fn();
 const mockDbUpdateTimeEntry = vi.fn();
 const mockDbGetTimeEntryById = vi.fn();
 const mockDbGetActiveEntry = vi.fn();
+const mockDbGetOrgTimeEntries = vi.fn(async () => []);
+const mockDbGetTimeEntries = vi.fn(async () => []);
 const mockDbClockInAt = vi.fn();
 const mockDbClockOutAt = vi.fn();
 const mockInvalidateTimeEntryCache = vi.fn();
@@ -32,9 +34,9 @@ vi.mock("@/mcp/db", () => ({
     mockDbFindOverlapping(...args),
   dbGetActiveEntry: (...args: unknown[]) => mockDbGetActiveEntry(...args),
   dbGetOrgActiveEntries: vi.fn(async () => []),
-  dbGetOrgTimeEntries: vi.fn(async () => []),
+  dbGetOrgTimeEntries: (...args: unknown[]) => mockDbGetOrgTimeEntries(...args),
   dbGetReportingSettings: vi.fn(async () => undefined),
-  dbGetTimeEntries: vi.fn(async () => []),
+  dbGetTimeEntries: (...args: unknown[]) => mockDbGetTimeEntries(...args),
   dbGetTimeEntryById: (...args: unknown[]) => mockDbGetTimeEntryById(...args),
   dbInsertTimeEntry: (...args: unknown[]) => mockDbInsertTimeEntry(...args),
   dbUpdateReportingSettings: vi.fn(),
@@ -60,7 +62,11 @@ import {
   SERVER_INFO,
   SERVER_OPTIONS,
 } from "@/mcp/server";
-import { addTimeEntryTool, updateTimeEntryTool } from "@/mcp/tools";
+import {
+  addTimeEntryTool,
+  exportTimesheetTool,
+  updateTimeEntryTool,
+} from "@/mcp/tools";
 
 type Registered = {
   name: string;
@@ -92,6 +98,7 @@ describe("Clock Out MCP server", () => {
       "clock_in",
       "clock_out",
       "delete_time_entry",
+      "export_timesheet",
       "get_clock_status",
       "get_weekly_timecard",
       "list_members",
@@ -119,6 +126,7 @@ describe("Clock Out MCP server", () => {
       "get_clock_status",
       "list_time_entries",
       "get_weekly_timecard",
+      "export_timesheet",
     ]) {
       expect(tools.get(name)?.annotations?.readOnlyHint, name).toBe(true);
     }
@@ -308,5 +316,73 @@ describe("Double / overlapping time prevention & cache invalidation", () => {
     expect(res.isError).toBe(true);
     expect(res.data.status).toBe("overlapping_existing_entries");
     expect(mockDbUpdateTimeEntry).not.toHaveBeenCalled();
+  });
+
+  it("exports a PDF timesheet with a Clerk-protected download URL and embedded PDF resource", async () => {
+    mockDbGetOrgTimeEntries.mockResolvedValueOnce([
+      {
+        id: 1,
+        user_id: "user_worker",
+        org_id: "org_1",
+        clock_in: new Date("2026-10-26T15:00:00.000Z"),
+        clock_out: new Date("2026-10-26T23:00:00.000Z"),
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+    ]);
+
+    const res = await exportTimesheetTool(
+      { userId: "user_admin", client: "Claude" },
+      {
+        start_date: "2026-10-26",
+        end_date: "2026-10-28",
+        format: "pdf",
+        timezone: "America/Edmonton",
+      },
+    );
+
+    expect(res.isError).toBeUndefined();
+    expect(res.data.status).toBe("ready");
+    expect(res.data.file_name).toBe(
+      "timesheet-entire-organization-2026-10-26-to-2026-10-28.pdf",
+    );
+    expect(res.data.total_hours).toBe(8);
+    expect(res.data.download_url).toContain(
+      "/api/export/timesheet?org_id=org_1&member=all&start_date=2026-10-26&end_date=2026-10-28&format=pdf&timezone=America%2FEdmonton",
+    );
+    expect(res.resource?.mimeType).toBe("application/pdf");
+    const pdfContent = Buffer.from(res.resource?.blob ?? "", "base64").toString(
+      "latin1",
+    );
+    expect(pdfContent.startsWith("%PDF-1.4\n")).toBe(true);
+    expect(pdfContent).toContain("(Alex Smith) Tj");
+  });
+
+  it("forbids non-admin members from exporting timesheets for other members or 'all'", async () => {
+    mockGetUserOrgMemberships.mockResolvedValueOnce({
+      data: [
+        {
+          role: "org:member",
+          organization: {
+            id: "org_1",
+            name: "PatMac Org",
+            slug: "patmac-org",
+            membersCount: 2,
+          },
+        },
+      ],
+    });
+
+    const res = await exportTimesheetTool(
+      { userId: "user_worker", client: "Claude" },
+      {
+        member: "all",
+        start_date: "2026-10-26",
+        end_date: "2026-10-28",
+      },
+    );
+
+    expect(res.isError).toBe(true);
+    expect(res.data.status).toBe("forbidden");
   });
 });

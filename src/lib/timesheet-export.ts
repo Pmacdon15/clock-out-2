@@ -1,3 +1,5 @@
+import { formatInTimeZone } from "date-fns-tz";
+
 /**
  * Timesheet export: turns time entries into a downloadable Excel spreadsheet
  * (.xlsx) or PDF. Dependency-free on purpose — both files are written by hand
@@ -49,10 +51,15 @@ const MONTHS = [
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
-export const formatDate = (d: Date) =>
-  `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+export const formatDate = (d: Date, timezone?: string) =>
+  timezone
+    ? formatInTimeZone(d, timezone, "yyyy-MM-dd")
+    : `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
-export const formatTime = (d: Date) => {
+export const formatTime = (d: Date, timezone?: string) => {
+  if (timezone) {
+    return formatInTimeZone(d, timezone, "h:mm a");
+  }
   const hours = d.getHours();
   const suffix = hours < 12 ? "AM" : "PM";
   return `${hours % 12 || 12}:${pad(d.getMinutes())} ${suffix}`;
@@ -72,6 +79,7 @@ export const formatHours = (hours: number) => hours.toFixed(2);
 export function buildExportRows(
   entries: ExportableEntry[],
   getEmployeeName: (userId: string) => string,
+  timezone?: string,
 ): ExportRow[] {
   return entries
     .map((entry) => ({
@@ -85,9 +93,9 @@ export function buildExportRows(
     )
     .map(({ entry, clockIn, clockOut }) => ({
       employee: getEmployeeName(entry.user_id),
-      date: formatDate(clockIn),
-      clockIn: formatTime(clockIn),
-      clockOut: clockOut ? formatTime(clockOut) : "In progress",
+      date: formatDate(clockIn, timezone),
+      clockIn: formatTime(clockIn, timezone),
+      clockOut: clockOut ? formatTime(clockOut, timezone) : "In progress",
       hours: clockOut
         ? (clockOut.getTime() - clockIn.getTime()) / 3_600_000
         : null,
