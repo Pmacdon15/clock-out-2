@@ -11,6 +11,18 @@ import {
 import { formatInTimeZone, fromZonedTime, toZonedTime } from "date-fns-tz";
 import { z } from "zod";
 import { sendWeeklyReports } from "@/lib/reports";
+import {
+  buildExportRows,
+  type ExportFormat,
+  type ExportMeta,
+  exportFileName,
+  formatHours,
+  formatPeriod,
+  toPdf,
+  totalHours,
+  toXlsx,
+  XLSX_MIME,
+} from "@/lib/timesheet-export";
 import type { TimeEntry } from "@/lib/types";
 import { isOverMemberShipLimit } from "@/lib/utils-clerk";
 import {
@@ -36,9 +48,16 @@ export type McpCaller = {
   client: string | null;
 };
 
+export type ToolResource = {
+  uri: string;
+  mimeType: string;
+  blob: string;
+};
+
 export type ToolResult = {
   summary: string;
   data: Record<string, unknown>;
+  resource?: ToolResource;
   isError?: boolean;
 };
 
@@ -250,6 +269,62 @@ export const getWeeklyTimecardInputSchema = z.object({
     .optional()
     .describe(
       "Clock Out month-week number (1 = days 1–7, 2 = days 8–14, 3 = days 15–21, 4 = day 22 to end of month).",
+    ),
+  timezone: timezoneField,
+});
+
+export const exportTimesheetInputSchema = z.object({
+  org_id: orgIdField,
+  member: z
+    .string()
+    .optional()
+    .describe(
+      "Target member (name, email, or user_id), or 'all' (admins only) to export a timesheet for everyone in the organization. Admins default to 'all'; regular members default to themselves.",
+    ),
+  format: z
+    .enum(["pdf", "xlsx"])
+    .optional()
+    .describe(
+      "File format to export: 'pdf' (default) or 'xlsx' (Excel spreadsheet).",
+    ),
+  week_of: z
+    .string()
+    .optional()
+    .describe(
+      "Any YYYY-MM-DD date within the target 7-day Monday–Sunday week. Ignored if start_date/end_date or year/month/week are given.",
+    ),
+  start_date: z
+    .string()
+    .optional()
+    .describe("Explicit period start date (YYYY-MM-DD)."),
+  end_date: z
+    .string()
+    .optional()
+    .describe("Explicit period inclusive end date (YYYY-MM-DD)."),
+  year: z
+    .number()
+    .int()
+    .optional()
+    .describe(
+      "Year (e.g. 2026) when exporting a full month (year + month) or Clock Out's month-week 1–4 selector (year + month + week).",
+    ),
+  month: z
+    .number()
+    .int()
+    .min(1)
+    .max(12)
+    .optional()
+    .describe(
+      "Month 1–12 (e.g. 10 for October) when exporting a full month or Clock Out's month-week 1–4 selector.",
+    ),
+  week: z
+    .number()
+    .int()
+    .min(1)
+    .max(4)
+    .optional()
+    .describe(
+      "Optional Clock Out month-week number (1 = days 1–7, 2 = days 8–14, 3 = days 15–21, 4 = day 22 to end of month). Omit when year + month are set to export the entire month.",
     ),
   timezone: timezoneField,
 });
@@ -1602,6 +1677,273 @@ export async function getWeeklyTimecardTool(
       organization_total_hours: orgTotalDur.decimalHours,
       organization_formatted_total: orgTotalDur.formatted,
       timecards,
+    },
+  };
+}
+
+export type GeneratedTimesheetExport = {
+  bytes: Uint8Array;
+  fileName: string;
+  mimeType: string;
+  format: ExportFormat;
+  org: OrgContext;
+  employeeLabel: string;
+  memberParam: string;
+  startStr: string;
+  endStr: string;
+  periodLabel: string;
+  formattedPeriod: string;
+  timezone: string;
+  entriesCount: number;
+  totalHours: number;
+  downloadUrl: string;
+};
+
+export async function generateTimesheetExport(
+  caller: McpCaller,
+  input: z.infer<typeof exportTimesheetInputSchema>,
+  origin?: string,
+): Promise<
+  | { ok: true; value: GeneratedTimesheetExport }
+  | { ok: false; status: number; result: ToolResult }
+> {
+  const orgRes = await resolveOrg(caller.userId, input.org_id);
+  if (!orgRes.ok) {
+    return {
+      ok: false,
+      status: orgRes.result.data.status === "forbidden" ? 403 : 400,
+      result: orgRes.result,
+    };
+  }
+  const { org } = orgRes;
+  const tz = validTimezone(input.timezone);
+  const exportFormat: ExportFormat = input.format === "xlsx" ? "xlsx" : "pdf";
+
+  let startDate: Date;
+  let endDate: Date;
+  let startStr: string;
+  let endStr: string;
+  let periodLabel: string;
+
+  if (input.start_date && input.end_date) {
+    startStr = input.start_date.slice(0, 10);
+    endStr = input.end_date.slice(0, 10);
+    startDate = fromZonedTime(`${startStr}T00:00:00.000`, tz);
+    endDate = fromZonedTime(`${endStr}T23:59:59.999`, tz);
+    periodLabel = `${startStr} to ${endStr}`;
+  } else if (input.year && input.month && input.week) {
+    const monthIndex = input.month - 1;
+    const baseDate = new Date(input.year, monthIndex, 1);
+    const startDay = (input.week - 1) * 7 + 1;
+    const endDayDate =
+      input.week === 4
+        ? endOfMonth(baseDate)
+        : endOfDay(new Date(input.year, monthIndex, input.week * 7));
+    startStr = format(new Date(input.year, monthIndex, startDay), "yyyy-MM-dd");
+    endStr = format(endDayDate, "yyyy-MM-dd");
+    startDate = fromZonedTime(`${startStr}T00:00:00.000`, tz);
+    endDate = fromZonedTime(`${endStr}T23:59:59.999`, tz);
+    periodLabel = `Week ${input.week} of ${format(baseDate, "MMMM yyyy")} (${startStr} to ${endStr})`;
+  } else if (input.year && input.month) {
+    const monthIndex = input.month - 1;
+    const baseDate = new Date(input.year, monthIndex, 1);
+    startStr = format(baseDate, "yyyy-MM-dd");
+    endStr = format(endOfMonth(baseDate), "yyyy-MM-dd");
+    startDate = fromZonedTime(`${startStr}T00:00:00.000`, tz);
+    endDate = fromZonedTime(`${endStr}T23:59:59.999`, tz);
+    periodLabel = `${format(baseDate, "MMMM yyyy")} (${startStr} to ${endStr})`;
+  } else {
+    const refDate = input.week_of
+      ? fromZonedTime(`${input.week_of.slice(0, 10)}T12:00:00`, tz)
+      : new Date();
+    const zonedRef = toZonedTime(refDate, tz);
+    const weekStartZoned = startOfWeek(zonedRef, { weekStartsOn: 1 });
+    const weekEndZoned = endOfWeek(zonedRef, { weekStartsOn: 1 });
+    startStr = format(weekStartZoned, "yyyy-MM-dd");
+    endStr = format(weekEndZoned, "yyyy-MM-dd");
+    startDate = fromZonedTime(`${startStr}T00:00:00.000`, tz);
+    endDate = fromZonedTime(`${endStr}T23:59:59.999`, tz);
+    periodLabel = `${startStr} to ${endStr}`;
+  }
+
+  if (
+    Number.isNaN(startDate.getTime()) ||
+    Number.isNaN(endDate.getTime()) ||
+    endDate.getTime() < startDate.getTime()
+  ) {
+    return {
+      ok: false,
+      status: 400,
+      result: {
+        summary: `Invalid date range (${startStr} to ${endStr}). Ensure start_date and end_date are valid YYYY-MM-DD dates with end_date on or after start_date.`,
+        data: {
+          status: "invalid_date_range",
+          start_date: startStr,
+          end_date: endStr,
+        },
+        isError: true,
+      },
+    };
+  }
+
+  const members = await fetchOrgMembers(org.orgId);
+  const memberMap = new Map(members.map((m) => [m.userId, m]));
+
+  const requestedMember = input.member?.trim();
+  const wantsAll =
+    requestedMember?.toLowerCase() === "all" ||
+    (!requestedMember && org.isAdmin);
+
+  let entries: TimeEntry[];
+  let employeeLabel: string;
+  let memberParam: string;
+
+  if (wantsAll) {
+    if (!org.isAdmin) {
+      return {
+        ok: false,
+        status: 403,
+        result: {
+          summary:
+            "Only organization admins (org:admin) can export timesheets for all members.",
+          data: { status: "forbidden" },
+          isError: true,
+        },
+      };
+    }
+    entries = await dbGetOrgTimeEntries(org.orgId, startDate, endDate);
+    employeeLabel = "Entire Organization";
+    memberParam = "all";
+  } else {
+    const memberRes = resolveMemberFromList(
+      members,
+      caller.userId,
+      org.isAdmin,
+      requestedMember,
+    );
+    if (!memberRes.ok) {
+      return {
+        ok: false,
+        status: memberRes.result.data.status === "forbidden" ? 403 : 404,
+        result: memberRes.result,
+      };
+    }
+    entries = await dbGetTimeEntries(
+      memberRes.member.userId,
+      org.orgId,
+      startDate,
+      endDate,
+    );
+    employeeLabel = memberRes.member.name;
+    memberParam = memberRes.member.userId;
+  }
+
+  const rows = buildExportRows(
+    entries,
+    (userId) =>
+      wantsAll
+        ? (memberMap.get(userId)?.name ?? "Unknown member")
+        : employeeLabel,
+    tz,
+  );
+  const meta: ExportMeta = {
+    employee: employeeLabel,
+    startDate: startStr,
+    endDate: endStr,
+  };
+  const fileName = exportFileName(meta, exportFormat);
+  const bytes = exportFormat === "pdf" ? toPdf(rows, meta) : toXlsx(rows, meta);
+  const mimeType = exportFormat === "pdf" ? "application/pdf" : XLSX_MIME;
+  const hours = Number(totalHours(rows).toFixed(2));
+
+  const baseOrigin = (
+    origin ||
+    process.env.NEXT_PUBLIC_APP_URL ||
+    "https://clockout.patmac.ca"
+  ).replace(/\/+$/, "");
+  const params = new URLSearchParams({
+    org_id: org.orgId,
+    member: memberParam,
+    start_date: startStr,
+    end_date: endStr,
+    format: exportFormat,
+    timezone: tz,
+  });
+  const downloadUrl = `${baseOrigin}/api/export/timesheet?${params.toString()}`;
+
+  return {
+    ok: true,
+    value: {
+      bytes,
+      fileName,
+      mimeType,
+      format: exportFormat,
+      org,
+      employeeLabel,
+      memberParam,
+      startStr,
+      endStr,
+      periodLabel,
+      formattedPeriod: formatPeriod(meta),
+      timezone: tz,
+      entriesCount: rows.length,
+      totalHours: hours,
+      downloadUrl,
+    },
+  };
+}
+
+export async function exportTimesheetTool(
+  caller: McpCaller,
+  input: z.infer<typeof exportTimesheetInputSchema>,
+): Promise<ToolResult> {
+  const res = await generateTimesheetExport(caller, input);
+  if (!res.ok) return res.result;
+  const {
+    bytes,
+    fileName,
+    mimeType,
+    format: exportFormat,
+    org,
+    employeeLabel,
+    memberParam,
+    startStr,
+    endStr,
+    periodLabel,
+    formattedPeriod,
+    timezone,
+    entriesCount,
+    totalHours: hours,
+    downloadUrl,
+  } = res.value;
+
+  const base64 = Buffer.from(bytes).toString("base64");
+
+  return {
+    summary: `Timesheet ${exportFormat.toUpperCase()} "${fileName}" for ${employeeLabel} (${formattedPeriod}: ${entriesCount} entr${entriesCount === 1 ? "y" : "ies"}, ${formatHours(hours)} hrs) is ready. Download on your phone or computer (requires Clock Out sign-in): [${fileName}](${downloadUrl})`,
+    data: {
+      status: "ready",
+      organization: { org_id: org.orgId, name: org.orgName },
+      employee: employeeLabel,
+      member: memberParam,
+      period: {
+        label: periodLabel,
+        formatted: formattedPeriod,
+        start: startStr,
+        end: endStr,
+        timezone,
+      },
+      format: exportFormat,
+      file_name: fileName,
+      mime_type: mimeType,
+      entries_count: entriesCount,
+      total_hours: hours,
+      download_url: downloadUrl,
+    },
+    resource: {
+      uri: downloadUrl,
+      mimeType,
+      blob: base64,
     },
   };
 }
