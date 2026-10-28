@@ -12,6 +12,7 @@ Organizations:
 Roles & Permissions:
 - Regular members ("org:member") can clock themselves in and out, check their own clock status, add their own shifts, and view their own time entries and weekly timecards, plus see who is currently working in the organization.
 - Organization admins ("org:admin") have full management access across everyone in the organization:
+  - Invite new users by email to join the organization as a member or admin, list pending invitations, or revoke pending invitations (invite_member).
   - Clock in or clock out any member (pass member as their name, email, or user_id).
   - Add completed or active shifts for themselves or any member (add_time_entry).
   - Change/edit hours on days that are already logged for themselves or any member (update_time_entry) or delete entries (delete_time_entry).
