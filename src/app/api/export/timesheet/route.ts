@@ -6,23 +6,15 @@ import {
   generateTimesheetExport,
 } from "@/mcp/tools";
 
-function parseOptionalInt(value: string | null): number | undefined {
-  if (!value) return undefined;
-  const parsed = Number.parseInt(value, 10);
-  return Number.isNaN(parsed) ? undefined : parsed;
-}
-
 export async function GET(req: Request): Promise<Response> {
   const session = await auth();
-  let userId = session.userId ?? null;
+  let userId = session.userId;
 
   if (!userId) {
     const token = bearerToken(req);
-    if (token) {
-      const authInfo = await verifyMcpToken(req, token);
-      if (typeof authInfo?.extra?.userId === "string") {
-        userId = authInfo.extra.userId;
-      }
+    const authInfo = token ? await verifyMcpToken(req, token) : undefined;
+    if (typeof authInfo?.extra?.userId === "string") {
+      userId = authInfo.extra.userId;
     }
   }
 
@@ -30,7 +22,7 @@ export async function GET(req: Request): Promise<Response> {
     const acceptsHtml = (req.headers.get("accept") ?? "")
       .toLowerCase()
       .includes("text/html");
-    if (acceptsHtml && typeof session.redirectToSignIn === "function") {
+    if (acceptsHtml) {
       return session.redirectToSignIn({ returnBackUrl: req.url });
     }
     return Response.json(
@@ -42,27 +34,14 @@ export async function GET(req: Request): Promise<Response> {
     );
   }
 
-  const url = new URL(req.url);
-  const parsed = exportTimesheetInputSchema.safeParse({
-    org_id: url.searchParams.get("org_id") ?? undefined,
-    member: url.searchParams.get("member") ?? undefined,
-    format: url.searchParams.get("format") ?? undefined,
-    week_of: url.searchParams.get("week_of") ?? undefined,
-    start_date: url.searchParams.get("start_date") ?? undefined,
-    end_date: url.searchParams.get("end_date") ?? undefined,
-    year: parseOptionalInt(url.searchParams.get("year")),
-    month: parseOptionalInt(url.searchParams.get("month")),
-    week: parseOptionalInt(url.searchParams.get("week")),
-    timezone: url.searchParams.get("timezone") ?? undefined,
-  });
+  const params = Object.fromEntries(new URL(req.url).searchParams);
+  const parsed = exportTimesheetInputSchema.safeParse(params);
 
   if (!parsed.success) {
     return Response.json(
       {
         error: "invalid_parameters",
-        error_description: parsed.error.issues
-          .map((i) => `${i.path.join(".") || "param"}: ${i.message}`)
-          .join("; "),
+        error_description: "Invalid timesheet export query parameters.",
       },
       { status: 400 },
     );

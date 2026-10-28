@@ -226,4 +226,30 @@ describe("GET /api/export/timesheet", () => {
     const body = await res.json();
     expect(body.status).toBe("forbidden");
   });
+
+  it("returns 401 when an invalid bearer token is sent", async () => {
+    mockAuth.mockResolvedValueOnce({ userId: null });
+    mockVerifyMcpToken.mockResolvedValueOnce(undefined);
+
+    const req = new Request(
+      "https://clockout.patmac.ca/api/export/timesheet?org_id=org_1",
+      { headers: { authorization: "Bearer bad_token" } },
+    );
+    const res = await GET(req);
+
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 400 when invalid query parameters are provided", async () => {
+    mockAuth.mockResolvedValueOnce({ userId: "user_admin" });
+
+    const req = new Request(
+      "https://clockout.patmac.ca/api/export/timesheet?org_id=org_1&format=csv",
+    );
+    const res = await GET(req);
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("invalid_parameters");
+  });
 });
