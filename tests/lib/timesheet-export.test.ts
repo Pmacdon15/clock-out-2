@@ -424,6 +424,57 @@ describe("PDF output", () => {
   it("renders rows straight to PDF bytes", () => {
     expect(decode(toPdf([row()], meta))).toContain("(Ada) Tj");
   });
+
+  it("renders organization name and logo in the PDF header and embeds image XObject", () => {
+    const logo = {
+      width: 80,
+      height: 40,
+      colorSpace: "DeviceRGB" as const,
+      filter: "DCTDecode" as const,
+      data: Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]),
+    };
+
+    // Org name only
+    const nameOnlyPages = layoutPdfPages(
+      Array.from({ length: 80 }, () => row()),
+      { ...meta, orgName: "Acme Construction" },
+    );
+    expect(nameOnlyPages[0]).toContain("(Acme Construction) Tj");
+    expect(nameOnlyPages[0]).not.toContain("/Im1 Do");
+    expect(nameOnlyPages[1]).toContain(
+      "(Acme Construction - Timesheet - Ada Lovelace \\(continued\\)) Tj",
+    );
+
+    // Logo only
+    const logoOnlyPages = layoutPdfPages([row()], { ...meta, orgLogo: logo });
+    expect(logoOnlyPages[0]).toContain(
+      "q 40.00 0 0 20.00 48.00 714.00 cm /Im1 Do Q",
+    );
+
+    // Both org name and logo
+    const bothPdf = decode(
+      toPdf([row()], {
+        ...meta,
+        orgName: "Acme Construction",
+        orgLogo: logo,
+      }),
+    );
+    expect(bothPdf).toContain("(Acme Construction) Tj");
+    expect(bothPdf).toContain("/Im1 Do");
+    expect(bothPdf).toContain("/XObject << /Im1 7 0 R >>");
+    expect(bothPdf).toContain(
+      "/Type /XObject /Subtype /Image /Width 80 /Height 40 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length 4",
+    );
+
+    // Verify xref offsets remain byte-accurate with binary image data
+    const offsets = [...bothPdf.matchAll(/^(\d{10}) 00000 n $/gm)].map((m) =>
+      Number(m[1]),
+    );
+    expect(offsets).toHaveLength(7);
+    offsets.forEach((offset, i) => {
+      expect(bothPdf.slice(offset).startsWith(`${i + 1} 0 obj`)).toBe(true);
+    });
+  });
 });
 
 describe("downloads", () => {
@@ -489,12 +540,11 @@ describe("downloads", () => {
     expect(buildSheetXml([row()], { ...meta, groupBy: "month" })).toContain(
       "Subtotal",
     );
-    expect(
-      layoutPdfPages([row()], { ...meta, groupBy: "week" })[0],
-    ).toContain("Subtotal");
-    expect(
-      layoutPdfPages([row()], { ...meta, groupBy: "month" })[0],
-    ).toContain("Subtotal");
+    expect(layoutPdfPages([row()], { ...meta, groupBy: "week" })[0]).toContain(
+      "Subtotal",
+    );
+    expect(layoutPdfPages([row()], { ...meta, groupBy: "month" })[0]).toContain(
+      "Subtotal",
+    );
   });
 });
-

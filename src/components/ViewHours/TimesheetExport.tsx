@@ -1,10 +1,13 @@
 "use client";
 
+import { useOrganization } from "@clerk/nextjs";
 import { Download } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { loadPdfImage } from "@/lib/pdf-image";
 import {
   buildExportRows,
   type ExportFormat,
+  type ExportMeta,
   exportTimesheet,
   formatHours,
   formatPeriod,
@@ -32,6 +35,9 @@ export function TimesheetExport({
   members = [],
   breakSettings,
 }: TimesheetExportProps) {
+  const { organization } = useOrganization();
+  const [isExporting, setIsExporting] = useState(false);
+
   const rows = useMemo(
     () =>
       buildExportRows(
@@ -46,11 +52,28 @@ export function TimesheetExport({
     [entries, isViewingAll, members, employeeName, breakSettings],
   );
 
-  const meta = { employee: employeeName, startDate, endDate };
+  const meta: ExportMeta = { employee: employeeName, startDate, endDate };
   const isEmpty = rows.length === 0;
 
-  const handleExport = (format: ExportFormat) => {
-    exportTimesheet(format, rows, meta);
+  const handleExport = async (format: ExportFormat) => {
+    if (format !== "pdf") {
+      exportTimesheet(format, rows, meta);
+      return;
+    }
+    setIsExporting(true);
+    try {
+      // Only use uploaded logos — skip Clerk's generated placeholder avatar.
+      const orgLogo = organization?.hasImage
+        ? await loadPdfImage(organization.imageUrl)
+        : null;
+      exportTimesheet(format, rows, {
+        ...meta,
+        ...(organization ? { orgName: organization.name } : {}),
+        ...(orgLogo ? { orgLogo } : {}),
+      });
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   return (
@@ -65,7 +88,7 @@ export function TimesheetExport({
       </div>
       <div className="flex gap-2">
         <Button
-          disabled={isEmpty}
+          disabled={isEmpty || isExporting}
           onClick={() => handleExport("pdf")}
           size="sm"
           variant="outline"
