@@ -359,6 +359,18 @@ describe("Double / overlapping time prevention & cache invalidation", () => {
       "/api/export/timesheet?org_id=org_1&member=all&start_date=2026-10-26&end_date=2026-10-28&format=pdf&timezone=America%2FEdmonton",
     );
     expect(res.resource?.mimeType).toBe("application/pdf");
+    expect(res.resources).toHaveLength(2);
+    expect(res.data.pdf).toEqual({
+      file_name: "timesheet-entire-organization-2026-10-26-to-2026-10-28.pdf",
+      mime_type: "application/pdf",
+      download_url: expect.stringContaining("format=pdf"),
+    });
+    expect(res.data.spreadsheet).toEqual({
+      file_name: "timesheet-entire-organization-2026-10-26-to-2026-10-28.xlsx",
+      mime_type:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      download_url: expect.stringContaining("format=xlsx"),
+    });
     const pdfContent = Buffer.from(res.resource?.blob ?? "", "base64").toString(
       "latin1",
     );

@@ -12,8 +12,11 @@ import { formatInTimeZone, fromZonedTime, toZonedTime } from "date-fns-tz";
 import { z } from "zod";
 import { sendWeeklyReports } from "@/lib/reports";
 import {
+  buildEmployeeSummary,
   buildExportRows,
+  buildPeriodSections,
   type ExportFormat,
+  type ExportGrouping,
   type ExportMeta,
   exportFileName,
   formatHours,
@@ -58,6 +61,7 @@ export type ToolResult = {
   summary: string;
   data: Record<string, unknown>;
   resource?: ToolResource;
+  resources?: ToolResource[];
   isError?: boolean;
 };
 
@@ -285,7 +289,13 @@ export const exportTimesheetInputSchema = z.object({
     .enum(["pdf", "xlsx"])
     .optional()
     .describe(
-      "File format to export: 'pdf' (default) or 'xlsx' (Excel spreadsheet).",
+      "Preferred file format ('pdf' or 'xlsx'). Note: export_timesheet always provides download links for both PDF and Excel spreadsheet (.xlsx).",
+    ),
+  group_by: z
+    .enum(["auto", "week", "month", "none"])
+    .optional()
+    .describe(
+      "How to group shifts and subtotal rows in the exported PDF and spreadsheet: 'week' (weekly sections with subtotals), 'month' (monthly sections with subtotals), 'none' (flat list), or 'auto' (default: groups by week or month based on date range).",
     ),
   week_of: z
     .string()
@@ -1720,6 +1730,13 @@ export type GeneratedTimesheetExport = {
   fileName: string;
   mimeType: string;
   format: ExportFormat;
+  pdfBytes: Uint8Array;
+  pdfFileName: string;
+  pdfDownloadUrl: string;
+  xlsxBytes: Uint8Array;
+  xlsxFileName: string;
+  xlsxDownloadUrl: string;
+  groupBy: ExportGrouping;
   org: OrgContext;
   employeeLabel: string;
   memberParam: string;
@@ -1729,8 +1746,11 @@ export type GeneratedTimesheetExport = {
   formattedPeriod: string;
   timezone: string;
   entriesCount: number;
+  daysWorked: number;
   totalHours: number;
   downloadUrl: string;
+  periodSections: ReturnType<typeof buildPeriodSections>;
+  employeeSummaries: ReturnType<typeof buildEmployeeSummary>;
 };
 
 export async function generateTimesheetExport(
@@ -1752,6 +1772,7 @@ export async function generateTimesheetExport(
   const { org } = orgRes;
   const tz = validTimezone(input.timezone);
   const exportFormat: ExportFormat = input.format === "xlsx" ? "xlsx" : "pdf";
+  const groupBy: ExportGrouping = input.group_by ?? "auto";
 
   let startDate: Date;
   let endDate: Date;
@@ -1884,26 +1905,45 @@ export async function generateTimesheetExport(
     employee: employeeLabel,
     startDate: startStr,
     endDate: endStr,
+    groupBy,
   };
-  const fileName = exportFileName(meta, exportFormat);
-  const bytes = exportFormat === "pdf" ? toPdf(rows, meta) : toXlsx(rows, meta);
+  const pdfFileName = exportFileName(meta, "pdf");
+  const xlsxFileName = exportFileName(meta, "xlsx");
+  const pdfBytes = toPdf(rows, meta);
+  const xlsxBytes = toXlsx(rows, meta);
+
+  const fileName = exportFormat === "pdf" ? pdfFileName : xlsxFileName;
+  const bytes = exportFormat === "pdf" ? pdfBytes : xlsxBytes;
   const mimeType = exportFormat === "pdf" ? "application/pdf" : XLSX_MIME;
   const hours = Number(totalHours(rows).toFixed(2));
+  const daysWorked = new Set(rows.map((r) => r.date)).size;
+  const periodSections = buildPeriodSections(rows, meta);
+  const employeeSummaries = buildEmployeeSummary(rows);
 
   const baseOrigin = (
     origin ||
     process.env.NEXT_PUBLIC_APP_URL ||
     "https://clockout.patmac.ca"
   ).replace(/\/+$/, "");
-  const params = new URLSearchParams({
-    org_id: org.orgId,
-    member: memberParam,
-    start_date: startStr,
-    end_date: endStr,
-    format: exportFormat,
-    timezone: tz,
-  });
-  const downloadUrl = `${baseOrigin}/api/export/timesheet?${params.toString()}`;
+
+  const buildUrl = (fmt: ExportFormat) => {
+    const p = new URLSearchParams({
+      org_id: org.orgId,
+      member: memberParam,
+      start_date: startStr,
+      end_date: endStr,
+      format: fmt,
+      timezone: tz,
+    });
+    if (groupBy !== "auto") {
+      p.set("group_by", groupBy);
+    }
+    return `${baseOrigin}/api/export/timesheet?${p.toString()}`;
+  };
+
+  const pdfDownloadUrl = buildUrl("pdf");
+  const xlsxDownloadUrl = buildUrl("xlsx");
+  const downloadUrl = exportFormat === "pdf" ? pdfDownloadUrl : xlsxDownloadUrl;
 
   return {
     ok: true,
@@ -1912,6 +1952,13 @@ export async function generateTimesheetExport(
       fileName,
       mimeType,
       format: exportFormat,
+      pdfBytes,
+      pdfFileName,
+      pdfDownloadUrl,
+      xlsxBytes,
+      xlsxFileName,
+      xlsxDownloadUrl,
+      groupBy,
       org,
       employeeLabel,
       memberParam,
@@ -1921,8 +1968,11 @@ export async function generateTimesheetExport(
       formattedPeriod: formatPeriod(meta),
       timezone: tz,
       entriesCount: rows.length,
+      daysWorked,
       totalHours: hours,
       downloadUrl,
+      periodSections,
+      employeeSummaries,
     },
   };
 }
@@ -1938,6 +1988,13 @@ export async function exportTimesheetTool(
     fileName,
     mimeType,
     format: exportFormat,
+    pdfBytes,
+    pdfFileName,
+    pdfDownloadUrl,
+    xlsxBytes,
+    xlsxFileName,
+    xlsxDownloadUrl,
+    groupBy,
     org,
     employeeLabel,
     memberParam,
@@ -1947,14 +2004,30 @@ export async function exportTimesheetTool(
     formattedPeriod,
     timezone,
     entriesCount,
+    daysWorked,
     totalHours: hours,
     downloadUrl,
+    periodSections,
+    employeeSummaries,
   } = res.value;
 
-  const base64 = Buffer.from(bytes).toString("base64");
+  const pdfBase64 = Buffer.from(pdfBytes).toString("base64");
+  const xlsxBase64 = Buffer.from(xlsxBytes).toString("base64");
+  const primaryBase64 = Buffer.from(bytes).toString("base64");
+
+  const pdfResource: ToolResource = {
+    uri: pdfDownloadUrl,
+    mimeType: "application/pdf",
+    blob: pdfBase64,
+  };
+  const xlsxResource: ToolResource = {
+    uri: xlsxDownloadUrl,
+    mimeType: XLSX_MIME,
+    blob: xlsxBase64,
+  };
 
   return {
-    summary: `Timesheet ${exportFormat.toUpperCase()} "${fileName}" for ${employeeLabel} (${formattedPeriod}: ${entriesCount} entr${entriesCount === 1 ? "y" : "ies"}, ${formatHours(hours)} hrs) is ready. Download on your phone or computer (requires Clock Out sign-in): [${fileName}](${downloadUrl})`,
+    summary: `Timesheet for ${employeeLabel} (${formattedPeriod}: ${entriesCount} entr${entriesCount === 1 ? "y" : "ies"} across ${daysWorked} day${daysWorked === 1 ? "" : "s"}, ${formatHours(hours)} hrs) is ready in both PDF and Excel Spreadsheet formats. Download (requires Clock Out sign-in): PDF [${pdfFileName}](${pdfDownloadUrl}) | Spreadsheet [${xlsxFileName}](${xlsxDownloadUrl})`,
     data: {
       status: "ready",
       organization: { org_id: org.orgId, name: org.orgName },
@@ -1966,19 +2039,47 @@ export async function exportTimesheetTool(
         start: startStr,
         end: endStr,
         timezone,
+        group_by: groupBy,
       },
       format: exportFormat,
       file_name: fileName,
       mime_type: mimeType,
       entries_count: entriesCount,
+      days_worked: daysWorked,
       total_hours: hours,
       download_url: downloadUrl,
+      pdf: {
+        file_name: pdfFileName,
+        mime_type: "application/pdf",
+        download_url: pdfDownloadUrl,
+      },
+      spreadsheet: {
+        file_name: xlsxFileName,
+        mime_type: XLSX_MIME,
+        download_url: xlsxDownloadUrl,
+      },
+      period_breakdown: periodSections.map((s) => ({
+        label: s.label,
+        days_worked: s.daysWorked,
+        shifts_count: s.shiftsCount,
+        total_hours: Number(s.totalHours.toFixed(2)),
+      })),
+      employee_breakdown: employeeSummaries.map((e) => ({
+        employee: e.employee,
+        days_worked: e.daysWorked,
+        shifts_count: e.shiftsCount,
+        total_hours: Number(e.totalHours.toFixed(2)),
+      })),
     },
     resource: {
       uri: downloadUrl,
       mimeType,
-      blob: base64,
+      blob: primaryBase64,
     },
+    resources:
+      exportFormat === "xlsx"
+        ? [xlsxResource, pdfResource]
+        : [pdfResource, xlsxResource],
   };
 }
 
