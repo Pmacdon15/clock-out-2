@@ -1,6 +1,10 @@
 import { neon } from "@neondatabase/serverless";
 import { cacheLife, cacheTag } from "next/cache";
-import type { ReportingSettingsData, TimeEntry } from "./types";
+import type {
+  BreakSettingsData,
+  ReportingSettingsData,
+  TimeEntry,
+} from "./types";
 
 if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL is not defined");
@@ -140,7 +144,22 @@ export async function dbUpdateTimeEntry(
   clock_out: Date | null,
   orgId: string,
   isAdmin: boolean,
+  skip_lunch?: boolean,
 ) {
+  if (skip_lunch !== undefined) {
+    const [updated] = await sql`
+      UPDATE time_entries
+      SET clock_in = ${clock_in},
+          clock_out = ${clock_out},
+          skip_lunch = ${skip_lunch},
+          updated_at = NOW()
+      WHERE id = ${id} AND org_id = ${orgId}
+      AND ${isAdmin}
+      RETURNING *
+    `;
+    return updated as unknown as TimeEntry | undefined;
+  }
+
   const [updated] = await sql`
       UPDATE time_entries
       SET clock_in = ${clock_in},
@@ -203,4 +222,40 @@ export async function dbUpdateReportingSettings(
 		RETURNING *
 	`;
   return updated as ReportingSettingsData;
+}
+
+export async function dbGetBreakSettings(orgId: string) {
+  "use cache";
+  cacheTag(`break-settings-${orgId}`);
+  cacheLife("hours");
+  const [settings] = await sql`
+		SELECT * FROM break_settings WHERE org_id = ${orgId}
+	`;
+  return settings as BreakSettingsData | undefined;
+}
+
+export async function dbUpdateBreakSettings(
+  orgId: string,
+  dockLunch: boolean,
+  durationMinutes: number,
+  minShiftHours: number,
+) {
+  await sql`
+		INSERT INTO settings (org_id, updated_at)
+		VALUES (${orgId}, NOW())
+		ON CONFLICT (org_id) DO UPDATE SET updated_at = NOW()
+	`;
+
+  const [updated] = await sql`
+		INSERT INTO break_settings (org_id, dock_lunch, lunch_duration_minutes, lunch_min_shift_hours, updated_at)
+		VALUES (${orgId}, ${dockLunch}, ${durationMinutes}, ${minShiftHours}, NOW())
+		ON CONFLICT (org_id)
+		DO UPDATE SET
+            dock_lunch = ${dockLunch},
+            lunch_duration_minutes = ${durationMinutes},
+            lunch_min_shift_hours = ${minShiftHours},
+            updated_at = NOW()
+		RETURNING *
+	`;
+  return updated as BreakSettingsData;
 }

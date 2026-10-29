@@ -246,4 +246,42 @@ describe("TimeClock recent activity", () => {
     );
     expect(screen.getByText("Offline")).toBeInTheDocument();
   });
+
+  it("displays docked break badge or Not docked badge in recent activity", () => {
+    renderWithClient(
+      <TimeClock
+        breakSettings={{
+          dock_lunch: true,
+          lunch_duration_minutes: 30,
+          lunch_min_shift_hours: 5,
+        }}
+        initialEntries={[
+          makeEntry({
+            id: 201,
+            clock_in: new Date("2026-01-01T09:00:00Z"),
+            clock_out: new Date("2026-01-01T17:30:00Z"),
+            skip_lunch: false,
+          }),
+          makeEntry({
+            id: 202,
+            clock_in: new Date("2026-01-02T09:00:00Z"),
+            clock_out: new Date("2026-01-02T17:30:00Z"),
+            skip_lunch: true,
+          }),
+          makeEntry({
+            id: 203,
+            clock_in: new Date("2026-01-03T09:00:00Z"),
+            clock_out: new Date("2026-01-03T09:45:00Z"),
+          }),
+        ]}
+        isAdmin={false}
+        setOptimisticEntries={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("8h 0m")).toBeInTheDocument();
+    expect(screen.getByText("-30m break")).toBeInTheDocument();
+    expect(screen.getByText("8h 30m")).toBeInTheDocument();
+    expect(screen.getByText("Not docked")).toBeInTheDocument();
+    expect(screen.getByText("45m")).toBeInTheDocument();
+  });
 });

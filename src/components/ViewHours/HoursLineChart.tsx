@@ -14,8 +14,10 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { getEffectiveHours } from "@/lib/break-utils";
 import type { TimeEntry } from "@/lib/dal";
 import { downloadElementAsImage } from "@/lib/download";
+import type { BreakSettingsData } from "@/lib/types";
 import { Button, Card } from "../ui";
 
 interface HoursLineChartProps {
@@ -27,6 +29,7 @@ interface HoursLineChartProps {
   endDate?: string;
   isViewingAll?: boolean;
   employeeName?: string;
+  breakSettings?: BreakSettingsData | null;
 }
 
 export const COLORS = [
@@ -137,6 +140,7 @@ function HoursLineChartContent({
   summaryText,
   isViewingAll = false,
   employeeName,
+  breakSettings,
 }: HoursLineChartProps & {
   onDownload?: () => void;
   isDownloading?: boolean;
@@ -152,10 +156,7 @@ function HoursLineChartContent({
     filteredEntries.forEach((e) => {
       const clockIn = new Date(e.clock_in);
       const dayKey = startOfDay(clockIn).toISOString();
-      const durationMs = e.clock_out
-        ? new Date(e.clock_out).getTime() - clockIn.getTime()
-        : Date.now() - clockIn.getTime();
-      const hours = Math.max(0, durationMs / (1000 * 60 * 60));
+      const hours = getEffectiveHours(e, breakSettings);
 
       if (!dataMap[dayKey]) {
         dataMap[dayKey] = { date: clockIn };
@@ -186,30 +187,23 @@ function HoursLineChartContent({
         }
         return entry;
       });
-  }, [filteredEntries, members]);
+  }, [filteredEntries, members, breakSettings]);
 
   const totalOrgHours = useMemo(() => {
-    return filteredEntries.reduce((acc, e) => {
-      const clockIn = new Date(e.clock_in);
-      const durationMs = e.clock_out
-        ? new Date(e.clock_out).getTime() - clockIn.getTime()
-        : Date.now() - clockIn.getTime();
-      return acc + Math.max(0, durationMs / (1000 * 60 * 60));
-    }, 0);
-  }, [filteredEntries]);
+    return filteredEntries.reduce(
+      (acc, e) => acc + getEffectiveHours(e, breakSettings),
+      0,
+    );
+  }, [filteredEntries, breakSettings]);
 
   const memberBreakdown = useMemo(() => {
     const breakdown: Record<string, number> = {};
     filteredEntries.forEach((e) => {
-      const clockIn = new Date(e.clock_in);
-      const durationMs = e.clock_out
-        ? new Date(e.clock_out).getTime() - clockIn.getTime()
-        : Date.now() - clockIn.getTime();
-      const hours = Math.max(0, durationMs / (1000 * 60 * 60));
+      const hours = getEffectiveHours(e, breakSettings);
       breakdown[e.user_id] = (breakdown[e.user_id] || 0) + hours;
     });
     return breakdown;
-  }, [filteredEntries]);
+  }, [filteredEntries, breakSettings]);
 
   // Theme variables for the chart itself
   // In app: use zinc-400 for ticks/grid to look good in both themes
@@ -442,10 +436,7 @@ function HoursLineChartContent({
                   .map((e) => {
                     const clockIn = new Date(e.clock_in);
                     const clockOut = e.clock_out ? new Date(e.clock_out) : null;
-                    const durationMs = clockOut
-                      ? clockOut.getTime() - clockIn.getTime()
-                      : Date.now() - clockIn.getTime();
-                    const hours = Math.max(0, durationMs / (1000 * 60 * 60));
+                    const hours = getEffectiveHours(e, breakSettings);
                     const member = members.find((m) => m.id === e.user_id);
 
                     return (

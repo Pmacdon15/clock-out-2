@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   clockOut: vi.fn(),
   deleteTimeEntry: vi.fn(),
   updateTimeEntry: vi.fn(),
+  updateBreakSettingsDal: vi.fn(),
   updateReportingSettingsDal: vi.fn(),
   sendWeeklyReports: vi.fn(),
 }));
@@ -19,6 +20,7 @@ vi.mock("@/lib/dal", () => ({
   clockOut: mocks.clockOut,
   deleteTimeEntry: mocks.deleteTimeEntry,
   updateTimeEntry: mocks.updateTimeEntry,
+  updateBreakSettingsDal: mocks.updateBreakSettingsDal,
   updateReportingSettingsDal: mocks.updateReportingSettingsDal,
 }));
 vi.mock("@/lib/reports", () => ({
@@ -30,6 +32,7 @@ import {
   clockOutAction,
   deleteTimeEntryAction,
   sendCurrentWeekReportAction,
+  updateBreakSettingAction,
   updateOrgSettingAction,
   updateTimeEntryAction,
 } from "@/lib/actions";
@@ -129,6 +132,22 @@ describe("updateTimeEntryAction arguments", () => {
       null,
     );
   });
+
+  it("forwards skip_lunch when provided", async () => {
+    mocks.updateTimeEntry.mockResolvedValue(ok(entry));
+    await updateTimeEntryAction(
+      7,
+      "2026-01-05T09:00:00.000Z",
+      "2026-01-05T17:00:00.000Z",
+      true,
+    );
+    expect(mocks.updateTimeEntry).toHaveBeenCalledWith(
+      7,
+      new Date("2026-01-05T09:00:00.000Z"),
+      new Date("2026-01-05T17:00:00.000Z"),
+      true,
+    );
+  });
 });
 
 describe("sendCurrentWeekReportAction", () => {
@@ -210,6 +229,32 @@ describe("updateOrgSettingAction", () => {
   it("returns the failure reason", async () => {
     mocks.updateReportingSettingsDal.mockResolvedValue(failure);
     await expect(updateOrgSettingAction("weekly")).resolves.toEqual({
+      success: false,
+      error: "nope",
+    });
+  });
+});
+
+describe("updateBreakSettingAction", () => {
+  it("uses default duration and min shift hours and revalidates break settings", async () => {
+    mocks.updateBreakSettingsDal.mockResolvedValue(ok({ org_id: "org_1" }));
+    await expect(updateBreakSettingAction(true)).resolves.toEqual({
+      success: true,
+      data: { org_id: "org_1" },
+    });
+    expect(mocks.updateBreakSettingsDal).toHaveBeenCalledWith(true, 30, 5);
+    expect(mocks.updateTag).toHaveBeenCalledWith("break-settings-org_1");
+  });
+
+  it("forwards custom duration and min shift hours", async () => {
+    mocks.updateBreakSettingsDal.mockResolvedValue(ok({ org_id: "org_1" }));
+    await updateBreakSettingAction(true, 45, 6);
+    expect(mocks.updateBreakSettingsDal).toHaveBeenCalledWith(true, 45, 6);
+  });
+
+  it("returns the failure reason", async () => {
+    mocks.updateBreakSettingsDal.mockResolvedValue(failure);
+    await expect(updateBreakSettingAction(false)).resolves.toEqual({
       success: false,
       error: "nope",
     });

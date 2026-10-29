@@ -7,13 +7,16 @@ import {
   dbClockOut,
   dbDeleteTimeEntry,
   dbGetActiveEntry,
+  dbGetBreakSettings,
   dbGetOrgTimeEntries,
   dbGetReportingSettings,
   dbGetTimeEntries,
+  dbUpdateBreakSettings,
   dbUpdateReportingSettings,
   dbUpdateTimeEntry,
 } from "./db";
 import type {
+  BreakSettingsData,
   ReportingSettingsData,
   SerializableResult,
   TimeEntry,
@@ -237,6 +240,7 @@ export async function updateTimeEntry(
   id: number,
   clock_in: Date,
   clock_out: Date | null,
+  skip_lunch?: boolean,
 ) {
   const { userId, orgId, orgRole } = await auth.protect();
   if (!userId || !orgId) {
@@ -253,13 +257,13 @@ export async function updateTimeEntry(
     return errAsync({ reason: "Clock out must be after clock in" } as const);
   }
 
-  return await dbUpdateTimeEntry(
-    id,
-    clock_in,
-    clock_out,
-    orgId,
-    orgRole === "org:admin",
-  )
+  const isAdmin = orgRole === "org:admin";
+  const updatePromise =
+    skip_lunch === undefined
+      ? dbUpdateTimeEntry(id, clock_in, clock_out, orgId, isAdmin)
+      : dbUpdateTimeEntry(id, clock_in, clock_out, orgId, isAdmin, skip_lunch);
+
+  return await updatePromise
     .then(
       (
         updated,
@@ -359,5 +363,69 @@ export async function getOrgReportingSettings(): Promise<
     .catch((e) => {
       console.error("Error fetching settings.: ", e);
       return { error: { reason: "Error fetching settings." }, ok: false };
+    });
+}
+
+export async function updateBreakSettingsDal(
+  dockLunch: boolean,
+  durationMinutes: number = 30,
+  minShiftHours: number = 5,
+) {
+  const authUser = await auth.protect();
+  if (
+    !authUser.userId ||
+    !authUser.orgId ||
+    authUser.orgRole !== "org:admin"
+  ) {
+    return errAsync({ reason: "Unauthorized" } as const);
+  }
+  if (
+    !Number.isFinite(durationMinutes) ||
+    durationMinutes < 0 ||
+    durationMinutes > 480 ||
+    !Number.isFinite(minShiftHours) ||
+    minShiftHours < 0 ||
+    minShiftHours > 24
+  ) {
+    return errAsync({ reason: "Invalid break settings" } as const);
+  }
+  return await dbUpdateBreakSettings(
+    authUser.orgId,
+    dockLunch,
+    durationMinutes,
+    minShiftHours,
+  )
+    .then((updated) => {
+      return okAsync(updated);
+    })
+    .catch((e) => {
+      console.error("Update break settings error: ", e);
+      return errAsync({
+        reason: "Failed to update break settings",
+      } as const);
+    });
+}
+
+export async function getOrgBreakSettings(): Promise<
+  SerializableResult<BreakSettingsData | null, { reason: string }>
+> {
+  const { userId, orgId } = await auth.protect();
+  if (!userId || !orgId) {
+    return {
+      error: { reason: "Unauthorized or no organization selected" },
+      ok: false,
+    };
+  }
+
+  return await dbGetBreakSettings(orgId)
+    .then((settings) => {
+      return {
+        value: (settings as BreakSettingsData) || null,
+        ok: true as const,
+      };
+    })
+    .catch((e) => {
+      console.error("Error fetching break settings.: ", e);
+      return { error: { reason: "Error fetching break settings." }, ok: false };
     });
 }

@@ -76,6 +76,33 @@ describe("EntryItem display", () => {
     renderItem();
     expect(screen.getByTestId("delete")).toHaveTextContent("5");
   });
+
+  it("shows docked break badge and reduced hours when breakSettings docks lunch", () => {
+    renderItem({
+      isAdmin: false,
+      breakSettings: {
+        dock_lunch: true,
+        lunch_duration_minutes: 30,
+        lunch_min_shift_hours: 5,
+      },
+    });
+    expect(screen.getByText("8.00h")).toBeInTheDocument();
+    expect(screen.getByText("-30m break")).toBeInTheDocument();
+  });
+
+  it("shows Not docked badge and full hours when skip_lunch is true", () => {
+    renderItem({
+      entry: { ...entry, skip_lunch: true },
+      isAdmin: false,
+      breakSettings: {
+        dock_lunch: true,
+        lunch_duration_minutes: 30,
+        lunch_min_shift_hours: 5,
+      },
+    });
+    expect(screen.getByText("8.50h")).toBeInTheDocument();
+    expect(screen.getByText("Not docked")).toBeInTheDocument();
+  });
 });
 
 describe("EntryItem editing", () => {
@@ -105,6 +132,9 @@ describe("EntryItem editing", () => {
     fireEvent.change(screen.getByLabelText("Clock Out"), {
       target: { value: "2026-01-05T16:00" },
     });
+    fireEvent.click(
+      screen.getByLabelText("Skipped lunch / break (do not dock)"),
+    );
     fireEvent.click(screen.getAllByRole("button")[1]);
 
     expect(setOptimisticEntries).toHaveBeenCalledWith({
@@ -113,6 +143,7 @@ describe("EntryItem editing", () => {
         id: 5,
         clock_in: new Date("2026-01-05T08:00"),
         clock_out: new Date("2026-01-05T16:00"),
+        skip_lunch: true,
         updated_at: new Date("2026-01-05T12:00:00Z"),
       },
     });
@@ -123,6 +154,7 @@ describe("EntryItem editing", () => {
       5,
       "2026-01-05T08:00:00.000Z",
       "2026-01-05T16:00:00.000Z",
+      true,
     );
     await waitFor(() =>
       expect(screen.queryByLabelText("Clock In")).not.toBeInTheDocument(),
@@ -144,6 +176,7 @@ describe("EntryItem editing", () => {
         5,
         "2026-01-05T09:00:00.000Z",
         "",
+        false,
       ),
     );
   });

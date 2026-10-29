@@ -6,6 +6,7 @@ import DashboardSkeleton from "@/components/fallbacks/home-page-fallback";
 import MainPageHeader from "@/components/headers/main-page-header";
 import McpConnectCard from "@/components/McpConnectCard";
 import {
+  getOrgBreakSettings,
   getOrgMembers,
   getOrgReportingSettings,
   getOrgTimeEntries,
@@ -23,6 +24,7 @@ export default function Home(props: PageProps<"/">) {
         <Show when="signed-in">
           <Suspense fallback={<DashboardSkeleton />}>
             <DashboardTabs
+              breakSettingsPromise={getOrgBreakSettings()}
               defaultTabPromise={props.searchParams.then((p) =>
                 parseParams(p.defaultTab),
               )}

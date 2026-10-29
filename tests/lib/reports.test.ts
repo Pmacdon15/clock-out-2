@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => {
     getOrganizationBillingSubscription: vi.fn(),
     render: vi.fn(async () => "<html>report</html>"),
     WeeklyReportEmail: vi.fn((props: unknown) => props),
+    dbGetBreakSettings: vi.fn(),
     dbGetTimeEntriesForPeriod: vi.fn(),
   };
 });
@@ -47,6 +48,7 @@ vi.mock("@/components/emails/WeeklyReportEmail", () => ({
   WeeklyReportEmail: mocks.WeeklyReportEmail,
 }));
 vi.mock("@/lib/db", () => ({
+  dbGetBreakSettings: mocks.dbGetBreakSettings,
   dbGetTimeEntriesForPeriod: mocks.dbGetTimeEntriesForPeriod,
 }));
 
@@ -111,6 +113,7 @@ beforeEach(() => {
   mocks.getOrganizationList.mockResolvedValue({ data: [org] });
   mocks.getOrganizationBillingSubscription.mockResolvedValue(withReporting);
   mocks.getOrganizationMembershipList.mockResolvedValue({ data: [admin] });
+  mocks.dbGetBreakSettings.mockResolvedValue(undefined);
   mocks.dbGetTimeEntriesForPeriod.mockResolvedValue([]);
   mocks.send.mockResolvedValue({ MessageId: "m1" });
 });

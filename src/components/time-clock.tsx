@@ -6,14 +6,14 @@ import { startTransition, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useTimeframeDefaults } from "@/hooks/useTimeframeDefaults";
 import { clockInAction, clockOutAction } from "@/lib/actions";
+import { getDockedMinutes, getEffectiveDurationMs } from "@/lib/break-utils";
 import type { EntryAction } from "@/lib/reducers/time-entries";
-import type { TimeEntry } from "@/lib/types";
+import type { BreakSettingsData, TimeEntry } from "@/lib/types";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 import { Button, Card } from "./ui";
 
-const formatDuration = (start: Date, end: Date = new Date()) => {
-  const diffMs = Math.abs(end.getTime() - start.getTime());
-  const totalMinutes = Math.floor(diffMs / (1000 * 60));
+const formatDurationMs = (diffMs: number) => {
+  const totalMinutes = Math.floor(Math.max(0, diffMs) / (1000 * 60));
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
 
@@ -23,16 +23,21 @@ const formatDuration = (start: Date, end: Date = new Date()) => {
   return `${minutes}m`;
 };
 
+const formatDuration = (start: Date, end: Date = new Date()) =>
+  formatDurationMs(Math.abs(end.getTime() - start.getTime()));
+
 interface ManageHoursProps {
   initialEntries: TimeEntry[];
   isAdmin: boolean;
   setOptimisticEntries: (action: EntryAction) => void;
+  breakSettings?: BreakSettingsData | null;
 }
 
 export default function TimeClock({
   initialEntries = [],
   isAdmin,
   setOptimisticEntries,
+  breakSettings,
 }: ManageHoursProps) {
   useTimeframeDefaults();
   const [elapsedTime, setElapsedTime] = useState<string>("");
@@ -171,48 +176,63 @@ export default function TimeClock({
           <h3 className="font-bold text-lg">Recent Activity</h3>
         </div>
         <div className="space-y-3">
-          {initialEntries.slice(0, 5).map((entry) => (
-            <div
-              className="flex items-center justify-between rounded-xl border p-4 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900"
-              key={entry.id}
-            >
-              <div className="flex flex-col">
-                <span className="font-semibold">
-                  {new Date(entry.clock_in).toLocaleDateString()}
-                </span>
-                <span className="text-muted-foreground text-xs">
-                  {new Date(entry.clock_in).toLocaleTimeString()} -{" "}
-                  {entry.clock_out
-                    ? new Date(entry.clock_out).toLocaleTimeString()
-                    : "Current"}
-                </span>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="rounded-md bg-zinc-100 px-3 py-1 font-bold font-mono text-sm dark:bg-zinc-800">
-                  {entry.clock_out
-                    ? formatDuration(
-                        new Date(entry.clock_in),
-                        new Date(entry.clock_out),
-                      )
-                    : "Active"}
+          {initialEntries.slice(0, 5).map((entry) => {
+            const dockedMinutes = entry.clock_out
+              ? getDockedMinutes(entry, breakSettings)
+              : 0;
+            return (
+              <div
+                className="flex items-center justify-between rounded-xl border p-4 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900"
+                key={entry.id}
+              >
+                <div className="flex flex-col">
+                  <span className="font-semibold">
+                    {new Date(entry.clock_in).toLocaleDateString()}
+                  </span>
+                  <span className="text-muted-foreground text-xs">
+                    {new Date(entry.clock_in).toLocaleTimeString()} -{" "}
+                    {entry.clock_out
+                      ? new Date(entry.clock_out).toLocaleTimeString()
+                      : "Current"}
+                  </span>
                 </div>
-                {isAdmin && (
-                  <DeleteConfirmDialog
-                    entryId={entry.id}
-                    setOptimisticEntries={setOptimisticEntries}
-                    trigger={
-                      <button
-                        className="rounded-lg p-2 text-zinc-400 transition-colors hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20"
-                        type="button"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    }
-                  />
-                )}
+                <div className="flex items-center gap-3">
+                  {entry.skip_lunch ? (
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 font-bold text-[10px] text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                      Not docked
+                    </span>
+                  ) : (
+                    dockedMinutes > 0 && (
+                      <span className="rounded-full bg-blue-100 px-2 py-0.5 font-bold text-[10px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+                        -{dockedMinutes}m break
+                      </span>
+                    )
+                  )}
+                  <div className="rounded-md bg-zinc-100 px-3 py-1 font-bold font-mono text-sm dark:bg-zinc-800">
+                    {entry.clock_out
+                      ? formatDurationMs(
+                          getEffectiveDurationMs(entry, breakSettings),
+                        )
+                      : "Active"}
+                  </div>
+                  {isAdmin && (
+                    <DeleteConfirmDialog
+                      entryId={entry.id}
+                      setOptimisticEntries={setOptimisticEntries}
+                      trigger={
+                        <button
+                          className="rounded-lg p-2 text-zinc-400 transition-colors hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20"
+                          type="button"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      }
+                    />
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </Card>

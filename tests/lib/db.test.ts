@@ -171,6 +171,15 @@ describe("mutations", () => {
     expect(valuesOf()).toEqual([start, null, 8, "o1", true]);
   });
 
+  it("dbUpdateTimeEntry updates skip_lunch when provided", async () => {
+    sql.mockResolvedValue([{ id: 8, skip_lunch: true }]);
+    await expect(
+      db.dbUpdateTimeEntry(8, start, end, "o1", true, true),
+    ).resolves.toEqual({ id: 8, skip_lunch: true });
+    expect(textOf()).toContain("skip_lunch = ?");
+    expect(valuesOf()).toEqual([start, end, true, 8, "o1", true]);
+  });
+
   it("dbGetTimeEntriesForPeriod orders ascending", async () => {
     sql.mockResolvedValue([{ id: 9 }]);
     await expect(
@@ -207,5 +216,29 @@ describe("reporting settings", () => {
       "Monday",
       2,
     ]);
+  });
+});
+
+describe("break settings", () => {
+  it("dbGetBreakSettings reads and tags the cache", async () => {
+    sql.mockResolvedValue([{ org_id: "o1", dock_lunch: true }]);
+    await expect(db.dbGetBreakSettings("o1")).resolves.toEqual({
+      org_id: "o1",
+      dock_lunch: true,
+    });
+    expect(cacheTag).toHaveBeenCalledWith("break-settings-o1");
+  });
+
+  it("dbUpdateBreakSettings upserts settings then break settings", async () => {
+    sql
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ org_id: "o1", dock_lunch: true }]);
+    await expect(
+      db.dbUpdateBreakSettings("o1", true, 30, 5),
+    ).resolves.toEqual({ org_id: "o1", dock_lunch: true });
+    expect(textOf(0)).toContain("INSERT INTO settings");
+    expect(valuesOf(0)).toEqual(["o1"]);
+    expect(textOf(1)).toContain("INSERT INTO break_settings");
+    expect(valuesOf(1)).toEqual(["o1", true, 30, 5, true, 30, 5]);
   });
 });

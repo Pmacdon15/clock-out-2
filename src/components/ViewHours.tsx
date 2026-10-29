@@ -18,6 +18,7 @@ export default function ViewHours({
   entries,
   setOptimisticEntries,
   isAdmin = false,
+  breakSettings,
   membersPromise,
   orgTimeEntriesPromise,
   selectedUserIdPromise,
@@ -126,6 +127,7 @@ export default function ViewHours({
 
         {timeframe === "custom" && (
           <TimesheetExport
+            breakSettings={breakSettings}
             employeeName={employeeName}
             endDate={endDate}
             entries={displayEntries}
@@ -167,6 +169,7 @@ export default function ViewHours({
         <div className="lg:col-span-3">
           {chartType === "bar" ? (
             <HoursBarChart
+              breakSettings={breakSettings}
               employeeName={employeeName}
               filteredEntries={displayEntries}
               isViewingAll={isViewingAll}
@@ -179,6 +182,7 @@ export default function ViewHours({
             />
           ) : (
             <HoursLineChart
+              breakSettings={breakSettings}
               employeeName={employeeName}
               filteredEntries={displayEntries}
               isViewingAll={isViewingAll}
@@ -205,6 +209,7 @@ export default function ViewHours({
             isViewingAll={isViewingAll}
           />
           <EntryList
+            breakSettings={breakSettings}
             entries={displayEntries}
             isAdmin={isAdmin}
             isViewingAll={isViewingAll}

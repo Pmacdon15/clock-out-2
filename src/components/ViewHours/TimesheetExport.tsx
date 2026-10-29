@@ -10,7 +10,7 @@ import {
   formatPeriod,
   totalHours,
 } from "@/lib/timesheet-export";
-import type { TimeEntry } from "@/lib/types";
+import type { BreakSettingsData, TimeEntry } from "@/lib/types";
 import { Button, Card } from "../ui";
 
 interface TimesheetExportProps {
@@ -20,6 +20,7 @@ interface TimesheetExportProps {
   endDate: string;
   isViewingAll?: boolean;
   members?: { id: string; name: string }[];
+  breakSettings?: BreakSettingsData | null;
 }
 
 export function TimesheetExport({
@@ -29,15 +30,20 @@ export function TimesheetExport({
   endDate,
   isViewingAll = false,
   members = [],
+  breakSettings,
 }: TimesheetExportProps) {
   const rows = useMemo(
     () =>
-      buildExportRows(entries, (userId) =>
-        isViewingAll
-          ? (members.find((m) => m.id === userId)?.name ?? "Unknown member")
-          : employeeName,
+      buildExportRows(
+        entries,
+        (userId) =>
+          isViewingAll
+            ? (members.find((m) => m.id === userId)?.name ?? "Unknown member")
+            : employeeName,
+        undefined,
+        breakSettings,
       ),
-    [entries, isViewingAll, members, employeeName],
+    [entries, isViewingAll, members, employeeName, breakSettings],
   );
 
   const meta = { employee: employeeName, startDate, endDate };

@@ -6,8 +6,9 @@ import { Calendar, Check, Edit3, Loader2, X } from "lucide-react";
 import { startTransition, useState } from "react";
 import { toast } from "sonner";
 import { updateTimeEntryAction } from "@/lib/actions";
+import { getDockedMinutes, getEffectiveHours } from "@/lib/break-utils";
 import type { EntryAction } from "@/lib/reducers/time-entries";
-import type { TimeEntry } from "@/lib/types";
+import type { BreakSettingsData, TimeEntry } from "@/lib/types";
 import { DeleteConfirmDialog } from "../DeleteConfirmDialog";
 
 interface EntryItemProps {
@@ -15,6 +16,7 @@ interface EntryItemProps {
   isAdmin: boolean;
   setOptimisticEntries: (action: EntryAction) => void;
   memberName?: string;
+  breakSettings?: BreakSettingsData | null;
 }
 
 export function EntryItem({
@@ -22,6 +24,7 @@ export function EntryItem({
   isAdmin,
   setOptimisticEntries,
   memberName,
+  breakSettings,
 }: EntryItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editClockIn, setEditClockIn] = useState(
@@ -32,17 +35,22 @@ export function EntryItem({
       ? format(new Date(entry.clock_out), "yyyy-MM-dd'T'HH:mm")
       : "",
   );
+  const [editSkipLunch, setEditSkipLunch] = useState(
+    Boolean(entry.skip_lunch),
+  );
 
   const updateMutation = useMutation({
     mutationFn: ({
       id,
       clock_in,
       clock_out,
+      skip_lunch,
     }: {
       id: number;
       clock_in: string;
       clock_out: string;
-    }) => updateTimeEntryAction(id, clock_in, clock_out),
+      skip_lunch: boolean;
+    }) => updateTimeEntryAction(id, clock_in, clock_out, skip_lunch),
     onSuccess: (res) => {
       if (res.success) {
         toast.success("Entry updated");
@@ -58,6 +66,7 @@ export function EntryItem({
       id: entry.id,
       clock_in: new Date(editClockIn),
       clock_out: editClockOut ? new Date(editClockOut) : null,
+      skip_lunch: editSkipLunch,
       updated_at: new Date(),
     };
 
@@ -68,6 +77,7 @@ export function EntryItem({
         id: entry.id,
         clock_in: new Date(editClockIn).toISOString(),
         clock_out: editClockOut ? new Date(editClockOut).toISOString() : "",
+        skip_lunch: editSkipLunch,
       });
     });
   };
@@ -107,6 +117,19 @@ export function EntryItem({
             />
           </div>
         </div>
+        <label
+          className="flex cursor-pointer items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 font-medium text-xs text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300"
+          htmlFor={`edit-skip-lunch-${entry.id}`}
+        >
+          <input
+            checked={editSkipLunch}
+            className="h-4 w-4 rounded border-zinc-300 accent-zinc-900 dark:accent-zinc-100"
+            id={`edit-skip-lunch-${entry.id}`}
+            onChange={(e) => setEditSkipLunch(e.target.checked)}
+            type="checkbox"
+          />
+          <span>Skipped lunch / break (do not dock)</span>
+        </label>
         <div className="flex justify-end gap-2">
           <button
             className="rounded-lg p-1.5 text-zinc-500 transition-colors hover:bg-zinc-200 dark:hover:bg-zinc-800"
@@ -132,21 +155,15 @@ export function EntryItem({
     );
   }
 
+  const dockedMinutes = getDockedMinutes(entry, breakSettings);
+  const effectiveHours = getEffectiveHours(entry, breakSettings);
+
   return (
     <div className="group flex flex-col gap-2 border-zinc-100 border-b pb-5 transition-all last:border-0 dark:border-zinc-800">
       <div className="flex items-center justify-between font-bold text-sm">
         <span>{format(new Date(entry.clock_in), "eeee, MMM d")}</span>
         <div className="flex items-center gap-3">
-          <span className="tabular-nums">
-            {(
-              ((entry.clock_out
-                ? new Date(entry.clock_out).getTime()
-                : Date.now()) -
-                new Date(entry.clock_in).getTime()) /
-              (1000 * 60 * 60)
-            ).toFixed(2)}
-            h
-          </span>
+          <span className="tabular-nums">{effectiveHours.toFixed(2)}h</span>
           {isAdmin && (
             <div className="flex items-center gap-1 opacity-100 transition-opacity lg:opacity-0 lg:group-hover:opacity-100">
               <button
@@ -172,6 +189,17 @@ export function EntryItem({
             ? format(new Date(entry.clock_out), "hh:mm a")
             : "..."}
         </span>
+        {entry.skip_lunch ? (
+          <span className="ml-1.5 rounded-full bg-amber-100 px-2 py-0.5 font-bold text-[10px] text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+            Not docked
+          </span>
+        ) : (
+          dockedMinutes > 0 && (
+            <span className="ml-1.5 rounded-full bg-blue-100 px-2 py-0.5 font-bold text-[10px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+              -{dockedMinutes}m break
+            </span>
+          )
+        )}
         {memberName && (
           <span className="ml-1.5 rounded-full bg-zinc-100 px-2 py-0.5 font-bold text-[10px] text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
             {memberName}
