@@ -10,6 +10,7 @@ import {
 } from "date-fns";
 import { formatInTimeZone, fromZonedTime, toZonedTime } from "date-fns-tz";
 import { z } from "zod";
+import { loadPdfImage } from "@/lib/pdf-image";
 import { sendWeeklyReports } from "@/lib/reports";
 import {
   buildEmployeeSummary,
@@ -464,6 +465,8 @@ export type OrgContext = {
   orgId: string;
   orgName: string;
   orgSlug: string | null;
+  /** Uploaded org logo, or null when Clerk would show its placeholder. */
+  orgImageUrl?: string | null;
   role: string;
   isAdmin: boolean;
 };
@@ -600,6 +603,18 @@ async function resolveOrg(
     membersCount: m.organization.membersCount ?? undefined,
   }));
 
+  // Kept out of `list` so tool responses listing organizations don't change.
+  const imageUrls = new Map(
+    memberships.data.map((m) => [
+      m.organization.id,
+      m.organization.hasImage ? m.organization.imageUrl : null,
+    ]),
+  );
+  const withImage = (o: (typeof list)[number]): OrgContext => ({
+    ...o,
+    orgImageUrl: imageUrls.get(o.orgId) ?? null,
+  });
+
   if (list.length === 0) {
     return {
       ok: false,
@@ -635,11 +650,11 @@ async function resolveOrg(
         },
       };
     }
-    return { ok: true, org: matched };
+    return { ok: true, org: withImage(matched) };
   }
 
   if (list.length === 1 && list[0]) {
-    return { ok: true, org: list[0] };
+    return { ok: true, org: withImage(list[0]) };
   }
 
   return {
@@ -1901,11 +1916,14 @@ export async function generateTimesheetExport(
         : employeeLabel,
     tz,
   );
+  const orgLogo = await loadPdfImage(org.orgImageUrl);
   const meta: ExportMeta = {
     employee: employeeLabel,
     startDate: startStr,
     endDate: endStr,
     groupBy,
+    orgName: org.orgName,
+    orgLogo,
   };
   const pdfFileName = exportFileName(meta, "pdf");
   const xlsxFileName = exportFileName(meta, "xlsx");

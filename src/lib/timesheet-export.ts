@@ -1,5 +1,6 @@
 import { formatInTimeZone } from "date-fns-tz";
 import { getEffectiveHours } from "./break-utils";
+import type { PdfImage } from "./pdf-image";
 import type { BreakSettingsData } from "./types";
 
 /**
@@ -40,6 +41,10 @@ export type ExportMeta = {
   endDate: string;
   /** Optional grouping mode ('week', 'month', 'none', or 'auto'). */
   groupBy?: ExportGrouping;
+  /** Organization name shown in the PDF header (e.g. the Clerk org name). */
+  orgName?: string;
+  /** Organization logo drawn next to the name in the PDF header. */
+  orgLogo?: PdfImage | null;
 };
 
 export type EmployeeSummaryRow = {
@@ -403,8 +408,7 @@ const cellXml = (cell: Cell, ref: string) => {
   return `<c r="${ref}"${s}><f>${cell.formula}</f><v>${cell.cached}</v></c>`;
 };
 
-const plural = (n: number, word: string) =>
-  `${n} ${word}${n === 1 ? "" : "s"}`;
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 export function buildSheetXml(rows: ExportRow[], meta: ExportMeta): string {
   const HEADER_ROW = 5;
@@ -704,6 +708,38 @@ const writeHeaderRow = (pen: Pen, y: number) => {
   line(pen, y - 6, 0.2);
 };
 
+/** Name the logo XObject is registered under in each page's resources. */
+export const PDF_LOGO_NAME = "Im1";
+const LOGO_BOX = 40;
+
+/**
+ * Draw the organization logo and name at the top of the first page.
+ * Returns how much vertical space was used (0 when there's no branding).
+ */
+const drawOrgBranding = (pen: Pen, meta: ExportMeta, top: number) => {
+  const logo = meta.orgLogo;
+  if (!logo && !meta.orgName) return 0;
+  let textX = MARGIN;
+  if (logo) {
+    // Fit inside a square box, preserving the aspect ratio.
+    const scale = LOGO_BOX / Math.max(logo.width, logo.height);
+    const w = logo.width * scale;
+    const h = logo.height * scale;
+    const x = MARGIN + (LOGO_BOX - w) / 2;
+    const y = top - LOGO_BOX + (LOGO_BOX - h) / 2;
+    pen.push(
+      `q ${w.toFixed(2)} 0 0 ${h.toFixed(2)} ${x.toFixed(2)} ${y.toFixed(2)} cm /${PDF_LOGO_NAME} Do Q`,
+    );
+    textX += LOGO_BOX + 12;
+  }
+  if (meta.orgName) {
+    const size = 16;
+    const name = fitText(meta.orgName, PAGE_WIDTH - MARGIN - textX, size);
+    write(pen, name, textX, top - (logo ? LOGO_BOX / 2 + 6 : 14), size, true);
+  }
+  return (logo ? LOGO_BOX : 18) + 14;
+};
+
 /** Lay the rows out over as many pages as needed; returns each page's content stream. */
 export function layoutPdfPages(rows: ExportRow[], meta: ExportMeta): string[] {
   const pages: Pen[] = [];
@@ -719,14 +755,16 @@ export function layoutPdfPages(rows: ExportRow[], meta: ExportMeta): string[] {
     pages.push(pen);
     y = PAGE_HEIGHT - MARGIN;
     if (first) {
+      y -= drawOrgBranding(pen, meta, y);
       write(pen, "Timesheet", MARGIN, y - 14, 20, true);
       write(pen, meta.employee, MARGIN, y - 36, 11);
       write(pen, formatPeriod(meta), MARGIN, y - 52, 11);
       y -= 84;
     } else {
+      const prefix = meta.orgName ? `${meta.orgName} - ` : "";
       write(
         pen,
-        `Timesheet - ${meta.employee} (continued)`,
+        `${prefix}Timesheet - ${meta.employee} (continued)`,
         MARGIN,
         y - 10,
         10,
@@ -822,13 +860,7 @@ export function layoutPdfPages(rows: ExportRow[], meta: ExportMeta): string[] {
   ensureSpace(2);
   writeCell(pen, COLUMNS[0], "Total hours", y - 4, true);
   if (rows.length > 0) {
-    writeCell(
-      pen,
-      COLUMNS[3],
-      `${uniqueDays}d / ${rows.length}s`,
-      y - 4,
-      true,
-    );
+    writeCell(pen, COLUMNS[3], `${uniqueDays}d / ${rows.length}s`, y - 4, true);
   }
   writeCell(pen, COLUMNS[5], formatHours(totalHours(rows)), y - 4, true);
   writeCell(pen, COLUMNS[6], formatHours(totalHours(rows)), y - 4, true);
@@ -858,12 +890,32 @@ export function layoutPdfPages(rows: ExportRow[], meta: ExportMeta): string[] {
   });
 }
 
-/** Assemble a valid PDF 1.4 file from page content streams. */
-export function buildPdf(pageStreams: string[]): Uint8Array {
+/** Bytes -> a string of 0–255 char codes, so binary data survives in `out`. */
+const latin1 = (bytes: Uint8Array) => {
+  let s = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return s;
+};
+
+/**
+ * Assemble a valid PDF 1.4 file from page content streams, optionally
+ * embedding one image (referenced from the streams as `/Im1`).
+ */
+export function buildPdf(
+  pageStreams: string[],
+  image?: PdfImage | null,
+): Uint8Array {
   const objects: string[] = [];
   const pageCount = pageStreams.length;
-  // 1: catalog, 2: page tree, 3–4: fonts, then a page + content pair per page.
+  // 1: catalog, 2: page tree, 3–4: fonts, then a page + content pair per page,
+  // then the optional image so existing object ids stay stable.
   const pageIds = pageStreams.map((_, i) => 5 + i * 2);
+  const imageId = 5 + pageCount * 2;
+  const xObjects = image
+    ? ` /XObject << /${PDF_LOGO_NAME} ${imageId} 0 R >>`
+    : "";
 
   objects.push("<< /Type /Catalog /Pages 2 0 R >>");
   objects.push(
@@ -878,10 +930,17 @@ export function buildPdf(pageStreams: string[]): Uint8Array {
   for (const [i, stream] of pageStreams.entries()) {
     objects.push(
       `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE_WIDTH} ${PAGE_HEIGHT}] ` +
-        `/Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${pageIds[i] + 1} 0 R >>`,
+        `/Resources << /Font << /F1 3 0 R /F2 4 0 R >>${xObjects} >> /Contents ${pageIds[i] + 1} 0 R >>`,
     );
     objects.push(
       `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+    );
+  }
+  if (image) {
+    objects.push(
+      `<< /Type /XObject /Subtype /Image /Width ${image.width} /Height ${image.height} ` +
+        `/ColorSpace /${image.colorSpace} /BitsPerComponent 8 /Filter /${image.filter} ` +
+        `/Length ${image.data.length} >>\nstream\n${latin1(image.data)}\nendstream`,
     );
   }
 
@@ -905,7 +964,7 @@ export function buildPdf(pageStreams: string[]): Uint8Array {
 }
 
 export const toPdf = (rows: ExportRow[], meta: ExportMeta) =>
-  buildPdf(layoutPdfPages(rows, meta));
+  buildPdf(layoutPdfPages(rows, meta), meta.orgLogo);
 
 /* ------------------------------------------------------------- download -- */
 
