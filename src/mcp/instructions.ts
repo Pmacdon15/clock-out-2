@@ -37,5 +37,5 @@ Editing and Deleting:
 - Always use exact dates and times in the user's local timezone (pass timezone as an IANA timezone like "America/Edmonton" when known). Never invent or guess shift times.
 
 Downloading Timesheet PDFs or Spreadsheets:
-- When the user asks to download or export a PDF (or Excel spreadsheet) of a timesheet for a selected time period, call export_timesheet.
-- Always include the returned clickable download_url markdown link in your response so the user can tap or click it on their phone or computer (requires being signed into Clock Out in their browser).`;
+- When the user asks to download or export a PDF or Excel spreadsheet of a timesheet (by week, month, or custom date range), call export_timesheet (use group_by: 'week' or 'month' when a weekly or monthly breakdown is desired).
+- Always include both returned clickable markdown download links (pdf.download_url and spreadsheet.download_url) in your response so the user can download either the PDF or the Excel spreadsheet on their phone or computer (requires being signed into Clock Out in their browser).`;

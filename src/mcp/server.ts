@@ -92,13 +92,16 @@ const text = (value: string) => ({ type: "text" as const, text: value });
 
 /** A tool's result as MCP content: the sentence first, then the data as JSON. */
 function respond(result: ToolResult) {
+  const attachedResources =
+    result.resources ?? (result.resource ? [result.resource] : []);
   return {
     content: [
       text(result.summary),
       text(JSON.stringify(result.data, null, 2)),
-      ...(result.resource
-        ? [{ type: "resource" as const, resource: result.resource }]
-        : []),
+      ...attachedResources.map((r) => ({
+        type: "resource" as const,
+        resource: r,
+      })),
     ],
     structuredContent: result.data,
     ...(result.isError ? { isError: true } : {}),
@@ -284,9 +287,9 @@ export function registerClockOutTools(server: McpServer) {
   server.registerTool(
     "export_timesheet",
     {
-      title: "Export timesheet as PDF or Excel spreadsheet",
+      title: "Export timesheet as PDF and Excel spreadsheet",
       description:
-        "Generates a downloadable PDF (or Excel .xlsx spreadsheet) of a timesheet for any selected time period (start_date/end_date, week_of, full month via year+month, or Clock Out month-week 1–4 via year+month+week). Returns both an embedded file resource and a Clerk-authenticated download link that the user can open on their phone or computer to download the PDF.",
+        "Generates downloadable PDF and Excel (.xlsx) spreadsheet timesheets for any selected time period (start_date/end_date, week_of, full month via year+month, or Clock Out month-week 1–4 via year+month+week), with Day of Week, Daily Totals, Employee Summaries, and Weekly/Monthly section breakdowns (group_by: 'week' | 'month' | 'none' | 'auto'). Returns both embedded file resources and Clerk-authenticated download links for both PDF and Spreadsheet.",
       inputSchema: portable(exportTimesheetInputSchema),
       annotations: { readOnlyHint: true, openWorldHint: false },
     },

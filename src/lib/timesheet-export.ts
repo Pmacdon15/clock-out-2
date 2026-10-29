@@ -19,9 +19,12 @@ type ExportableEntry = {
 
 export type ExportFormat = "pdf" | "xlsx";
 
+export type ExportGrouping = "auto" | "week" | "month" | "none";
+
 export type ExportRow = {
   employee: string;
   date: string;
+  dayOfWeek?: string;
   clockIn: string;
   clockOut: string;
   /** Null while the shift is still open. */
@@ -35,6 +38,24 @@ export type ExportMeta = {
   startDate: string;
   /** yyyy-MM-dd (a trailing time part is ignored). */
   endDate: string;
+  /** Optional grouping mode ('week', 'month', 'none', or 'auto'). */
+  groupBy?: ExportGrouping;
+};
+
+export type EmployeeSummaryRow = {
+  employee: string;
+  shiftsCount: number;
+  daysWorked: number;
+  totalHours: number;
+};
+
+export type PeriodSection = {
+  key: string;
+  label: string;
+  rows: ExportRow[];
+  totalHours: number;
+  shiftsCount: number;
+  daysWorked: number;
 };
 
 const MONTHS = [
@@ -51,6 +72,8 @@ const MONTHS = [
   "Nov",
   "Dec",
 ];
+
+const DAYS_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
@@ -74,6 +97,45 @@ export const formatDayLabel = (value: string) => {
   return `${MONTHS[month - 1]} ${day}, ${year}`;
 };
 
+/** Parse "yyyy-MM-dd" into a UTC Date at noon to avoid DST edge cases. */
+const parseDateString = (ymd: string): Date => {
+  const [y, m, d] = ymd.slice(0, 10).split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+};
+
+const toYmd = (utcDate: Date): string =>
+  `${utcDate.getUTCFullYear()}-${pad(utcDate.getUTCMonth() + 1)}-${pad(utcDate.getUTCDate())}`;
+
+export const getDayOfWeekShort = (ymd: string): string => {
+  const dt = parseDateString(ymd);
+  return DAYS_SHORT[dt.getUTCDay()] as string;
+};
+
+/** Get the Monday-Sunday week key and label for a given "yyyy-MM-dd". */
+export const getWeekBounds = (ymd: string): { key: string; label: string } => {
+  const dt = parseDateString(ymd);
+  const dow = dt.getUTCDay(); // 0 = Sun, 1 = Mon, ...
+  const diffToMon = dow === 0 ? -6 : 1 - dow;
+  const mon = new Date(dt.getTime() + diffToMon * 86_400_000);
+  const sun = new Date(mon.getTime() + 6 * 86_400_000);
+  const monStr = toYmd(mon);
+  const sunStr = toYmd(sun);
+  return {
+    key: monStr,
+    label: `Week of ${formatDayLabel(monStr)} - ${formatDayLabel(sunStr)}`,
+  };
+};
+
+/** Get the month key ("yyyy-MM") and label ("Oct 2026") for a given "yyyy-MM-dd". */
+export const getMonthBounds = (ymd: string): { key: string; label: string } => {
+  const [year, month] = ymd.slice(0, 10).split("-").map(Number);
+  const key = `${year}-${pad(month)}`;
+  return {
+    key,
+    label: `Month of ${MONTHS[month - 1]} ${year}`,
+  };
+};
+
 export const formatPeriod = (meta: ExportMeta) =>
   `${formatDayLabel(meta.startDate)} - ${formatDayLabel(meta.endDate)}`;
 
@@ -95,17 +157,108 @@ export function buildExportRows(
       (a, b) =>
         a.clockIn.getTime() - b.clockIn.getTime() || a.entry.id - b.entry.id,
     )
-    .map(({ entry, clockIn, clockOut }) => ({
-      employee: getEmployeeName(entry.user_id),
-      date: formatDate(clockIn, timezone),
-      clockIn: formatTime(clockIn, timezone),
-      clockOut: clockOut ? formatTime(clockOut, timezone) : "In progress",
-      hours: clockOut ? getEffectiveHours(entry, breakSettings) : null,
-    }));
+    .map(({ entry, clockIn, clockOut }) => {
+      const date = formatDate(clockIn, timezone);
+      return {
+        employee: getEmployeeName(entry.user_id),
+        date,
+        dayOfWeek: getDayOfWeekShort(date),
+        clockIn: formatTime(clockIn, timezone),
+        clockOut: clockOut ? formatTime(clockOut, timezone) : "In progress",
+        hours: clockOut ? getEffectiveHours(entry, breakSettings) : null,
+      };
+    });
 }
 
 export const totalHours = (rows: ExportRow[]) =>
   rows.reduce((sum, row) => sum + (row.hours ?? 0), 0);
+
+export function resolveGrouping(
+  rows: ExportRow[],
+  meta: ExportMeta,
+): "week" | "month" | "none" {
+  if (meta.groupBy && meta.groupBy !== "auto") {
+    return meta.groupBy;
+  }
+  const start = parseDateString(meta.startDate);
+  const end = parseDateString(meta.endDate);
+  const spanDays =
+    Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1;
+  if (spanDays > 35) return "month";
+  if (spanDays > 7) return "week";
+  const weeks = new Set(rows.map((r) => getWeekBounds(r.date).key));
+  return weeks.size > 1 ? "week" : "none";
+}
+
+export function buildPeriodSections(
+  rows: ExportRow[],
+  meta: ExportMeta,
+): PeriodSection[] {
+  const mode = resolveGrouping(rows, meta);
+  if (mode === "none" || rows.length === 0) {
+    const days = new Set(rows.map((r) => r.date));
+    return [
+      {
+        key: "all",
+        label: formatPeriod(meta),
+        rows,
+        totalHours: totalHours(rows),
+        shiftsCount: rows.length,
+        daysWorked: days.size,
+      },
+    ];
+  }
+
+  const map = new Map<string, { label: string; rows: ExportRow[] }>();
+  for (const row of rows) {
+    const bounds =
+      mode === "month" ? getMonthBounds(row.date) : getWeekBounds(row.date);
+    const existing = map.get(bounds.key);
+    if (existing) {
+      existing.rows.push(row);
+    } else {
+      map.set(bounds.key, { label: bounds.label, rows: [row] });
+    }
+  }
+
+  return Array.from(map.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, group]) => {
+      const days = new Set(group.rows.map((r) => r.date));
+      return {
+        key,
+        label: group.label,
+        rows: group.rows,
+        totalHours: totalHours(group.rows),
+        shiftsCount: group.rows.length,
+        daysWorked: days.size,
+      };
+    });
+}
+
+export function buildEmployeeSummary(rows: ExportRow[]): EmployeeSummaryRow[] {
+  const map = new Map<
+    string,
+    { shiftsCount: number; days: Set<string>; totalHours: number }
+  >();
+  for (const row of rows) {
+    const existing = map.get(row.employee) ?? {
+      shiftsCount: 0,
+      days: new Set<string>(),
+      totalHours: 0,
+    };
+    existing.shiftsCount += 1;
+    existing.days.add(row.date);
+    existing.totalHours += row.hours ?? 0;
+    map.set(row.employee, existing);
+  }
+  return Array.from(map.entries()).map(([employee, data]) => ({
+    employee,
+    shiftsCount: data.shiftsCount,
+    daysWorked: data.days.size,
+    totalHours: data.totalHours,
+  }));
+}
 
 export const exportFileName = (meta: ExportMeta, format: ExportFormat) => {
   const who =
@@ -238,7 +391,7 @@ type Cell =
   | { formula: string; cached: number; style?: number }
   | null;
 
-const COLUMN_LETTERS = "ABCDE";
+const COLUMN_LETTERS = "ABCDEFG";
 
 const cellXml = (cell: Cell, ref: string) => {
   if (!cell) return "";
@@ -250,41 +403,195 @@ const cellXml = (cell: Cell, ref: string) => {
   return `<c r="${ref}"${s}><f>${cell.formula}</f><v>${cell.cached}</v></c>`;
 };
 
+const plural = (n: number, word: string) =>
+  `${n} ${word}${n === 1 ? "" : "s"}`;
+
 export function buildSheetXml(rows: ExportRow[], meta: ExportMeta): string {
   const HEADER_ROW = 5;
   const firstData = HEADER_ROW + 1;
   const total = totalHours(rows);
+  const uniqueDays = new Set(rows.map((r) => r.date)).size;
+  const sections = buildPeriodSections(rows, meta);
+  const showSections =
+    sections.length > 1 || meta.groupBy === "week" || meta.groupBy === "month";
+  const employeeSummaries = buildEmployeeSummary(rows);
 
   const grid: Cell[][] = [
     [{ text: "Timesheet", style: STYLE.title }],
     [{ text: "Report for", style: STYLE.bold }, { text: meta.employee }],
     [{ text: "Period", style: STYLE.bold }, { text: formatPeriod(meta) }],
     [],
-    ["Employee", "Date", "Clock In", "Clock Out", "Hours"].map((text) => ({
+    [
+      "Employee",
+      "Date",
+      "Day",
+      "Clock In",
+      "Clock Out",
+      "Hours",
+      "Daily Total",
+    ].map((text) => ({
       text,
       style: STYLE.header,
     })),
-    ...rows.map((r): Cell[] => [
-      { text: r.employee },
-      { text: r.date },
-      { text: r.clockIn },
-      { text: r.clockOut },
-      r.hours === null ? null : { number: r.hours, style: STYLE.hours },
-    ]),
-    [
-      { text: "Total hours", style: STYLE.bold },
-      null,
-      null,
-      null,
-      rows.length > 0
-        ? {
-            formula: `SUM(E${firstData}:E${firstData + rows.length - 1})`,
-            cached: total,
-            style: STYLE.boldHours,
-          }
-        : { number: 0, style: STYLE.boldHours },
-    ],
   ];
+
+  // Calculate daily totals per employee+date
+  const dayTotals = new Map<string, number>();
+  const dayLastIndex = new Map<string, number>();
+  rows.forEach((r, idx) => {
+    const key = `${r.employee}__${r.date}`;
+    dayTotals.set(key, (dayTotals.get(key) ?? 0) + (r.hours ?? 0));
+    dayLastIndex.set(key, idx);
+  });
+
+  const shiftRowIndices: number[] = [];
+  let globalRowIdx = 0;
+
+  for (const section of sections) {
+    if (showSections && rows.length > 0) {
+      grid.push([
+        { text: section.label, style: STYLE.bold },
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+      ]);
+    }
+
+    const sectionShiftExcelRows: number[] = [];
+
+    for (const r of section.rows) {
+      const excelRowNumber = grid.length + 1;
+      shiftRowIndices.push(excelRowNumber);
+      sectionShiftExcelRows.push(excelRowNumber);
+
+      const dayKey = `${r.employee}__${r.date}`;
+      const isLastOfDay = dayLastIndex.get(dayKey) === globalRowIdx;
+      const dayTotal = dayTotals.get(dayKey) as number;
+
+      grid.push([
+        { text: r.employee },
+        { text: r.date },
+        { text: r.dayOfWeek ?? getDayOfWeekShort(r.date) },
+        { text: r.clockIn },
+        { text: r.clockOut },
+        r.hours === null ? null : { number: r.hours, style: STYLE.hours },
+        isLastOfDay ? { number: dayTotal, style: STYLE.boldHours } : null,
+      ]);
+      globalRowIdx += 1;
+    }
+
+    if (showSections && section.rows.length > 0) {
+      const firstSecRow = sectionShiftExcelRows[0];
+      const lastSecRow =
+        sectionShiftExcelRows[sectionShiftExcelRows.length - 1];
+      grid.push([
+        { text: `Subtotal — ${section.label}`, style: STYLE.bold },
+        {
+          text: plural(section.daysWorked, "day"),
+          style: STYLE.bold,
+        },
+        {
+          text: plural(section.shiftsCount, "shift"),
+          style: STYLE.bold,
+        },
+        null,
+        null,
+        {
+          formula: `SUM(F${firstSecRow}:F${lastSecRow})`,
+          cached: section.totalHours,
+          style: STYLE.boldHours,
+        },
+        null,
+      ]);
+    }
+  }
+
+  // Grand total row
+  const grandTotalFormula =
+    rows.length === 0
+      ? null
+      : showSections
+        ? `SUM(${shiftRowIndices.map((idx) => `F${idx}`).join(",")})`
+        : `SUM(F${firstData}:F${firstData + rows.length - 1})`;
+
+  grid.push([
+    { text: "Total hours", style: STYLE.bold },
+    rows.length > 0
+      ? {
+          text: plural(uniqueDays, "day"),
+          style: STYLE.bold,
+        }
+      : null,
+    rows.length > 0
+      ? {
+          text: plural(rows.length, "shift"),
+          style: STYLE.bold,
+        }
+      : null,
+    null,
+    null,
+    grandTotalFormula
+      ? {
+          formula: grandTotalFormula,
+          cached: total,
+          style: STYLE.boldHours,
+        }
+      : { number: 0, style: STYLE.boldHours },
+    null,
+  ]);
+
+  // Summary breakdown section (by employee and/or by week/month)
+  if (rows.length > 0) {
+    grid.push([]);
+    grid.push([
+      { text: "Summary by Employee", style: STYLE.header },
+      { text: "Days Worked", style: STYLE.header },
+      { text: "Shifts", style: STYLE.header },
+      { text: "Avg Hrs/Day", style: STYLE.header },
+      null,
+      { text: "Total Hours", style: STYLE.header },
+      null,
+    ]);
+    for (const emp of employeeSummaries) {
+      const avg = emp.totalHours / emp.daysWorked;
+      grid.push([
+        { text: emp.employee },
+        { number: emp.daysWorked },
+        { number: emp.shiftsCount },
+        { number: avg, style: STYLE.hours },
+        null,
+        { number: emp.totalHours, style: STYLE.boldHours },
+        null,
+      ]);
+    }
+
+    if (sections.length > 1) {
+      grid.push([]);
+      grid.push([
+        { text: "Summary by Period", style: STYLE.header },
+        { text: "Days Worked", style: STYLE.header },
+        { text: "Shifts", style: STYLE.header },
+        null,
+        null,
+        { text: "Total Hours", style: STYLE.header },
+        null,
+      ]);
+      for (const sec of sections) {
+        grid.push([
+          { text: sec.label },
+          { number: sec.daysWorked },
+          { number: sec.shiftsCount },
+          null,
+          null,
+          { number: sec.totalHours, style: STYLE.boldHours },
+          null,
+        ]);
+      }
+    }
+  }
 
   const sheetRows = grid
     .map((cells, i) => {
@@ -297,7 +604,7 @@ export function buildSheetXml(rows: ExportRow[], meta: ExportMeta): string {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
 <sheetViews><sheetView workbookViewId="0"><pane ySplit="${HEADER_ROW}" topLeftCell="A${firstData}" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
-<cols><col min="1" max="1" width="26" customWidth="1"/><col min="2" max="4" width="14" customWidth="1"/><col min="5" max="5" width="12" customWidth="1"/></cols>
+<cols><col min="1" max="1" width="26" customWidth="1"/><col min="2" max="2" width="13" customWidth="1"/><col min="3" max="3" width="8" customWidth="1"/><col min="4" max="5" width="12" customWidth="1"/><col min="6" max="7" width="12" customWidth="1"/></cols>
 <sheetData>${sheetRows}</sheetData>
 </worksheet>`;
 }
@@ -336,11 +643,13 @@ const PAGE_HEIGHT = 792;
 const MARGIN = 48;
 const ROW_HEIGHT = 18;
 const COLUMNS = [
-  { title: "Employee", x: MARGIN, width: 170 },
-  { title: "Date", x: 222, width: 80 },
-  { title: "Clock In", x: 306, width: 80 },
-  { title: "Clock Out", x: 390, width: 90 },
-  { title: "Hours", x: PAGE_WIDTH - MARGIN, width: 0, alignRight: true },
+  { title: "Employee", x: MARGIN, width: 135 },
+  { title: "Date", x: 187, width: 68 },
+  { title: "Day", x: 259, width: 32 },
+  { title: "Clock In", x: 295, width: 64 },
+  { title: "Clock Out", x: 363, width: 72 },
+  { title: "Hours", x: 498, width: 0, alignRight: true },
+  { title: "Day Total", x: PAGE_WIDTH - MARGIN, width: 0, alignRight: true },
 ];
 
 /** Escape PDF string delimiters and keep to the WinAnsi (Latin-1) range. */
@@ -401,6 +710,10 @@ export function layoutPdfPages(rows: ExportRow[], meta: ExportMeta): string[] {
   let pen: Pen = [];
   let y = 0;
 
+  const ensureSpace = (neededRows: number) => {
+    if (y < MARGIN + ROW_HEIGHT * neededRows) startPage(false);
+  };
+
   const startPage = (first: boolean) => {
     pen = [];
     pages.push(pen);
@@ -432,25 +745,112 @@ export function layoutPdfPages(rows: ExportRow[], meta: ExportMeta): string[] {
     y -= ROW_HEIGHT;
   }
 
-  for (const row of rows) {
-    if (y < MARGIN + ROW_HEIGHT * 2) startPage(false);
-    writeCell(pen, COLUMNS[0], row.employee, y);
-    writeCell(pen, COLUMNS[1], row.date, y);
-    writeCell(pen, COLUMNS[2], row.clockIn, y);
-    writeCell(pen, COLUMNS[3], row.clockOut, y);
-    writeCell(
-      pen,
-      COLUMNS[4],
-      row.hours === null ? "-" : formatHours(row.hours),
-      y,
-    );
-    line(pen, y - 6);
-    y -= ROW_HEIGHT;
+  const sections = buildPeriodSections(rows, meta);
+  const showSections =
+    sections.length > 1 || meta.groupBy === "week" || meta.groupBy === "month";
+
+  const dayTotals = new Map<string, number>();
+  const dayLastIndex = new Map<string, number>();
+  rows.forEach((r, idx) => {
+    const key = `${r.employee}__${r.date}`;
+    dayTotals.set(key, (dayTotals.get(key) ?? 0) + (r.hours ?? 0));
+    dayLastIndex.set(key, idx);
+  });
+
+  let globalIdx = 0;
+
+  for (const section of sections) {
+    if (showSections && section.rows.length > 0) {
+      ensureSpace(3);
+      write(pen, section.label, MARGIN, y, 9, true);
+      line(pen, y - 5, 0.5);
+      y -= ROW_HEIGHT;
+    }
+
+    for (const row of section.rows) {
+      ensureSpace(2);
+      const dayKey = `${row.employee}__${row.date}`;
+      const isLastOfDay = dayLastIndex.get(dayKey) === globalIdx;
+      const dayTotal = dayTotals.get(dayKey) as number;
+
+      writeCell(pen, COLUMNS[0], row.employee, y);
+      writeCell(pen, COLUMNS[1], row.date, y);
+      writeCell(
+        pen,
+        COLUMNS[2],
+        row.dayOfWeek ?? getDayOfWeekShort(row.date),
+        y,
+      );
+      writeCell(pen, COLUMNS[3], row.clockIn, y);
+      writeCell(pen, COLUMNS[4], row.clockOut, y);
+      writeCell(
+        pen,
+        COLUMNS[5],
+        row.hours === null ? "-" : formatHours(row.hours),
+        y,
+      );
+      writeCell(
+        pen,
+        COLUMNS[6],
+        isLastOfDay ? formatHours(dayTotal) : "",
+        y,
+        true,
+      );
+      line(pen, y - 6);
+      y -= ROW_HEIGHT;
+      globalIdx += 1;
+    }
+
+    if (showSections && section.rows.length > 0) {
+      ensureSpace(2);
+      writeCell(pen, COLUMNS[0], `Subtotal (${section.label})`, y, true);
+      writeCell(
+        pen,
+        COLUMNS[3],
+        `${section.daysWorked}d / ${section.shiftsCount}s`,
+        y,
+        true,
+      );
+      writeCell(pen, COLUMNS[5], formatHours(section.totalHours), y, true);
+      writeCell(pen, COLUMNS[6], formatHours(section.totalHours), y, true);
+      line(pen, y - 6, 0.4);
+      y -= ROW_HEIGHT + 4;
+    }
   }
 
-  // The row loop breaks pages early enough that the total always fits here.
+  const uniqueDays = new Set(rows.map((r) => r.date)).size;
+  ensureSpace(2);
   writeCell(pen, COLUMNS[0], "Total hours", y - 4, true);
-  writeCell(pen, COLUMNS[4], formatHours(totalHours(rows)), y - 4, true);
+  if (rows.length > 0) {
+    writeCell(
+      pen,
+      COLUMNS[3],
+      `${uniqueDays}d / ${rows.length}s`,
+      y - 4,
+      true,
+    );
+  }
+  writeCell(pen, COLUMNS[5], formatHours(totalHours(rows)), y - 4, true);
+  writeCell(pen, COLUMNS[6], formatHours(totalHours(rows)), y - 4, true);
+  y -= ROW_HEIGHT + 10;
+
+  // Employee summary table when there are multiple employees
+  const employeeSummaries = buildEmployeeSummary(rows);
+  if (employeeSummaries.length > 1) {
+    ensureSpace(employeeSummaries.length + 3);
+    write(pen, "Summary by Employee", MARGIN, y, 10, true);
+    line(pen, y - 5, 0.3);
+    y -= ROW_HEIGHT;
+    for (const emp of employeeSummaries) {
+      ensureSpace(2);
+      writeCell(pen, COLUMNS[0], emp.employee, y, true);
+      writeCell(pen, COLUMNS[1], `${emp.daysWorked} days`, y);
+      writeCell(pen, COLUMNS[3], `${emp.shiftsCount} shifts`, y);
+      writeCell(pen, COLUMNS[5], formatHours(emp.totalHours), y, true);
+      line(pen, y - 6);
+      y -= ROW_HEIGHT;
+    }
+  }
 
   return pages.map((p, i) => {
     write(p, `Page ${i + 1} of ${pages.length}`, MARGIN, MARGIN / 2, 8);

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildExportRows,
   buildPdf,
+  buildPeriodSections,
   buildSheetXml,
   buildZip,
   crc32,
@@ -12,8 +13,11 @@ import {
   formatDayLabel,
   formatPeriod,
   formatTime,
+  getMonthBounds,
+  getWeekBounds,
   layoutPdfPages,
   pdfText,
+  resolveGrouping,
   toPdf,
   totalHours,
   toXlsx,
@@ -31,6 +35,7 @@ const meta = {
 const row = (overrides: Partial<ExportRow> = {}): ExportRow => ({
   employee: "Ada",
   date: "2026-03-09",
+  dayOfWeek: "Mon",
   clockIn: "9:00 AM",
   clockOut: "5:00 PM",
   hours: 8,
@@ -50,6 +55,56 @@ describe("formatting helpers", () => {
   it("formats day labels and periods, ignoring time parts", () => {
     expect(formatDayLabel("2026-12-01")).toBe("Dec 1, 2026");
     expect(formatPeriod(meta)).toBe("Mar 8, 2026 - Mar 14, 2026");
+  });
+
+  it("computes week and month bounds including Sunday dates", () => {
+    expect(getWeekBounds("2026-03-08")).toEqual({
+      key: "2026-03-02",
+      label: "Week of Mar 2, 2026 - Mar 8, 2026",
+    });
+    expect(getWeekBounds("2026-03-09")).toEqual({
+      key: "2026-03-09",
+      label: "Week of Mar 9, 2026 - Mar 15, 2026",
+    });
+    expect(getMonthBounds("2026-10-26")).toEqual({
+      key: "2026-10",
+      label: "Month of Oct 2026",
+    });
+  });
+
+  it("resolves grouping modes and builds period sections", () => {
+    expect(resolveGrouping([row()], { ...meta, groupBy: "week" })).toBe("week");
+    expect(
+      resolveGrouping([row()], {
+        ...meta,
+        startDate: "2026-01-01",
+        endDate: "2026-03-01",
+      }),
+    ).toBe("month");
+    expect(
+      resolveGrouping([row()], {
+        ...meta,
+        startDate: "2026-03-01",
+        endDate: "2026-03-20",
+      }),
+    ).toBe("week");
+    expect(
+      resolveGrouping(
+        [row({ date: "2026-03-08" }), row({ date: "2026-03-09" })],
+        meta,
+      ),
+    ).toBe("week");
+
+    const monthSections = buildPeriodSections(
+      [
+        row({ date: "2026-02-10", hours: 4 }),
+        row({ date: "2026-01-15", hours: 6 }),
+        row({ date: "2026-01-16", hours: 2 }),
+      ],
+      { ...meta, groupBy: "month" },
+    );
+    expect(monthSections.map((s) => s.key)).toEqual(["2026-01", "2026-02"]);
+    expect(monthSections[0]?.totalHours).toBe(8);
   });
 
   it("builds a file name from the employee and period", () => {
@@ -94,6 +149,7 @@ describe("buildExportRows", () => {
       row({
         employee: "Grace",
         date: "2026-03-10",
+        dayOfWeek: "Tue",
         clockIn: "8:00 AM",
         clockOut: "12:30 PM",
         hours: 4.5,
@@ -120,6 +176,7 @@ describe("buildExportRows", () => {
       {
         employee: "Ada",
         date: "2026-10-26",
+        dayOfWeek: "Mon",
         clockIn: "9:00 AM",
         clockOut: "5:30 PM",
         hours: 8.5,
@@ -211,7 +268,7 @@ describe("XLSX output", () => {
   it("lays out the sheet with header, styled rows and a live total", () => {
     const xml = buildSheetXml(
       [
-        row({ employee: "Ada & Co", hours: 25 / 3 }),
+        row({ employee: "Ada & Co", dayOfWeek: undefined, hours: 25 / 3 }),
         row({ clockOut: "In progress", hours: null }),
       ],
       meta,
@@ -225,20 +282,43 @@ describe("XLSX output", () => {
     expect(xml).toContain("Mar 8, 2026 - Mar 14, 2026");
     expect(xml).toContain('<row r="4"></row>');
     expect(xml).toContain(
-      '<c r="E5" s="5" t="inlineStr"><is><t xml:space="preserve">Hours</t></is></c>',
+      '<c r="F5" s="5" t="inlineStr"><is><t xml:space="preserve">Hours</t></is></c>',
     );
     expect(xml).toContain("Ada &amp; Co");
-    expect(xml).toContain(`<c r="E6" s="3"><v>${25 / 3}</v></c>`);
-    expect(xml).toMatch(/<row r="7">(?:(?!<c r="E7").)*<\/row>/);
+    expect(xml).toContain(`<c r="F6" s="3"><v>${25 / 3}</v></c>`);
+    expect(xml).toMatch(/<row r="7">(?:(?!<c r="F7").)*<\/row>/);
     expect(xml).toContain(
-      `<c r="E8" s="4"><f>SUM(E6:E7)</f><v>${25 / 3}</v></c>`,
+      `<c r="F8" s="4"><f>SUM(F6:F7)</f><v>${25 / 3}</v></c>`,
     );
     expect(xml).toContain('<pane ySplit="5" topLeftCell="A6"');
   });
 
+  it("renders grouped sections and period summaries when spanning multiple weeks", () => {
+    const xml = buildSheetXml(
+      [
+        row({ date: "2026-03-08", hours: 4 }),
+        row({ date: "2026-03-09", hours: 3 }),
+        row({ date: "2026-03-09", hours: 5 }),
+        row({ date: "2026-03-10", hours: 6 }),
+      ],
+      meta,
+    );
+    expect(xml).toContain("Subtotal — Week of Mar 2, 2026 - Mar 8, 2026");
+    expect(xml).toContain("Subtotal — Week of Mar 9, 2026 - Mar 15, 2026");
+    expect(xml).toContain("Summary by Period");
+    expect(xml).toContain("<f>SUM(F7,F10,F11,F12)</f>");
+
+    const singleShiftXml = buildSheetXml([row({ hours: 8 })], {
+      ...meta,
+      groupBy: "none",
+    });
+    expect(singleShiftXml).toContain("1 day");
+    expect(singleShiftXml).toContain("1 shift");
+  });
+
   it("writes a zero total when there are no entries", () => {
     const xml = buildSheetXml([], meta);
-    expect(xml).toContain('<c r="E6" s="4"><v>0</v></c>');
+    expect(xml).toContain('<c r="F6" s="4"><v>0</v></c>');
     expect(xml).not.toContain("<f>");
   });
 
@@ -269,7 +349,7 @@ describe("PDF output", () => {
   it("lays out a single page with header, rows and totals", () => {
     const pages = layoutPdfPages(
       [
-        row({ employee: "A".repeat(60) }),
+        row({ employee: "A".repeat(60), dayOfWeek: undefined }),
         row({ clockOut: "In progress", hours: null }),
       ],
       meta,
@@ -277,11 +357,24 @@ describe("PDF output", () => {
     expect(pages).toHaveLength(1);
     expect(pages[0]).toContain("(Timesheet) Tj");
     expect(pages[0]).toContain("(Mar 8, 2026 - Mar 14, 2026) Tj");
-    expect(pages[0]).toContain(`(${"A".repeat(35)}...) Tj`);
+    expect(pages[0]).toContain(`(${"A".repeat(27)}...) Tj`);
     expect(pages[0]).toContain("(-) Tj");
     expect(pages[0]).toContain("(Total hours) Tj");
     expect(pages[0]).toContain("(8.00) Tj");
     expect(pages[0]).toContain("(Page 1 of 1) Tj");
+  });
+
+  it("renders grouped sections and subtotals in PDF when spanning weeks", () => {
+    const pages = layoutPdfPages(
+      [
+        row({ date: "2026-03-08", hours: 4 }),
+        row({ date: "2026-03-09", hours: 3 }),
+        row({ date: "2026-03-09", hours: 5 }),
+      ],
+      meta,
+    );
+    expect(pages[0]).toContain("(Week of Mar 2, 2026 - Mar 8, 2026) Tj");
+    expect(pages[0]).toContain("(Subtotal \\(Week of Mar 2, 20...) Tj");
   });
 
   it("notes when there are no entries", () => {
@@ -299,6 +392,16 @@ describe("PDF output", () => {
     expect(pages[1]).toContain("(Timesheet - Ada Lovelace \\(continued\\)) Tj");
     expect(pages[2]).toContain("(Page 3 of 3) Tj");
     expect(pages[2]).toContain("(640.00) Tj");
+
+    // Multi-employee summary near bottom of page triggers page break
+    const empPages = layoutPdfPages(
+      Array.from({ length: 32 }, (_, i) =>
+        row({ employee: i % 2 === 0 ? "Ada" : "Grace" }),
+      ),
+      meta,
+    );
+    expect(empPages.length).toBeGreaterThanOrEqual(2);
+    expect(empPages.join("\n")).toContain("(Summary by Employee) Tj");
   });
 
   it("assembles a PDF with a correct cross-reference table", () => {
@@ -378,4 +481,20 @@ describe("downloads", () => {
     );
     createSpy.mockRestore();
   });
+
+  it("renders section subtotals when groupBy is explicitly week or month with 1 section", () => {
+    expect(buildSheetXml([row()], { ...meta, groupBy: "week" })).toContain(
+      "Subtotal",
+    );
+    expect(buildSheetXml([row()], { ...meta, groupBy: "month" })).toContain(
+      "Subtotal",
+    );
+    expect(
+      layoutPdfPages([row()], { ...meta, groupBy: "week" })[0],
+    ).toContain("Subtotal");
+    expect(
+      layoutPdfPages([row()], { ...meta, groupBy: "month" })[0],
+    ).toContain("Subtotal");
+  });
 });
+
