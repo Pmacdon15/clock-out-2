@@ -15,6 +15,7 @@ import ViewHours from "./ViewHours";
 export default function DashboardTabs({
   defaultTabPromise,
   orgSettingsPromise,
+  breakSettingsPromise,
   entriesPromise,
   orgTimeEntriesPromise,
   recentEntriesPromise,
@@ -36,6 +37,12 @@ export default function DashboardTabs({
   const isAdmin = use(isAdminPromise);
   const result = use(entriesPromise);
   const recentEntriesResult = use(recentEntriesPromise);
+  const breakSettingsResult = breakSettingsPromise
+    ? use(breakSettingsPromise)
+    : null;
+  const breakSettings = breakSettingsResult?.ok
+    ? breakSettingsResult.value
+    : null;
   const defaultTab = use(defaultTabPromise) || "time-clock";
 
   const [optimisticEntries, setOptimisticEntries] = useOptimistic(
@@ -69,6 +76,7 @@ export default function DashboardTabs({
 
       <TabsContent className="mt-0" value="time-clock">
         <TimeClock
+          breakSettings={breakSettings}
           initialEntries={optimisticRecentEntries}
           isAdmin={isAdmin}
           setOptimisticEntries={setOptimisticRecentEntries}
@@ -78,6 +86,7 @@ export default function DashboardTabs({
       <TabsContent className="mt-0" value="view">
         <Suspense fallback={<ViewHoursFallback />}>
           <ViewHours
+            breakSettings={breakSettings}
             currentUserIdPromise={userIdPromise}
             endDatePromise={endDatePromise}
             entries={optimisticEntries}
@@ -99,6 +108,7 @@ export default function DashboardTabs({
         <TabsContent className="mt-0" value="settings">
           <Suspense fallback={<SettingsFallback />}>
             <OrgSettings
+              breakSettingsPromise={breakSettingsPromise}
               hasReporting={hasReporting}
               orgSettingsPromise={orgSettingsPromise}
             />

@@ -1,7 +1,7 @@
 "use client";
 
 import type { EntryAction } from "@/lib/reducers/time-entries";
-import type { TimeEntry } from "@/lib/types";
+import type { BreakSettingsData, TimeEntry } from "@/lib/types";
 import { Card } from "../ui";
 import { EntryItem } from "./EntryItem";
 
@@ -11,6 +11,7 @@ interface EntryListProps {
   setOptimisticEntries: (action: EntryAction) => void;
   isViewingAll?: boolean;
   members?: { id: string; name: string }[];
+  breakSettings?: BreakSettingsData | null;
 }
 
 export function EntryList({
@@ -19,6 +20,7 @@ export function EntryList({
   setOptimisticEntries,
   isViewingAll = false,
   members = [],
+  breakSettings,
 }: EntryListProps) {
   return (
     <Card className="scrollbar-thin scrollbar-track-transparent scrollbar-thumb-zinc-300 hover:scrollbar-thumb-zinc-400 relative flex min-h-[100px] flex-col justify-between overflow-y-auto p-6 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-300 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar]:w-1.5">
@@ -46,6 +48,7 @@ export function EntryList({
                 : undefined;
               return (
                 <EntryItem
+                  breakSettings={breakSettings}
                   entry={entry}
                   isAdmin={isAdmin}
                   key={entry.id}

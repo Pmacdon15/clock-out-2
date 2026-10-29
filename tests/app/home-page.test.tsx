@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
     Boolean(check.feature === "reporting" || check.role === "org:admin"),
   ),
   protect: vi.fn(),
+  getOrgBreakSettings: vi.fn(),
   getOrgMembers: vi.fn(),
   getOrgReportingSettings: vi.fn(),
   getOrgTimeEntries: vi.fn(),
@@ -24,6 +25,7 @@ vi.mock("@clerk/nextjs", () => ({
 }));
 vi.mock("@clerk/nextjs/server", () => ({ auth: { protect: mocks.protect } }));
 vi.mock("@/lib/dal", () => ({
+  getOrgBreakSettings: mocks.getOrgBreakSettings,
   getOrgMembers: mocks.getOrgMembers,
   getOrgReportingSettings: mocks.getOrgReportingSettings,
   getOrgTimeEntries: mocks.getOrgTimeEntries,
@@ -62,6 +64,7 @@ function renderHome() {
     orgId: "org_1",
     has: mocks.has,
   });
+  mocks.getOrgBreakSettings.mockReturnValue(Promise.resolve("break_settings"));
   mocks.getOrgMembers.mockReturnValue(Promise.resolve(["members"]));
   mocks.getOrgReportingSettings.mockReturnValue(Promise.resolve("settings"));
   mocks.getOrgTimeEntries.mockImplementation(async (filters) => ({
@@ -131,6 +134,7 @@ describe("Home page", () => {
     await expect(props.isAdminPromise).resolves.toBe(true);
     await expect(props.membersPromise).resolves.toEqual(["members"]);
     await expect(props.orgSettingsPromise).resolves.toBe("settings");
+    await expect(props.breakSettingsPromise).resolves.toBe("break_settings");
     await expect(props.orgIdPromise).resolves.toBe("org_1");
     await expect(props.userIdPromise).resolves.toBe("user_1");
 

@@ -126,6 +126,37 @@ describe("buildExportRows", () => {
       },
     ]);
   });
+
+  it("docks lunch when breakSettings is active unless skip_lunch is true", () => {
+    const breakSettings = {
+      dock_lunch: true,
+      lunch_duration_minutes: 30,
+      lunch_min_shift_hours: 5,
+    };
+    const rows = buildExportRows(
+      [
+        makeEntry({
+          id: 1,
+          user_id: "u1",
+          clock_in: new Date("2026-03-09T09:00:00Z"),
+          clock_out: new Date("2026-03-09T17:30:00Z"),
+          skip_lunch: false,
+        }),
+        makeEntry({
+          id: 2,
+          user_id: "u1",
+          clock_in: new Date("2026-03-10T09:00:00Z"),
+          clock_out: new Date("2026-03-10T17:30:00Z"),
+          skip_lunch: true,
+        }),
+      ],
+      () => "Ada",
+      undefined,
+      breakSettings,
+    );
+
+    expect(rows.map((r) => r.hours)).toEqual([8, 8.5]);
+  });
 });
 
 /** Minimal reader for the stored (uncompressed) zips that buildZip writes. */

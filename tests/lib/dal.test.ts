@@ -8,9 +8,11 @@ const mocks = vi.hoisted(() => ({
   dbClockOut: vi.fn(),
   dbDeleteTimeEntry: vi.fn(),
   dbGetActiveEntry: vi.fn(),
+  dbGetBreakSettings: vi.fn(),
   dbGetOrgTimeEntries: vi.fn(),
   dbGetReportingSettings: vi.fn(),
   dbGetTimeEntries: vi.fn(),
+  dbUpdateBreakSettings: vi.fn(),
   dbUpdateReportingSettings: vi.fn(),
   dbUpdateTimeEntry: vi.fn(),
   getProcessedMembers: vi.fn(),
@@ -32,9 +34,11 @@ vi.mock("@/lib/db", () => ({
   dbClockOut: mocks.dbClockOut,
   dbDeleteTimeEntry: mocks.dbDeleteTimeEntry,
   dbGetActiveEntry: mocks.dbGetActiveEntry,
+  dbGetBreakSettings: mocks.dbGetBreakSettings,
   dbGetOrgTimeEntries: mocks.dbGetOrgTimeEntries,
   dbGetReportingSettings: mocks.dbGetReportingSettings,
   dbGetTimeEntries: mocks.dbGetTimeEntries,
+  dbUpdateBreakSettings: mocks.dbUpdateBreakSettings,
   dbUpdateReportingSettings: mocks.dbUpdateReportingSettings,
   dbUpdateTimeEntry: mocks.dbUpdateTimeEntry,
 }));
@@ -49,10 +53,12 @@ import {
   clockOut,
   deleteTimeEntry,
   getActiveEntry,
+  getOrgBreakSettings,
   getOrgMembers,
   getOrgReportingSettings,
   getOrgTimeEntries,
   getTimeEntries,
+  updateBreakSettingsDal,
   updateReportingSettingsDal,
   updateTimeEntry,
 } from "@/lib/dal";
@@ -414,6 +420,22 @@ describe("updateTimeEntry", () => {
     expect(mocks.dbUpdateTimeEntry).not.toHaveBeenCalled();
   });
 
+  it("passes skip_lunch through to dbUpdateTimeEntry when provided", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbUpdateTimeEntry.mockResolvedValue({ id: 1, skip_lunch: true });
+    expect(
+      (await updateTimeEntry(1, clockInAt, clockOutAt, true))._unsafeUnwrap(),
+    ).toEqual({ id: 1, skip_lunch: true });
+    expect(mocks.dbUpdateTimeEntry).toHaveBeenCalledWith(
+      1,
+      clockInAt,
+      clockOutAt,
+      "org_1",
+      true,
+      true,
+    );
+  });
+
   it("returns an error when the update fails", async () => {
     mocks.protect.mockResolvedValue(admin);
     mocks.dbUpdateTimeEntry.mockRejectedValue(new Error("db"));
@@ -540,6 +562,107 @@ describe("getOrgReportingSettings", () => {
     await expect(getOrgReportingSettings()).resolves.toEqual({
       ok: false,
       error: { reason: "Error fetching settings." },
+    });
+  });
+});
+
+describe("updateBreakSettingsDal", () => {
+  it.each([
+    ["no user", noUser],
+    ["no org", noOrg],
+    ["a non-admin", member],
+  ])("rejects %s", async (_label, session) => {
+    mocks.protect.mockResolvedValue(session);
+    expect((await updateBreakSettingsDal(true))._unsafeUnwrapErr()).toEqual({
+      reason: "Unauthorized",
+    });
+    expect(mocks.dbUpdateBreakSettings).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["negative duration", -1, 5],
+    ["excessive duration", 500, 5],
+    ["negative min shift hours", 30, -1],
+    ["excessive min shift hours", 30, 25],
+    ["NaN duration", Number.NaN, 5],
+  ])("rejects %s", async (_label, duration, minHours) => {
+    mocks.protect.mockResolvedValue(admin);
+    expect(
+      (
+        await updateBreakSettingsDal(true, duration, minHours)
+      )._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Invalid break settings" });
+    expect(mocks.dbUpdateBreakSettings).not.toHaveBeenCalled();
+  });
+
+  it("saves with default duration and min shift hours", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbUpdateBreakSettings.mockResolvedValue({ org_id: "org_1" });
+    expect((await updateBreakSettingsDal(true))._unsafeUnwrap()).toEqual({
+      org_id: "org_1",
+    });
+    expect(mocks.dbUpdateBreakSettings).toHaveBeenCalledWith(
+      "org_1",
+      true,
+      30,
+      5,
+    );
+  });
+
+  it("saves custom duration and min shift hours", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbUpdateBreakSettings.mockResolvedValue({ org_id: "org_1" });
+    await updateBreakSettingsDal(true, 45, 6);
+    expect(mocks.dbUpdateBreakSettings).toHaveBeenCalledWith(
+      "org_1",
+      true,
+      45,
+      6,
+    );
+  });
+
+  it("returns an error when the save fails", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbUpdateBreakSettings.mockRejectedValue(new Error("db"));
+    expect((await updateBreakSettingsDal(true))._unsafeUnwrapErr()).toEqual({
+      reason: "Failed to update break settings",
+    });
+  });
+});
+
+describe("getOrgBreakSettings", () => {
+  it("rejects requests without a user or org", async () => {
+    mocks.protect.mockResolvedValue(noOrg);
+    expect((await getOrgBreakSettings()).ok).toBe(false);
+  });
+
+  it("returns the stored break settings", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetBreakSettings.mockResolvedValue({
+      org_id: "org_1",
+      dock_lunch: true,
+    });
+    await expect(getOrgBreakSettings()).resolves.toEqual({
+      ok: true,
+      value: { org_id: "org_1", dock_lunch: true },
+    });
+  });
+
+  it("returns null when nothing is stored", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetBreakSettings.mockResolvedValue(undefined);
+    await expect(getOrgBreakSettings()).resolves.toEqual({
+      ok: true,
+      value: null,
+    });
+  });
+
+  it("returns an error result when the query fails", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetBreakSettings.mockRejectedValue(new Error("db"));
+    await expect(getOrgBreakSettings()).resolves.toEqual({
+      ok: false,
+      error: { reason: "Error fetching break settings." },
     });
   });
 });

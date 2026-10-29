@@ -112,9 +112,38 @@ describe("DashboardTabs", () => {
     render(<DashboardTabs {...p} />);
     expect(screen.getByTestId("org-settings")).toBeInTheDocument();
     expect(latest(captured.orgSettings)).toEqual({
+      breakSettingsPromise: undefined,
       hasReporting: true,
       orgSettingsPromise: p.orgSettingsPromise,
     });
+  });
+
+  it("passes resolved breakSettings when breakSettingsPromise succeeds or fails", () => {
+    const breakSettings = {
+      dock_lunch: true,
+      lunch_duration_minutes: 30,
+      lunch_min_shift_hours: 5,
+    };
+    render(
+      <DashboardTabs
+        {...props({
+          breakSettingsPromise: ok(breakSettings),
+        })}
+      />,
+    );
+    expect(latest(captured.timeClock).breakSettings).toEqual(breakSettings);
+
+    render(
+      <DashboardTabs
+        {...props({
+          breakSettingsPromise: resolved({
+            ok: false,
+            error: { reason: "err" },
+          }),
+        })}
+      />,
+    );
+    expect(latest(captured.timeClock).breakSettings).toBeNull();
   });
 
   it("hides settings from admins without reporting", () => {

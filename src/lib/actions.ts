@@ -8,6 +8,7 @@ import {
   clockOut as dalClockOut,
   deleteTimeEntry as dalDeleteTimeEntry,
   updateTimeEntry as dalUpdateTimeEntry,
+  updateBreakSettingsDal,
   updateReportingSettingsDal,
 } from "./dal";
 import { sendWeeklyReports } from "./reports";
@@ -64,12 +65,14 @@ export async function updateTimeEntryAction(
   id: number,
   clock_in: string,
   clock_out: string | null,
+  skip_lunch?: boolean,
 ) {
-  const result = await dalUpdateTimeEntry(
-    id,
-    new Date(clock_in),
-    clock_out ? new Date(clock_out) : null,
-  );
+  const clockInDate = new Date(clock_in);
+  const clockOutDate = clock_out ? new Date(clock_out) : null;
+  const result =
+    skip_lunch === undefined
+      ? await dalUpdateTimeEntry(id, clockInDate, clockOutDate)
+      : await dalUpdateTimeEntry(id, clockInDate, clockOutDate, skip_lunch);
 
   return result.match(
     (entry) => {
@@ -113,6 +116,28 @@ export async function updateOrgSettingAction(
     (entry) => {
       // updateTag(`settings-${entry.org_id}`)
       updateTag(`reporting-settings-${entry.org_id}`);
+      return { success: true, data: entry };
+    },
+    (err) => {
+      return { success: false, error: err.reason };
+    },
+  );
+}
+
+export async function updateBreakSettingAction(
+  dockLunch: boolean,
+  durationMinutes: number = 30,
+  minShiftHours: number = 5,
+) {
+  const result = await updateBreakSettingsDal(
+    dockLunch,
+    durationMinutes,
+    minShiftHours,
+  );
+
+  return result.match(
+    (entry) => {
+      updateTag(`break-settings-${entry.org_id}`);
       return { success: true, data: entry };
     },
     (err) => {

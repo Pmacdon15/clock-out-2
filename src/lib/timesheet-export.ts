@@ -1,4 +1,6 @@
 import { formatInTimeZone } from "date-fns-tz";
+import { getEffectiveHours } from "./break-utils";
+import type { BreakSettingsData } from "./types";
 
 /**
  * Timesheet export: turns time entries into a downloadable Excel spreadsheet
@@ -12,6 +14,7 @@ type ExportableEntry = {
   user_id: string;
   clock_in: Date | string;
   clock_out: Date | string | null;
+  skip_lunch?: boolean;
 };
 
 export type ExportFormat = "pdf" | "xlsx";
@@ -80,6 +83,7 @@ export function buildExportRows(
   entries: ExportableEntry[],
   getEmployeeName: (userId: string) => string,
   timezone?: string,
+  breakSettings?: BreakSettingsData | null,
 ): ExportRow[] {
   return entries
     .map((entry) => ({
@@ -96,9 +100,7 @@ export function buildExportRows(
       date: formatDate(clockIn, timezone),
       clockIn: formatTime(clockIn, timezone),
       clockOut: clockOut ? formatTime(clockOut, timezone) : "In progress",
-      hours: clockOut
-        ? (clockOut.getTime() - clockIn.getTime()) / 3_600_000
-        : null,
+      hours: clockOut ? getEffectiveHours(entry, breakSettings) : null,
     }));
 }
 
@@ -251,9 +253,6 @@ const cellXml = (cell: Cell, ref: string) => {
 export function buildSheetXml(rows: ExportRow[], meta: ExportMeta): string {
   const HEADER_ROW = 5;
   const firstData = HEADER_ROW + 1;
-  const lastData = HEADER_ROW + rows.length;
-  // Full precision in the cells; the 0.00 number format handles display, so
-  // a recalculated SUM matches the PDF total exactly.
   const total = totalHours(rows);
 
   const grid: Cell[][] = [
@@ -277,9 +276,9 @@ export function buildSheetXml(rows: ExportRow[], meta: ExportMeta): string {
       null,
       null,
       null,
-      rows.length
+      rows.length > 0
         ? {
-            formula: `SUM(E${firstData}:E${lastData})`,
+            formula: `SUM(E${firstData}:E${firstData + rows.length - 1})`,
             cached: total,
             style: STYLE.boldHours,
           }
@@ -298,7 +297,7 @@ export function buildSheetXml(rows: ExportRow[], meta: ExportMeta): string {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
 <sheetViews><sheetView workbookViewId="0"><pane ySplit="${HEADER_ROW}" topLeftCell="A${firstData}" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
-<cols><col min="1" max="1" width="28" customWidth="1"/><col min="2" max="2" width="13" customWidth="1"/><col min="3" max="4" width="12" customWidth="1"/><col min="5" max="5" width="10" customWidth="1"/></cols>
+<cols><col min="1" max="1" width="26" customWidth="1"/><col min="2" max="4" width="14" customWidth="1"/><col min="5" max="5" width="12" customWidth="1"/></cols>
 <sheetData>${sheetRows}</sheetData>
 </worksheet>`;
 }

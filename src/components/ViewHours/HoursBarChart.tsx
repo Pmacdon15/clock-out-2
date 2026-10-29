@@ -15,8 +15,10 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { getEffectiveHours } from "@/lib/break-utils";
 import type { TimeEntry } from "@/lib/dal";
 import { downloadElementAsImage } from "@/lib/download";
+import type { BreakSettingsData } from "@/lib/types";
 import { Button, Card } from "../ui";
 import { COLORS } from "./HoursLineChart";
 
@@ -30,6 +32,7 @@ interface HoursBarChartProps {
   members?: { id: string; name: string }[];
   visibleMemberIds?: Set<string>;
   isViewingAll?: boolean;
+  breakSettings?: BreakSettingsData | null;
 }
 
 export function HoursBarChart(props: HoursBarChartProps) {
@@ -129,6 +132,7 @@ function HoursBarChartContent({
   members = [],
   visibleMemberIds,
   isViewingAll = false,
+  breakSettings,
 }: HoursBarChartProps & {
   onDownload?: () => void;
   isDownloading?: boolean;
@@ -144,10 +148,7 @@ function HoursBarChartContent({
     filteredEntries.forEach((e) => {
       const clockIn = new Date(e.clock_in);
       const dayKey = startOfDay(clockIn).toISOString();
-      const durationMs = e.clock_out
-        ? new Date(e.clock_out).getTime() - clockIn.getTime()
-        : Date.now() - clockIn.getTime();
-      const hours = Math.max(0, durationMs / (1000 * 60 * 60));
+      const hours = getEffectiveHours(e, breakSettings);
 
       if (!dataMap[dayKey]) {
         dataMap[dayKey] = { date: clockIn };
@@ -187,7 +188,7 @@ function HoursBarChartContent({
         }
         return row;
       });
-  }, [filteredEntries, isViewingAll, visibleMemberIds, members]);
+  }, [filteredEntries, isViewingAll, visibleMemberIds, members, breakSettings]);
 
   const totalHours = useMemo(() => {
     if (isViewingAll) {
@@ -439,10 +440,7 @@ function HoursBarChartContent({
                 .map((e) => {
                   const clockIn = new Date(e.clock_in);
                   const clockOut = e.clock_out ? new Date(e.clock_out) : null;
-                  const durationMs = clockOut
-                    ? clockOut.getTime() - clockIn.getTime()
-                    : Date.now() - clockIn.getTime();
-                  const hours = Math.max(0, durationMs / (1000 * 60 * 60));
+                  const hours = getEffectiveHours(e, breakSettings);
                   const member = members.find((m) => m.id === e.user_id);
 
                   return (

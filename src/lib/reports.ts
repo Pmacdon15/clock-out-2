@@ -3,7 +3,8 @@ import { clerkClient } from "@clerk/nextjs/server";
 import { render } from "@react-email/render";
 import { format, subDays } from "date-fns";
 import { WeeklyReportEmail } from "@/components/emails/WeeklyReportEmail";
-import { dbGetTimeEntriesForPeriod } from "./db";
+import { getEffectiveDurationMs } from "./break-utils";
+import { dbGetBreakSettings, dbGetTimeEntriesForPeriod } from "./db";
 
 const sesClient = new SESClient({
   region: process.env.AWS_REGION || "us-east-1",
@@ -108,6 +109,8 @@ export async function sendWeeklyReports(
       continue;
     }
 
+    const breakSettings = await dbGetBreakSettings(orgId);
+
     // Generate report for each member, even non-admins
     for (const member of members) {
       const publicUserData = member.publicUserData;
@@ -144,7 +147,7 @@ export async function sendWeeklyReports(
 
         const inDate = new Date(entry.clock_in);
         const outDate = new Date(entry.clock_out);
-        const durationMs = outDate.getTime() - inDate.getTime();
+        const durationMs = getEffectiveDurationMs(entry, breakSettings);
 
         totalMs += durationMs;
 

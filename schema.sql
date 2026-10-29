@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS time_entries (
     org_id VARCHAR(255) NOT NULL,
     clock_in TIMESTAMP WITH TIME ZONE NOT NULL,
     clock_out TIMESTAMP WITH TIME ZONE,
+    skip_lunch BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -19,6 +20,14 @@ CREATE TABLE IF NOT EXISTS reporting_settings (
     report_frequency TEXT NOT NULL DEFAULT 'weekly',
     report_day TEXT, -- e.g., 'Monday', 'Tuesday'
     report_interval INTEGER DEFAULT 1, -- 1 for weekly, 2 for bi-weekly
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS break_settings (
+    org_id TEXT PRIMARY KEY REFERENCES settings(org_id) ON DELETE CASCADE,
+    dock_lunch BOOLEAN NOT NULL DEFAULT FALSE,
+    lunch_duration_minutes INTEGER NOT NULL DEFAULT 30,
+    lunch_min_shift_hours DOUBLE PRECISION NOT NULL DEFAULT 5,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
