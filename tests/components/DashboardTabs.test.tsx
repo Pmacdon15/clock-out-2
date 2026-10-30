@@ -146,9 +146,14 @@ describe("DashboardTabs", () => {
     expect(latest(captured.timeClock).breakSettings).toBeNull();
   });
 
-  it("hides settings from admins without reporting", () => {
-    render(<DashboardTabs {...props({ isAdminPromise: resolved(true) })} />);
-    expect(screen.queryByRole("button", { name: "Settings" })).toBeNull();
+  it("shows settings to admins without reporting so they can set lunch breaks", () => {
+    const p = props({
+      defaultTabPromise: resolved("settings"),
+      isAdminPromise: resolved(true),
+    });
+    render(<DashboardTabs {...p} />);
+    expect(screen.getByTestId("org-settings")).toBeInTheDocument();
+    expect(latest(captured.orgSettings)).toMatchObject({ hasReporting: false });
   });
 
   it("treats missing entry lists as empty", () => {
