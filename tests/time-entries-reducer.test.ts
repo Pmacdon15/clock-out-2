@@ -16,7 +16,10 @@ const entry = (id: number, overrides: Partial<TimeEntry> = {}): TimeEntry => ({
 describe("timeEntriesReducer", () => {
   test("ADD puts the new entry first", () => {
     const state = [entry(1), entry(2)];
-    const result = timeEntriesReducer(state, { type: "ADD", payload: entry(3) });
+    const result = timeEntriesReducer(state, {
+      type: "ADD",
+      payload: entry(3),
+    });
     expect(result.map((e) => e.id)).toEqual([3, 1, 2]);
   });
 

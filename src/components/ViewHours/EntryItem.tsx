@@ -35,9 +35,7 @@ export function EntryItem({
       ? format(new Date(entry.clock_out), "yyyy-MM-dd'T'HH:mm")
       : "",
   );
-  const [editSkipLunch, setEditSkipLunch] = useState(
-    Boolean(entry.skip_lunch),
-  );
+  const [editSkipLunch, setEditSkipLunch] = useState(Boolean(entry.skip_lunch));
 
   const updateMutation = useMutation({
     mutationFn: ({

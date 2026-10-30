@@ -1,10 +1,12 @@
 import type { BreakSettingsData, TimeEntry } from "./types";
 
-type ShiftLike = Pick<TimeEntry, "clock_in" | "clock_out" | "skip_lunch"> | {
-  clock_in: Date | string;
-  clock_out: Date | string | null;
-  skip_lunch?: boolean;
-};
+type ShiftLike =
+  | Pick<TimeEntry, "clock_in" | "clock_out" | "skip_lunch">
+  | {
+      clock_in: Date | string;
+      clock_out: Date | string | null;
+      skip_lunch?: boolean;
+    };
 
 /**
  * Returns the number of minutes docked from a shift based on the organization's

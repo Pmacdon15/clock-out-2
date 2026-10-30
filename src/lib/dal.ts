@@ -372,11 +372,7 @@ export async function updateBreakSettingsDal(
   minShiftHours: number = 5,
 ) {
   const authUser = await auth.protect();
-  if (
-    !authUser.userId ||
-    !authUser.orgId ||
-    authUser.orgRole !== "org:admin"
-  ) {
+  if (!authUser.userId || !authUser.orgId || authUser.orgRole !== "org:admin") {
     return errAsync({ reason: "Unauthorized" } as const);
   }
   if (
