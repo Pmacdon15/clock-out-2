@@ -220,25 +220,101 @@ describe("reporting settings", () => {
 });
 
 describe("break settings", () => {
-  it("dbGetBreakSettings reads and tags the cache", async () => {
-    sql.mockResolvedValue([{ org_id: "o1", dock_lunch: true }]);
+  beforeEach(() => {
+    db.resetBreakSettingsTableCheck();
+  });
+
+  it("ensureBreakSettingsTable creates settings then break_settings if missing", async () => {
+    sql.mockResolvedValue([]);
+    await db.ensureBreakSettingsTable();
+    expect(sql).toHaveBeenCalledTimes(2);
+    expect(textOf(0)).toContain("CREATE TABLE IF NOT EXISTS settings");
+    expect(textOf(1)).toContain("CREATE TABLE IF NOT EXISTS break_settings");
+    expect(textOf(1)).toContain("REFERENCES settings(org_id)");
+    expect(textOf(1)).toContain("dock_lunch BOOLEAN NOT NULL DEFAULT FALSE");
+    expect(textOf(1)).toContain(
+      "lunch_duration_minutes INTEGER NOT NULL DEFAULT 30",
+    );
+    expect(textOf(1)).toContain(
+      "lunch_min_shift_hours DOUBLE PRECISION NOT NULL DEFAULT 5",
+    );
+  });
+
+  it("ensureBreakSettingsTable only runs once per instance", async () => {
+    sql.mockResolvedValue([]);
+    await Promise.all([
+      db.ensureBreakSettingsTable(),
+      db.ensureBreakSettingsTable(),
+    ]);
+    await db.ensureBreakSettingsTable();
+    expect(sql).toHaveBeenCalledTimes(2);
+  });
+
+  it("ensureBreakSettingsTable retries after a failure", async () => {
+    sql.mockRejectedValueOnce(new Error("db down"));
+    await expect(db.ensureBreakSettingsTable()).rejects.toThrow("db down");
+    sql.mockReset();
+    sql.mockResolvedValue([]);
+    await db.ensureBreakSettingsTable();
+    expect(sql).toHaveBeenCalledTimes(2);
+    expect(textOf(1)).toContain("CREATE TABLE IF NOT EXISTS break_settings");
+  });
+
+  it("dbGetBreakSettings creates the table first, then reads and tags the cache", async () => {
+    sql
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ org_id: "o1", dock_lunch: true }]);
     await expect(db.dbGetBreakSettings("o1")).resolves.toEqual({
       org_id: "o1",
       dock_lunch: true,
     });
+    expect(textOf(1)).toContain("CREATE TABLE IF NOT EXISTS break_settings");
+    expect(textOf(2)).toContain("SELECT * FROM break_settings");
+    expect(valuesOf(2)).toEqual(["o1"]);
     expect(cacheTag).toHaveBeenCalledWith("break-settings-o1");
   });
 
-  it("dbUpdateBreakSettings upserts settings then break settings", async () => {
+  it("dbGetBreakSettings returns undefined for an org with no saved settings", async () => {
+    sql.mockResolvedValue([]);
+    await expect(db.dbGetBreakSettings("o2")).resolves.toBeUndefined();
+  });
+
+  it("dbGetBreakSettings rejects when the table can't be created", async () => {
+    sql.mockRejectedValueOnce(new Error("permission denied"));
+    await expect(db.dbGetBreakSettings("o1")).rejects.toThrow(
+      "permission denied",
+    );
+  });
+
+  it("dbUpdateBreakSettings creates the table, then upserts settings and break settings", async () => {
     sql
       .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ org_id: "o1", dock_lunch: true }]);
-    await expect(
-      db.dbUpdateBreakSettings("o1", true, 30, 5),
-    ).resolves.toEqual({ org_id: "o1", dock_lunch: true });
+    await expect(db.dbUpdateBreakSettings("o1", true, 30, 5)).resolves.toEqual({
+      org_id: "o1",
+      dock_lunch: true,
+    });
+    expect(textOf(0)).toContain("CREATE TABLE IF NOT EXISTS settings");
+    expect(textOf(1)).toContain("CREATE TABLE IF NOT EXISTS break_settings");
+    expect(textOf(2)).toContain("INSERT INTO settings");
+    expect(valuesOf(2)).toEqual(["o1"]);
+    expect(textOf(3)).toContain("INSERT INTO break_settings");
+    expect(valuesOf(3)).toEqual(["o1", true, 30, 5, true, 30, 5]);
+  });
+
+  it("dbUpdateBreakSettings skips table creation once it has run", async () => {
+    sql.mockResolvedValue([]);
+    await db.ensureBreakSettingsTable();
+    sql.mockReset();
+    sql
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ org_id: "o1", dock_lunch: false }]);
+    await db.dbUpdateBreakSettings("o1", false, 45, 6);
+    expect(sql).toHaveBeenCalledTimes(2);
     expect(textOf(0)).toContain("INSERT INTO settings");
-    expect(valuesOf(0)).toEqual(["o1"]);
-    expect(textOf(1)).toContain("INSERT INTO break_settings");
-    expect(valuesOf(1)).toEqual(["o1", true, 30, 5, true, 30, 5]);
+    expect(valuesOf(1)).toEqual(["o1", false, 45, 6, false, 45, 6]);
   });
 });

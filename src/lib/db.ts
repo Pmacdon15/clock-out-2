@@ -224,10 +224,48 @@ export async function dbUpdateReportingSettings(
   return updated as ReportingSettingsData;
 }
 
+let breakSettingsTableReady: Promise<void> | null = null;
+
+/**
+ * Lunch-break settings are free for every admin. Production databases that
+ * predate `break_settings` in schema.sql don't have the table, so create it
+ * (and the `settings` parent it references) on first use. Runs once per
+ * server instance; a failure is not cached, so the next call retries.
+ */
+export function ensureBreakSettingsTable(): Promise<void> {
+  breakSettingsTableReady ??= (async () => {
+    await sql`
+		CREATE TABLE IF NOT EXISTS settings (
+			org_id TEXT PRIMARY KEY,
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+		)
+	`;
+    await sql`
+		CREATE TABLE IF NOT EXISTS break_settings (
+			org_id TEXT PRIMARY KEY REFERENCES settings(org_id) ON DELETE CASCADE,
+			dock_lunch BOOLEAN NOT NULL DEFAULT FALSE,
+			lunch_duration_minutes INTEGER NOT NULL DEFAULT 30,
+			lunch_min_shift_hours DOUBLE PRECISION NOT NULL DEFAULT 5,
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+		)
+	`;
+  })().catch((error) => {
+    breakSettingsTableReady = null;
+    throw error;
+  });
+  return breakSettingsTableReady;
+}
+
+/** Test-only: forget that the table check ran. */
+export function resetBreakSettingsTableCheck() {
+  breakSettingsTableReady = null;
+}
+
 export async function dbGetBreakSettings(orgId: string) {
   "use cache";
   cacheTag(`break-settings-${orgId}`);
   cacheLife("hours");
+  await ensureBreakSettingsTable();
   const [settings] = await sql`
 		SELECT * FROM break_settings WHERE org_id = ${orgId}
 	`;
@@ -240,6 +278,7 @@ export async function dbUpdateBreakSettings(
   durationMinutes: number,
   minShiftHours: number,
 ) {
+  await ensureBreakSettingsTable();
   await sql`
 		INSERT INTO settings (org_id, updated_at)
 		VALUES (${orgId}, NOW())
