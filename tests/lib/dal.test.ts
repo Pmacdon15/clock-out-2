@@ -403,9 +403,9 @@ describe("updateTimeEntry", () => {
     ["clock-out", clockInAt, new Date("not a date")],
   ])("rejects an invalid %s time", async (_label, inAt, outAt) => {
     mocks.protect.mockResolvedValue(admin);
-    expect((await updateTimeEntry(1, inAt, outAt))._unsafeUnwrapErr()).toEqual(
-      { reason: "Invalid clock-in or clock-out time" },
-    );
+    expect((await updateTimeEntry(1, inAt, outAt))._unsafeUnwrapErr()).toEqual({
+      reason: "Invalid clock-in or clock-out time",
+    });
     expect(mocks.dbUpdateTimeEntry).not.toHaveBeenCalled();
   });
 
@@ -607,6 +607,20 @@ describe("updateBreakSettingsDal", () => {
       30,
       5,
     );
+  });
+
+  it("lets admins on the free plan save lunch breaks (no paywall)", async () => {
+    const has = vi.fn(() => false);
+    mocks.protect.mockResolvedValue({ ...admin, has });
+    mocks.dbUpdateBreakSettings.mockResolvedValue({ org_id: "org_1" });
+    expect((await updateBreakSettingsDal(true, 30, 5)).isOk()).toBe(true);
+    expect(mocks.dbUpdateBreakSettings).toHaveBeenCalledWith(
+      "org_1",
+      true,
+      30,
+      5,
+    );
+    expect(has).not.toHaveBeenCalled();
   });
 
   it("saves custom duration and min shift hours", async () => {
