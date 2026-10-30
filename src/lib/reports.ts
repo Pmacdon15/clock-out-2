@@ -18,11 +18,38 @@ function formatDuration(ms: number) {
   return `${minutes}m`;
 }
 
+/**
+ * Whether the organization's Clerk billing subscription includes the paid
+ * "reporting" feature. Any billing error (no subscription, etc.) counts as no.
+ */
+export async function orgHasReportingFeature(orgId: string): Promise<boolean> {
+  try {
+    const client = await clerkClient();
+    const subscription =
+      await client.billing.getOrganizationBillingSubscription(orgId);
+    return subscription.subscriptionItems.some(
+      (item: { plan?: { features?: { slug: string }[] } | null }) =>
+        item.plan?.features?.some(
+          (f: { slug: string }) => f.slug === "reporting",
+        ),
+    );
+  } catch (_error) {
+    console.log(`[Reports] No billing/subscription for org ${orgId}`);
+    return false;
+  }
+}
+
+export type SendReportOptions = {
+  /** Only email reports for these members (defaults to every member). */
+  userIds?: string[];
+};
+
 export async function sendWeeklyReports(
   startDate: Date,
   endDate: Date,
   targetOrgId?: string,
   timeframe: string = "week",
+  options: SendReportOptions = {},
 ) {
   const hasAwsCreds =
     process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY;
@@ -53,23 +80,7 @@ export async function sendWeeklyReports(
   for (const org of allOrgs) {
     const orgId = org.id;
 
-    // Check for reporting feature in subscriptions
-    let hasReportingFeature = false;
-    try {
-      const subscription =
-        await client.billing.getOrganizationBillingSubscription(orgId);
-      hasReportingFeature = subscription.subscriptionItems.some(
-        (item: { plan?: { features?: { slug: string }[] } | null }) =>
-          item.plan?.features?.some(
-            (f: { slug: string }) => f.slug === "reporting",
-          ),
-      );
-    } catch (_error) {
-      // If no billing or error, assume no feature
-      console.log(
-        `[Reports] No billing/subscription for ${org.name} (${orgId})`,
-      );
-    }
+    const hasReportingFeature = await orgHasReportingFeature(orgId);
 
     if (!hasReportingFeature) {
       console.log(
@@ -116,6 +127,7 @@ export async function sendWeeklyReports(
       const publicUserData = member.publicUserData;
       const userId = publicUserData?.userId;
       if (!userId) continue;
+      if (options.userIds && !options.userIds.includes(userId)) continue;
 
       const userName = publicUserData.firstName
         ? `${publicUserData.firstName} ${publicUserData.lastName || ""}`.trim()
@@ -262,7 +274,10 @@ export async function sendWeeklyReports(
               },
               Subject: {
                 Charset: "UTF-8",
-                Data: `Weekly Hours Report for ${userName}`,
+                Data:
+                  timeframe === "custom"
+                    ? `Hours Report for ${userName} (${periodStartStr} – ${periodEndStr})`
+                    : `Weekly Hours Report for ${userName}`,
               },
             },
             Source:

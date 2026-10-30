@@ -64,10 +64,18 @@ export const WeeklyReportEmail = ({
     if (year) linkWithParams += `&year=${year}`;
   }
 
+  // On-demand reports (e.g. requested through the MCP server) cover an
+  // arbitrary date range, so only scheduled reports are called "weekly".
+  const reportLabel =
+    timeframe === "custom" ? "hours report" : "weekly hours report";
+
   return (
     <Html>
       <Head />
-      <Preview>Weekly Hours Report for {userName}</Preview>
+      <Preview>
+        {timeframe === "custom" ? "Hours Report" : "Weekly Hours Report"} for{" "}
+        {userName}
+      </Preview>
       <Tailwind>
         <Body className="mx-auto my-auto bg-gray-50 px-2 font-sans">
           <Container className="mx-auto my-[40px] max-w-[465px] rounded border border-gray-200 border-solid bg-white p-[20px]">
@@ -78,8 +86,8 @@ export const WeeklyReportEmail = ({
               Hello Admin,
             </Text>
             <Text className="text-[14px] text-black leading-[24px]">
-              Here is the weekly hours report for <strong>{userName}</strong>{" "}
-              from {periodStart} to {periodEnd}.
+              Here is the {reportLabel} for <strong>{userName}</strong> from{" "}
+              {periodStart} to {periodEnd}.
             </Text>
             <Text className="text-[14px] text-black leading-[24px]">
               <strong>Total Hours Logged:</strong> {totalHours}

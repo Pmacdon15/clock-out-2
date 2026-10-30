@@ -31,6 +31,9 @@ const mockDbClockInAt = vi.fn();
 const mockDbClockOutAt = vi.fn();
 const mockInvalidateTimeEntryCache = vi.fn();
 const mockInvalidateReportingSettingsCache = vi.fn();
+const mockDbGetBreakSettings = vi.fn(async () => undefined);
+const mockOrgHasReportingFeature = vi.fn(async () => true);
+const mockSendWeeklyReports = vi.fn(async () => true);
 
 vi.mock("@/mcp/db", () => ({
   dbClockInAt: (...args: unknown[]) => mockDbClockInAt(...args),
@@ -39,6 +42,7 @@ vi.mock("@/mcp/db", () => ({
   dbFindOverlappingTimeEntries: (...args: unknown[]) =>
     mockDbFindOverlapping(...args),
   dbGetActiveEntry: (...args: unknown[]) => mockDbGetActiveEntry(...args),
+  dbGetBreakSettings: (...args: unknown[]) => mockDbGetBreakSettings(...args),
   dbGetOrgActiveEntries: vi.fn(async () => []),
   dbGetOrgTimeEntries: (...args: unknown[]) => mockDbGetOrgTimeEntries(...args),
   dbGetReportingSettings: vi.fn(async () => undefined),
@@ -58,7 +62,9 @@ vi.mock("@/lib/utils-clerk", () => ({
 }));
 
 vi.mock("@/lib/reports", () => ({
-  sendWeeklyReports: vi.fn(async () => true),
+  orgHasReportingFeature: (...args: unknown[]) =>
+    mockOrgHasReportingFeature(...args),
+  sendWeeklyReports: (...args: unknown[]) => mockSendWeeklyReports(...args),
 }));
 
 import { MCP_INSTRUCTIONS } from "@/mcp/instructions";
@@ -72,6 +78,7 @@ import {
   addTimeEntryTool,
   exportTimesheetTool,
   inviteMemberTool,
+  runHoursReportTool,
   updateTimeEntryTool,
 } from "@/mcp/tools";
 
@@ -113,6 +120,7 @@ describe("Clock Out MCP server", () => {
       "list_organizations",
       "list_time_entries",
       "manage_reporting_settings",
+      "run_hours_report",
       "update_time_entry",
       "who_is_working",
     ]);
@@ -535,5 +543,184 @@ describe("Double / overlapping time prevention & cache invalidation", () => {
     expect(res.isError).toBe(true);
     expect(res.data.status).toBe("forbidden");
     expect(mockCreateOrganizationInvitation).not.toHaveBeenCalled();
+  });
+});
+
+describe("run_hours_report", () => {
+  const adminMembership = {
+    role: "org:admin",
+    organization: { id: "org_1", name: "PatMac Org", slug: "patmac-org" },
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockOrgHasReportingFeature.mockResolvedValue(true);
+    mockSendWeeklyReports.mockResolvedValue(true);
+    mockDbGetBreakSettings.mockResolvedValue(undefined);
+    mockGetUserOrgMemberships.mockResolvedValue({ data: [adminMembership] });
+    mockGetOrgMemberships.mockResolvedValue({
+      data: [
+        {
+          role: "org:admin",
+          publicUserData: {
+            userId: "user_admin",
+            firstName: "Patrick",
+            lastName: "MacDonald",
+            identifier: "patrick@patmac.ca",
+          },
+        },
+        {
+          role: "org:member",
+          publicUserData: {
+            userId: "user_adam",
+            firstName: "Adam",
+            lastName: "Jones",
+            identifier: "adam@patmac.ca",
+          },
+        },
+      ],
+    });
+    mockDbGetTimeEntries.mockResolvedValue([
+      {
+        id: 1,
+        user_id: "user_adam",
+        org_id: "org_1",
+        // Oct 6 2026, 8:00–17:00 America/Edmonton (UTC-6)
+        clock_in: new Date("2026-10-06T14:00:00.000Z"),
+        clock_out: new Date("2026-10-06T23:00:00.000Z"),
+      },
+      {
+        id: 2,
+        user_id: "user_adam",
+        org_id: "org_1",
+        clock_in: new Date("2026-10-07T14:00:00.000Z"),
+        clock_out: new Date("2026-10-07T18:00:00.000Z"),
+      },
+    ] as never);
+  });
+
+  const caller = { userId: "user_admin", client: "Claude" };
+
+  it("is registered as an admin reporting tool", () => {
+    expect(tools.get("run_hours_report")?.description).toMatch(/Admin-only/);
+    expect(tools.get("run_hours_report")?.description).toMatch(/Reporting/);
+  });
+
+  it("rejects non-admins", async () => {
+    mockGetUserOrgMemberships.mockResolvedValue({
+      data: [{ ...adminMembership, role: "org:member" }],
+    });
+    const res = await runHoursReportTool(
+      { userId: "user_adam", client: "Claude" },
+      { member: "Adam", start_date: "2026-10-01", end_date: "2026-10-15" },
+    );
+    expect(res.isError).toBe(true);
+    expect(res.data.status).toBe("forbidden");
+    expect(mockDbGetTimeEntries).not.toHaveBeenCalled();
+  });
+
+  it("requires the paid reporting feature", async () => {
+    mockOrgHasReportingFeature.mockResolvedValue(false);
+    const res = await runHoursReportTool(caller, {
+      member: "Adam",
+      start_date: "2026-10-01",
+      end_date: "2026-10-15",
+    });
+    expect(res.isError).toBe(true);
+    expect(res.data.status).toBe("reporting_not_enabled");
+    expect(mockDbGetTimeEntries).not.toHaveBeenCalled();
+  });
+
+  it("rejects an end date before the start date", async () => {
+    const res = await runHoursReportTool(caller, {
+      member: "Adam",
+      start_date: "2026-10-15",
+      end_date: "2026-10-01",
+    });
+    expect(res.isError).toBe(true);
+    expect(res.data.status).toBe("invalid_dates");
+  });
+
+  it("returns a member's net hours for the range to the AI without emailing", async () => {
+    mockDbGetBreakSettings.mockResolvedValue({
+      org_id: "org_1",
+      dock_lunch: true,
+      lunch_duration_minutes: 30,
+      lunch_min_shift_hours: 5,
+    } as never);
+
+    const res = await runHoursReportTool(caller, {
+      member: "Adam",
+      start_date: "2026-10-01",
+      end_date: "2026-10-15",
+      timezone: "America/Edmonton",
+    });
+
+    expect(res.isError).toBeUndefined();
+    expect(mockDbGetTimeEntries).toHaveBeenCalledWith(
+      "user_adam",
+      "org_1",
+      new Date("2026-10-01T06:00:00.000Z"),
+      new Date("2026-10-16T05:59:59.999Z"),
+    );
+    const reports = res.data.reports as {
+      name: string;
+      total_hours: number;
+      gross_hours: number;
+      days_worked: number;
+    }[];
+    expect(reports).toHaveLength(1);
+    // 9h shift docked 30m lunch + 4h shift under the lunch threshold
+    expect(reports[0]).toMatchObject({
+      name: "Adam Jones",
+      gross_hours: 13,
+      total_hours: 12.5,
+      days_worked: 2,
+    });
+    expect(res.summary).toMatch(/Adam Jones worked/);
+    expect(mockSendWeeklyReports).not.toHaveBeenCalled();
+    expect(res.data.email).toBeUndefined();
+  });
+
+  it("emails the report to admins when asked, limited to the requested member", async () => {
+    const res = await runHoursReportTool(caller, {
+      member: "Adam",
+      start_date: "2026-10-01",
+      end_date: "2026-10-15",
+      deliver: "both",
+    });
+
+    expect(mockSendWeeklyReports).toHaveBeenCalledTimes(1);
+    const [start, end, orgId, timeframe, options] = mockSendWeeklyReports.mock
+      .calls[0] as unknown as [
+      Date,
+      Date,
+      string,
+      string,
+      { userIds: string[] },
+    ];
+    expect(orgId).toBe("org_1");
+    expect(timeframe).toBe("custom");
+    expect(options).toEqual({ userIds: ["user_adam"] });
+    expect(end.getTime() - start.getTime()).toBe(15 * 86_400_000);
+    expect(res.data.email).toMatchObject({
+      status: "sent",
+      recipients: ["patrick@patmac.ca"],
+      members_emailed: ["Adam Jones"],
+    });
+    expect(res.data.reports).toBeDefined();
+  });
+
+  it("reports on everyone by default", async () => {
+    mockDbGetOrgTimeEntries.mockResolvedValueOnce([]);
+    const res = await runHoursReportTool(caller, {
+      start_date: "2026-10-01",
+      end_date: "2026-10-07",
+      deliver: "email_admins",
+    });
+    expect(mockDbGetOrgTimeEntries).toHaveBeenCalled();
+    expect(mockSendWeeklyReports).not.toHaveBeenCalled();
+    expect(res.data.email).toMatchObject({ status: "no_completed_shifts" });
+    expect(res.data.reports).toBeUndefined();
   });
 });
