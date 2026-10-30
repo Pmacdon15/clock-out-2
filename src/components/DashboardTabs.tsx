@@ -69,9 +69,7 @@ export default function DashboardTabs({
       <TabsList>
         <TabsTrigger value="time-clock">Time Clock</TabsTrigger>
         <TabsTrigger value="view">Hours</TabsTrigger>
-        {isAdmin && hasReporting && (
-          <TabsTrigger value="settings">Settings</TabsTrigger>
-        )}
+        {isAdmin && <TabsTrigger value="settings">Settings</TabsTrigger>}
       </TabsList>
 
       <TabsContent className="mt-0" value="time-clock">
@@ -104,7 +102,7 @@ export default function DashboardTabs({
         </Suspense>
       </TabsContent>
 
-      {isAdmin && hasReporting && (
+      {isAdmin && (
         <TabsContent className="mt-0" value="settings">
           <Suspense fallback={<SettingsFallback />}>
             <OrgSettings
