@@ -9,6 +9,7 @@ import {
   dbGetOrgTimeEntries,
   dbGetReportingSettings,
   dbGetTimeEntries,
+  dbUpdateBreakSettings,
   dbUpdateReportingSettings,
   dbUpdateTimeEntry,
 } from "@/lib/db";
@@ -23,6 +24,7 @@ export {
   dbGetOrgTimeEntries,
   dbGetReportingSettings,
   dbGetTimeEntries,
+  dbUpdateBreakSettings,
   dbUpdateReportingSettings,
   dbUpdateTimeEntry,
 };
@@ -148,6 +150,14 @@ export function invalidateTimeEntryCache(userId: string, orgId: string) {
 export function invalidateReportingSettingsCache(orgId: string) {
   try {
     revalidateTag(`reporting-settings-${orgId}`, { expire: 0 });
+  } catch (error) {
+    console.warn("Cache invalidation warning:", error);
+  }
+}
+
+export function invalidateBreakSettingsCache(orgId: string) {
+  try {
+    revalidateTag(`break-settings-${orgId}`, { expire: 0 });
   } catch (error) {
     console.warn("Cache invalidation warning:", error);
   }

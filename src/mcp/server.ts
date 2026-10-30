@@ -26,6 +26,8 @@ import {
   listTimeEntriesInputSchema,
   listTimeEntriesTool,
   type McpCaller,
+  manageBreakSettingsInputSchema,
+  manageBreakSettingsTool,
   manageReportingSettingsInputSchema,
   manageReportingSettingsTool,
   runHoursReportInputSchema,
@@ -358,6 +360,26 @@ export function registerClockOutTools(server: McpServer) {
     (args, ctx) =>
       run(server, ctx.http?.authInfo, (caller) =>
         manageReportingSettingsTool(caller, args),
+      ),
+  );
+
+  server.registerTool(
+    "manage_break_settings",
+    {
+      title: "View or update lunch/break deduction settings",
+      description:
+        "Views or updates the organization's automatic lunch/break deduction: whether unpaid break time is docked (dock_lunch), how many minutes are deducted (lunch_duration_minutes), and the minimum shift length in hours before it applies (lunch_min_shift_hours). Unspecified fields keep their current values. Anyone can view the settings; updating is admin-only ('org:admin'). Available on every plan.",
+      inputSchema: portable(manageBreakSettingsInputSchema),
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    (args, ctx) =>
+      run(server, ctx.http?.authInfo, (caller) =>
+        manageBreakSettingsTool(caller, args),
       ),
   );
 

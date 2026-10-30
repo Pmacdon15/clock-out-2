@@ -34,6 +34,8 @@ const mockInvalidateReportingSettingsCache = vi.fn();
 const mockDbGetBreakSettings = vi.fn(async () => undefined);
 const mockDbGetReportingSettings = vi.fn(async () => undefined);
 const mockDbUpdateReportingSettings = vi.fn();
+const mockDbUpdateBreakSettings = vi.fn();
+const mockInvalidateBreakSettingsCache = vi.fn();
 const mockOrgHasReportingFeature = vi.fn(async () => true);
 const mockSendWeeklyReports = vi.fn(async () => true);
 
@@ -52,9 +54,13 @@ vi.mock("@/mcp/db", () => ({
   dbGetTimeEntries: (...args: unknown[]) => mockDbGetTimeEntries(...args),
   dbGetTimeEntryById: (...args: unknown[]) => mockDbGetTimeEntryById(...args),
   dbInsertTimeEntry: (...args: unknown[]) => mockDbInsertTimeEntry(...args),
+  dbUpdateBreakSettings: (...args: unknown[]) =>
+    mockDbUpdateBreakSettings(...args),
   dbUpdateReportingSettings: (...args: unknown[]) =>
     mockDbUpdateReportingSettings(...args),
   dbUpdateTimeEntry: (...args: unknown[]) => mockDbUpdateTimeEntry(...args),
+  invalidateBreakSettingsCache: (...args: unknown[]) =>
+    mockInvalidateBreakSettingsCache(...args),
   invalidateReportingSettingsCache: (...args: unknown[]) =>
     mockInvalidateReportingSettingsCache(...args),
   invalidateTimeEntryCache: (...args: unknown[]) =>
@@ -82,6 +88,7 @@ import {
   addTimeEntryTool,
   exportTimesheetTool,
   inviteMemberTool,
+  manageBreakSettingsTool,
   manageReportingSettingsTool,
   runHoursReportTool,
   updateTimeEntryTool,
@@ -124,6 +131,7 @@ describe("Clock Out MCP server", () => {
       "list_members",
       "list_organizations",
       "list_time_entries",
+      "manage_break_settings",
       "manage_reporting_settings",
       "run_hours_report",
       "update_time_entry",
@@ -837,6 +845,112 @@ describe("manage_reporting_settings", () => {
       "custom",
       "Thursday",
       2,
+    );
+  });
+});
+
+describe("manage_break_settings", () => {
+  const adminMembership = {
+    role: "org:admin",
+    organization: { id: "org_1", name: "PatMac Org", slug: "patmac-org" },
+  };
+  const caller = { userId: "user_admin", client: "Claude" };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetUserOrgMemberships.mockResolvedValue({ data: [adminMembership] });
+    mockDbGetBreakSettings.mockResolvedValue(undefined);
+    mockDbUpdateBreakSettings.mockImplementation(
+      async (
+        orgId: string,
+        dock_lunch: boolean,
+        lunch_duration_minutes: number,
+        lunch_min_shift_hours: number,
+      ) => ({
+        org_id: orgId,
+        dock_lunch,
+        lunch_duration_minutes,
+        lunch_min_shift_hours,
+      }),
+    );
+  });
+
+  it("shows defaults when nothing is saved yet", async () => {
+    const res = await manageBreakSettingsTool(caller, {});
+    expect(res.isError).toBeUndefined();
+    expect(res.data.settings).toEqual({
+      org_id: "org_1",
+      dock_lunch: false,
+      lunch_duration_minutes: 30,
+      lunch_min_shift_hours: 5,
+    });
+  });
+
+  it("does not require the paid reporting feature", async () => {
+    mockOrgHasReportingFeature.mockResolvedValue(false);
+    const res = await manageBreakSettingsTool(caller, {
+      action: "update",
+      dock_lunch: true,
+    });
+    expect(res.data.status).toBe("updated");
+  });
+
+  it("rejects updates from non-admins", async () => {
+    mockGetUserOrgMemberships.mockResolvedValue({
+      data: [{ ...adminMembership, role: "org:member" }],
+    });
+    const res = await manageBreakSettingsTool(
+      { userId: "user_adam", client: "Claude" },
+      { action: "update", dock_lunch: true },
+    );
+    expect(res.data.status).toBe("forbidden");
+    expect(mockDbUpdateBreakSettings).not.toHaveBeenCalled();
+  });
+
+  it("rejects an update with nothing to change", async () => {
+    const res = await manageBreakSettingsTool(caller, { action: "update" });
+    expect(res.isError).toBe(true);
+    expect(res.data.status).toBe("invalid_input");
+    expect(mockDbUpdateBreakSettings).not.toHaveBeenCalled();
+  });
+
+  it("merges a partial update with the saved settings and invalidates the cache", async () => {
+    mockDbGetBreakSettings.mockResolvedValue({
+      org_id: "org_1",
+      dock_lunch: true,
+      lunch_duration_minutes: 30,
+      lunch_min_shift_hours: 5,
+    } as never);
+    const res = await manageBreakSettingsTool(caller, {
+      action: "update",
+      lunch_duration_minutes: 45,
+    });
+    expect(res.data.status).toBe("updated");
+    expect(mockDbUpdateBreakSettings).toHaveBeenCalledWith(
+      "org_1",
+      true,
+      45,
+      5,
+    );
+    expect(mockInvalidateBreakSettingsCache).toHaveBeenCalledWith("org_1");
+  });
+
+  it("can turn the deduction off", async () => {
+    mockDbGetBreakSettings.mockResolvedValue({
+      org_id: "org_1",
+      dock_lunch: true,
+      lunch_duration_minutes: 60,
+      lunch_min_shift_hours: 6,
+    } as never);
+    await manageBreakSettingsTool(caller, {
+      action: "update",
+      dock_lunch: false,
+    });
+    expect(mockDbUpdateBreakSettings).toHaveBeenCalledWith(
+      "org_1",
+      false,
+      60,
+      6,
     );
   });
 });
