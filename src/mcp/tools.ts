@@ -44,8 +44,10 @@ import {
   dbGetTimeEntries,
   dbGetTimeEntryById,
   dbInsertTimeEntry,
+  dbUpdateBreakSettings,
   dbUpdateReportingSettings,
   dbUpdateTimeEntry,
+  invalidateBreakSettingsCache,
   invalidateReportingSettingsCache,
   invalidateTimeEntryCache,
 } from "@/mcp/db";
@@ -424,6 +426,39 @@ export const manageReportingSettingsInputSchema = z.object({
     .max(2)
     .optional()
     .describe("Interval in weeks (1 or 2) when report_frequency is 'custom'."),
+});
+
+export const manageBreakSettingsInputSchema = z.object({
+  org_id: orgIdField,
+  action: z
+    .enum(["get", "update"])
+    .optional()
+    .describe(
+      "Action to perform: 'get' (view the current lunch/break deduction settings) or 'update' (change them). Defaults to 'get'.",
+    ),
+  dock_lunch: z
+    .boolean()
+    .optional()
+    .describe(
+      "When action is 'update': true to automatically deduct an unpaid lunch/break from qualifying shifts, false to count all time between clock-in and clock-out. If omitted, the current setting is kept.",
+    ),
+  lunch_duration_minutes: z
+    .number()
+    .int()
+    .min(0)
+    .max(480)
+    .optional()
+    .describe(
+      "Minutes deducted from each qualifying shift (0–480). If omitted, the current value is kept (default 30).",
+    ),
+  lunch_min_shift_hours: z
+    .number()
+    .min(0)
+    .max(24)
+    .optional()
+    .describe(
+      "Minimum shift length in hours before the deduction applies (0–24). If omitted, the current value is kept (default 5).",
+    ),
 });
 
 export const runHoursReportInputSchema = z.object({
@@ -2454,6 +2489,93 @@ export async function manageReportingSettingsTool(
 
   return {
     summary: `Updated reporting settings for ${org.orgName}: frequency=${updated.report_frequency}${updated.report_day ? `, day=${updated.report_day}, interval=${updated.report_interval}w` : ""}.`,
+    data: {
+      status: "updated",
+      organization: { org_id: org.orgId, name: org.orgName },
+      settings: updated,
+    },
+  };
+}
+
+const DEFAULT_LUNCH_DURATION_MINUTES = 30;
+const DEFAULT_LUNCH_MIN_SHIFT_HOURS = 5;
+
+function describeBreakSettings(settings: {
+  dock_lunch: boolean;
+  lunch_duration_minutes: number;
+  lunch_min_shift_hours: number;
+}) {
+  return settings.dock_lunch
+    ? `deducting ${Number(settings.lunch_duration_minutes)} min from shifts of ${Number(settings.lunch_min_shift_hours)}h or longer`
+    : "not deducting lunch/breaks";
+}
+
+/**
+ * Lunch/break deduction settings. Free for every organization (no plan
+ * feature needed); anyone can view them, only admins can change them.
+ */
+export async function manageBreakSettingsTool(
+  caller: McpCaller,
+  input: z.infer<typeof manageBreakSettingsInputSchema>,
+): Promise<ToolResult> {
+  const orgRes = await resolveOrg(caller.userId, input.org_id);
+  if (!orgRes.ok) return orgRes.result;
+  const { org } = orgRes;
+
+  const current = await dbGetBreakSettings(org.orgId);
+  const currentSettings = {
+    org_id: org.orgId,
+    dock_lunch: current?.dock_lunch ?? false,
+    lunch_duration_minutes: Number(
+      current?.lunch_duration_minutes ?? DEFAULT_LUNCH_DURATION_MINUTES,
+    ),
+    lunch_min_shift_hours: Number(
+      current?.lunch_min_shift_hours ?? DEFAULT_LUNCH_MIN_SHIFT_HOURS,
+    ),
+  };
+
+  if ((input.action ?? "get") === "get") {
+    return {
+      summary: `Lunch/break settings for ${org.orgName}: ${describeBreakSettings(currentSettings)}.`,
+      data: {
+        organization: { org_id: org.orgId, name: org.orgName },
+        settings: currentSettings,
+      },
+    };
+  }
+
+  if (!org.isAdmin) {
+    return {
+      summary:
+        "Only organization admins (org:admin) can change lunch/break deduction settings.",
+      data: { status: "forbidden" },
+      isError: true,
+    };
+  }
+
+  if (
+    input.dock_lunch === undefined &&
+    input.lunch_duration_minutes === undefined &&
+    input.lunch_min_shift_hours === undefined
+  ) {
+    return {
+      summary:
+        "Nothing to update. Pass dock_lunch, lunch_duration_minutes, and/or lunch_min_shift_hours.",
+      data: { status: "invalid_input", settings: currentSettings },
+      isError: true,
+    };
+  }
+
+  const updated = await dbUpdateBreakSettings(
+    org.orgId,
+    input.dock_lunch ?? currentSettings.dock_lunch,
+    input.lunch_duration_minutes ?? currentSettings.lunch_duration_minutes,
+    input.lunch_min_shift_hours ?? currentSettings.lunch_min_shift_hours,
+  );
+  invalidateBreakSettingsCache(org.orgId);
+
+  return {
+    summary: `Updated lunch/break settings for ${org.orgName}: ${describeBreakSettings(updated)}.`,
     data: {
       status: "updated",
       organization: { org_id: org.orgId, name: org.orgName },
