@@ -48,7 +48,9 @@ describe("BreakSettings", () => {
     renderBreakSettings(saved);
     expect(option(/Automatically Dock Lunch/)).toHaveTextContent("Current");
     expect(screen.getByLabelText("Break Duration (minutes)")).toHaveValue(30);
-    expect(screen.getByLabelText("Minimum Shift Length (hours)")).toHaveValue(5);
+    expect(screen.getByLabelText("Minimum Shift Length (hours)")).toHaveValue(
+      5,
+    );
     expect(save()).toBeDisabled();
   });
 
@@ -110,11 +112,7 @@ describe("BreakSettings", () => {
     const onUpdateOptimistic = renderBreakSettings(null);
     fireEvent.click(save());
     await waitFor(() =>
-      expect(mocks.updateBreakSettingAction).toHaveBeenCalledWith(
-        false,
-        30,
-        5,
-      ),
+      expect(mocks.updateBreakSettingAction).toHaveBeenCalledWith(false, 30, 5),
     );
     expect(onUpdateOptimistic).not.toHaveBeenCalled();
   });

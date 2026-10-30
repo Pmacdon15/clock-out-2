@@ -75,7 +75,8 @@ describe("inspectDefaultExport", () => {
       "async function load() {}\nexport default function Page() { return null; }",
     "commented-out async page":
       "// export default async function Old() {}\nexport default function Page() { return null; }",
-    "use client page": '"use client";\nexport default function Page() { return null; }',
+    "use client page":
+      '"use client";\nexport default function Page() { return null; }',
   };
 
   for (const [name, source] of Object.entries(asyncCases)) {
