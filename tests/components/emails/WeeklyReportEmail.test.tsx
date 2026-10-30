@@ -52,6 +52,13 @@ describe("WeeklyReportEmail", () => {
     expect(doc.querySelector("img")?.getAttribute("src")).toBe(base.chartUrl);
   });
 
+  it("calls on-demand (custom range) reports an hours report, not weekly", async () => {
+    const doc = await renderEmail({ ...base, timeframe: "custom" });
+    const text = doc.body.textContent ?? "";
+    expect(text).toContain("Here is the hours report for Grace");
+    expect(text).not.toContain("weekly hours report");
+  });
+
   it("links to the week view with every identifying param", async () => {
     const doc = await renderEmail({
       ...base,

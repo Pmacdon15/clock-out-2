@@ -28,6 +28,8 @@ import {
   type McpCaller,
   manageReportingSettingsInputSchema,
   manageReportingSettingsTool,
+  runHoursReportInputSchema,
+  runHoursReportTool,
   type ToolResult,
   updateTimeEntryInputSchema,
   updateTimeEntryTool,
@@ -356,6 +358,26 @@ export function registerClockOutTools(server: McpServer) {
     (args, ctx) =>
       run(server, ctx.http?.authInfo, (caller) =>
         manageReportingSettingsTool(caller, args),
+      ),
+  );
+
+  server.registerTool(
+    "run_hours_report",
+    {
+      title: "Run an hours report for a date range",
+      description:
+        "Admin-only ('org:admin') tool for organizations whose plan includes Reporting. Gets net hours worked (after lunch/break deductions) for one member or everyone between start_date and end_date, with daily breakdowns and shifts. Works with or without a reporting schedule. Returns the report to you by default; deliver: 'email_admins' or 'both' also emails it to the organization's admins.",
+      inputSchema: portable(runHoursReportInputSchema),
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+    },
+    (args, ctx) =>
+      run(server, ctx.http?.authInfo, (caller) =>
+        runHoursReportTool(caller, args),
       ),
   );
 

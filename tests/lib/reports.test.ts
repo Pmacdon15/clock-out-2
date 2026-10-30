@@ -52,7 +52,7 @@ vi.mock("@/lib/db", () => ({
   dbGetTimeEntriesForPeriod: mocks.dbGetTimeEntriesForPeriod,
 }));
 
-import { sendWeeklyReports } from "@/lib/reports";
+import { orgHasReportingFeature, sendWeeklyReports } from "@/lib/reports";
 
 // Snapshot the constructor call now: call history is cleared before every test.
 const initialSesConfig = mocks.sesConfig.mock.calls[0]?.[0];
@@ -315,5 +315,49 @@ describe("sendWeeklyReports", () => {
     mocks.send.mockRejectedValue(new Error("ses down"));
     await expect(sendWeeklyReports(start, end, "org_1")).resolves.toBe(true);
     expect(console.error).toHaveBeenCalled();
+  });
+
+  it("only reports on the requested members and labels on-demand reports", async () => {
+    mocks.getOrganizationMembershipList.mockResolvedValue({
+      data: [admin, worker, emailOnly],
+    });
+    mocks.dbGetTimeEntriesForPeriod.mockResolvedValue([
+      shift("2026-01-02T09:00:00Z", "2026-01-02T10:00:00Z"),
+    ]);
+    await sendWeeklyReports(start, end, "org_1", "custom", {
+      userIds: ["worker_1"],
+    });
+    expect(mocks.dbGetTimeEntriesForPeriod).toHaveBeenCalledTimes(1);
+    expect(mocks.dbGetTimeEntriesForPeriod).toHaveBeenCalledWith(
+      "worker_1",
+      "org_1",
+      start,
+      end,
+    );
+    expect(mocks.send).toHaveBeenCalledTimes(1);
+    const command = mocks.send.mock.calls[0]?.[0] as {
+      input: { Message: { Subject: { Data: string } } };
+    };
+    expect(command.input.Message.Subject.Data).toBe(
+      "Hours Report for Grace (Jan 1, 2026 – Jan 7, 2026)",
+    );
+    expect(emailProps().timeframe).toBe("custom");
+  });
+});
+
+describe("orgHasReportingFeature", () => {
+  it("is true when a subscription plan includes reporting", async () => {
+    await expect(orgHasReportingFeature("org_1")).resolves.toBe(true);
+  });
+
+  it("is false without the feature or when billing lookup fails", async () => {
+    mocks.getOrganizationBillingSubscription.mockResolvedValueOnce({
+      subscriptionItems: [{ plan: { features: [{ slug: "other" }] } }],
+    });
+    await expect(orgHasReportingFeature("org_1")).resolves.toBe(false);
+    mocks.getOrganizationBillingSubscription.mockRejectedValueOnce(
+      new Error("no billing"),
+    );
+    await expect(orgHasReportingFeature("org_1")).resolves.toBe(false);
   });
 });

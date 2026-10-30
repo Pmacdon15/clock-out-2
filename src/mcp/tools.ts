@@ -1,5 +1,6 @@
 import { clerkClient } from "@clerk/nextjs/server";
 import {
+  addDays,
   endOfDay,
   endOfMonth,
   endOfWeek,
@@ -10,8 +11,9 @@ import {
 } from "date-fns";
 import { formatInTimeZone, fromZonedTime, toZonedTime } from "date-fns-tz";
 import { z } from "zod";
+import { getEffectiveDurationMs } from "@/lib/break-utils";
 import { loadPdfImage } from "@/lib/pdf-image";
-import { sendWeeklyReports } from "@/lib/reports";
+import { orgHasReportingFeature, sendWeeklyReports } from "@/lib/reports";
 import {
   buildEmployeeSummary,
   buildExportRows,
@@ -35,6 +37,7 @@ import {
   dbDeleteTimeEntry,
   dbFindOverlappingTimeEntries,
   dbGetActiveEntry,
+  dbGetBreakSettings,
   dbGetOrgActiveEntries,
   dbGetOrgTimeEntries,
   dbGetReportingSettings,
@@ -419,6 +422,31 @@ export const manageReportingSettingsInputSchema = z.object({
     .max(2)
     .optional()
     .describe("Interval in weeks (1 or 2) when report_frequency is 'custom'."),
+});
+
+export const runHoursReportInputSchema = z.object({
+  org_id: orgIdField,
+  member: z
+    .string()
+    .optional()
+    .describe(
+      "Member to report on (name, first name, email, or user_id), or 'all' for every member. Defaults to 'all'.",
+    ),
+  start_date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD")
+    .describe("First day of the report period (YYYY-MM-DD, inclusive)."),
+  end_date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD")
+    .describe("Last day of the report period (YYYY-MM-DD, inclusive)."),
+  deliver: z
+    .enum(["chat", "email_admins", "both"])
+    .optional()
+    .describe(
+      "Where to send the report: 'chat' (default, return the hours to you), 'email_admins' (email the report to the organization's admins), or 'both'.",
+    ),
+  timezone: timezoneField,
 });
 
 export const inviteMemberInputSchema = z.object({
@@ -2404,6 +2432,269 @@ export async function manageReportingSettingsTool(
       organization: { org_id: org.orgId, name: org.orgName },
       settings: updated,
     },
+  };
+}
+
+/** Longest period an on-demand hours report may cover. */
+const MAX_REPORT_DAYS = 366;
+
+/**
+ * On-demand hours report for admins of organizations on a plan with the paid
+ * "reporting" feature. Works whether or not a reporting schedule is set:
+ * returns each member's net hours (after lunch/break deductions, matching the
+ * emailed reports) for any date range, and can also email it to the admins.
+ */
+export async function runHoursReportTool(
+  caller: McpCaller,
+  input: z.infer<typeof runHoursReportInputSchema>,
+): Promise<ToolResult> {
+  const orgRes = await resolveOrg(caller.userId, input.org_id);
+  if (!orgRes.ok) return orgRes.result;
+  const { org } = orgRes;
+
+  if (!org.isAdmin) {
+    return {
+      summary:
+        "Only organization admins (org:admin) can run hours reports. Members can still view their own hours with get_weekly_timecard.",
+      data: { status: "forbidden" },
+      isError: true,
+    };
+  }
+
+  if (!(await orgHasReportingFeature(org.orgId))) {
+    return {
+      summary: `${org.orgName} isn't on a plan that includes Reporting. Upgrade the organization's plan in Clock Out (https://clockout.patmac.ca) to run hours reports.`,
+      data: {
+        status: "reporting_not_enabled",
+        organization: { org_id: org.orgId, name: org.orgName },
+      },
+      isError: true,
+    };
+  }
+
+  const tz = validTimezone(input.timezone);
+  const startStr = input.start_date.slice(0, 10);
+  const endStr = input.end_date.slice(0, 10);
+  const startDate = fromZonedTime(`${startStr}T00:00:00.000`, tz);
+  const endDate = fromZonedTime(`${endStr}T23:59:59.999`, tz);
+
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+    return {
+      summary: "start_date and end_date must be valid dates (YYYY-MM-DD).",
+      data: { status: "invalid_dates" },
+      isError: true,
+    };
+  }
+  if (startDate > endDate) {
+    return {
+      summary: `start_date (${startStr}) must be on or before end_date (${endStr}).`,
+      data: { status: "invalid_dates" },
+      isError: true,
+    };
+  }
+  if (endDate.getTime() - startDate.getTime() > MAX_REPORT_DAYS * 86_400_000) {
+    return {
+      summary: `Hours reports can cover at most ${MAX_REPORT_DAYS} days. Split the period into smaller ranges.`,
+      data: { status: "range_too_long" },
+      isError: true,
+    };
+  }
+
+  const members = await fetchOrgMembers(org.orgId);
+  const memberMap = new Map(members.map((m) => [m.userId, m]));
+
+  const requestedMember = input.member?.trim();
+  const wantsAll = !requestedMember || requestedMember.toLowerCase() === "all";
+
+  let targetMembers: OrgMemberInfo[];
+  let entries: TimeEntry[];
+  if (wantsAll) {
+    targetMembers = members;
+    entries = await dbGetOrgTimeEntries(org.orgId, startDate, endDate);
+  } else {
+    const memberRes = resolveMemberFromList(
+      members,
+      caller.userId,
+      org.isAdmin,
+      requestedMember,
+    );
+    if (!memberRes.ok) return memberRes.result;
+    targetMembers = [memberRes.member];
+    entries = await dbGetTimeEntries(
+      memberRes.member.userId,
+      org.orgId,
+      startDate,
+      endDate,
+    );
+  }
+
+  const breakSettings = (await dbGetBreakSettings(org.orgId)) ?? null;
+  const nowMs = Date.now();
+
+  const entriesByUser = new Map<string, TimeEntry[]>();
+  for (const entry of entries) {
+    const list = entriesByUser.get(entry.user_id) ?? [];
+    list.push(entry);
+    entriesByUser.set(entry.user_id, list);
+  }
+
+  let orgNetMs = 0;
+  const reports = targetMembers.map((m) => {
+    const userEntries = (entriesByUser.get(m.userId) ?? []).sort(
+      (a, b) => new Date(a.clock_in).getTime() - new Date(b.clock_in).getTime(),
+    );
+
+    let grossMs = 0;
+    let netMs = 0;
+    let activeShifts = 0;
+    const days = new Map<
+      string,
+      {
+        date: string;
+        day_of_week: string;
+        netMs: number;
+        shifts: (ReturnType<typeof formatEntryForResponse> & {
+          net_hours: number;
+        })[];
+      }
+    >();
+
+    for (const entry of userEntries) {
+      const formatted = formatEntryForResponse(entry, memberMap, tz);
+      const inMs = new Date(entry.clock_in).getTime();
+      const outMs = entry.clock_out
+        ? new Date(entry.clock_out).getTime()
+        : nowMs;
+      const shiftGross = Math.max(0, outMs - inMs);
+      const shiftNet = getEffectiveDurationMs(entry, breakSettings, nowMs);
+      grossMs += shiftGross;
+      netMs += shiftNet;
+      if (!entry.clock_out) activeShifts += 1;
+
+      const day = days.get(formatted.date) ?? {
+        date: formatted.date,
+        day_of_week: formatted.day_of_week,
+        netMs: 0,
+        shifts: [],
+      };
+      day.netMs += shiftNet;
+      day.shifts.push({
+        ...formatted,
+        net_hours: formatDurationMs(shiftNet).decimalHours,
+      });
+      days.set(formatted.date, day);
+    }
+
+    orgNetMs += netMs;
+    const net = formatDurationMs(netMs);
+    const gross = formatDurationMs(grossMs);
+
+    return {
+      user_id: m.userId,
+      name: m.name,
+      email: m.email,
+      role: m.role,
+      total_hours: net.decimalHours,
+      formatted_total: net.formatted,
+      gross_hours: gross.decimalHours,
+      break_deduction_hours: Number(
+        (gross.decimalHours - net.decimalHours).toFixed(2),
+      ),
+      days_worked: days.size,
+      shifts_count: userEntries.length,
+      active_shifts: activeShifts,
+      daily_breakdown: Array.from(days.values()).map((d) => {
+        const dayDur = formatDurationMs(d.netMs);
+        return {
+          date: d.date,
+          day_of_week: d.day_of_week,
+          total_hours: dayDur.decimalHours,
+          formatted_total: dayDur.formatted,
+          shifts: d.shifts,
+        };
+      }),
+    };
+  });
+
+  const deliver = input.deliver ?? "chat";
+  let email: Record<string, unknown> | undefined;
+  if (deliver === "email_admins" || deliver === "both") {
+    const recipients = members
+      .filter((m) => m.isAdmin && m.email)
+      .map((m) => m.email as string);
+    const withHours = reports
+      .filter((r) => r.shifts_count > r.active_shifts)
+      .map((r) => r.user_id);
+
+    let sent = false;
+    if (recipients.length > 0 && withHours.length > 0) {
+      // The email pipeline works on whole days at midnight (exclusive end),
+      // the same way the scheduled reports call it.
+      const emailStart = startOfDay(new Date(`${startStr}T00:00:00`));
+      const emailEnd = addDays(startOfDay(new Date(`${endStr}T00:00:00`)), 1);
+      sent = await sendWeeklyReports(
+        emailStart,
+        emailEnd,
+        org.orgId,
+        "custom",
+        {
+          userIds: withHours,
+        },
+      );
+    }
+
+    email = {
+      status: sent
+        ? "sent"
+        : recipients.length === 0
+          ? "no_admin_recipients"
+          : withHours.length === 0
+            ? "no_completed_shifts"
+            : "failed",
+      recipients,
+      members_emailed: reports
+        .filter((r) => withHours.includes(r.user_id))
+        .map((r) => r.name),
+    };
+  }
+
+  const orgNet = formatDurationMs(orgNetMs);
+  const periodLabel = `${startStr} to ${endStr}`;
+  const hoursSummary =
+    reports.length === 1 && reports[0]
+      ? `${reports[0].name} worked ${reports[0].formatted_total} (${reports[0].total_hours}h) from ${periodLabel} across ${reports[0].days_worked} day${reports[0].days_worked === 1 ? "" : "s"}.`
+      : `Hours report for ${org.orgName} (${periodLabel}): ${orgNet.formatted} total — ${reports.map((r) => `${r.name}: ${r.formatted_total}`).join(", ")}.`;
+
+  let emailSummary = "";
+  if (email) {
+    emailSummary =
+      email.status === "sent"
+        ? ` Emailed the report to ${(email.recipients as string[]).join(", ")}.`
+        : email.status === "no_completed_shifts"
+          ? " No email sent: there are no completed shifts in this period."
+          : email.status === "no_admin_recipients"
+            ? " No email sent: no admin has an email address."
+            : " Could not send the report email (check the email service configuration).";
+  }
+
+  return {
+    summary: `${deliver === "email_admins" ? `Report for ${periodLabel} prepared.` : hoursSummary}${emailSummary}`,
+    data: {
+      status: "ok",
+      organization: { org_id: org.orgId, name: org.orgName },
+      period: {
+        label: periodLabel,
+        start: startDate.toISOString(),
+        end: endDate.toISOString(),
+        timezone: tz,
+      },
+      hours_are_net_of_breaks: Boolean(breakSettings?.dock_lunch),
+      organization_total_hours: orgNet.decimalHours,
+      organization_formatted_total: orgNet.formatted,
+      ...(deliver === "email_admins" ? {} : { reports }),
+      ...(email ? { email } : {}),
+    },
+    ...(email && email.status === "failed" ? { isError: true } : {}),
   };
 }
 
