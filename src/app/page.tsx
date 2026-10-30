@@ -20,7 +20,9 @@ export default function Home(props: PageProps<"/">) {
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-4 py-8">
       <MainPageHeader />
-      <Suspense>
+      {/* Show reads the session, so this boundary is the dashboard's hole:
+          the skeleton holds its place until auth and the entries resolve. */}
+      <Suspense fallback={<DashboardSkeleton />}>
         <Show when="signed-in">
           <Suspense fallback={<DashboardSkeleton />}>
             <DashboardTabs

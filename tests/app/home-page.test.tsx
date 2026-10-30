@@ -1,9 +1,12 @@
 import { render, screen } from "@testing-library/react";
+import { use } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { DashboardTabsProps } from "@/lib/types";
 
 const mocks = vi.hoisted(() => ({
   dashboardProps: [] as DashboardTabsProps[],
+  // When set, Show suspends on it, like Clerk's Show waiting on auth().
+  authGate: null as Promise<void> | null,
   has: vi.fn((check: { feature?: string; role?: string }) =>
     Boolean(check.feature === "reporting" || check.role === "org:admin"),
   ),
@@ -16,9 +19,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@clerk/nextjs", () => ({
-  Show: ({ when, children }: { when: string; children: React.ReactNode }) => (
-    <div data-testid={`show-${when}`}>{children}</div>
-  ),
+  Show: ({ when, children }: { when: string; children: React.ReactNode }) => {
+    if (mocks.authGate) use(mocks.authGate);
+    return <div data-testid={`show-${when}`}>{children}</div>;
+  },
   SignInButton: ({ children }: { children: React.ReactNode }) => (
     <>{children}</>
   ),
@@ -88,6 +92,18 @@ function renderHome() {
 }
 
 describe("Home page", () => {
+  it("shows the dashboard skeleton, not a blank gap, while the session loads", () => {
+    mocks.authGate = new Promise(() => {});
+    try {
+      renderHome();
+      expect(screen.getByTestId("header")).toBeInTheDocument();
+      expect(screen.getByTestId("skeleton")).toBeInTheDocument();
+      expect(screen.queryByTestId("dashboard")).not.toBeInTheDocument();
+    } finally {
+      mocks.authGate = null;
+    }
+  });
+
   it("renders the dashboard for signed-in users and a pitch for everyone else", () => {
     renderHome();
     expect(screen.getByTestId("header")).toBeInTheDocument();
