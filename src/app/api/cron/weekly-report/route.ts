@@ -1,15 +1,12 @@
 import { clerkClient } from "@clerk/nextjs/server";
 import { format, getWeek, startOfDay, subDays, subMonths } from "date-fns";
 import { NextResponse } from "next/server";
+import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 import { dbGetReportingSettings } from "@/lib/db";
 import { sendWeeklyReports } from "@/lib/reports";
 
 export async function GET(request: Request) {
-  const authHeader = request.headers.get("authorization");
-  const cronSecret = process.env.CRON_SECRET;
-
-  // Fail closed: without a secret, "Bearer undefined" would be accepted.
-  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
+  if (!isAuthorizedCronRequest(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -125,7 +122,8 @@ export async function GET(request: Request) {
         });
       } catch (error) {
         console.error(`[Cron] Failed to send for ${org.name}:`, error);
-        results.push({ org: org.name, status: "error", error });
+        // Keep internal error details out of the response body.
+        results.push({ org: org.name, status: "error", frequency });
       }
     }
   }
