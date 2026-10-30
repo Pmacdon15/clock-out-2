@@ -11,6 +11,7 @@ import {
   exportFileName,
   exportTimesheet,
   formatDayLabel,
+  formatEntryLocation,
   formatPeriod,
   formatTime,
   getMonthBounds,
@@ -546,5 +547,124 @@ describe("downloads", () => {
     expect(layoutPdfPages([row()], { ...meta, groupBy: "month" })[0]).toContain(
       "Subtotal",
     );
+  });
+});
+
+describe("captured location in the export", () => {
+  const located = {
+    id: 1,
+    user_id: "u1",
+    clock_in: new Date("2026-03-09T09:00:00Z"),
+    clock_out: new Date("2026-03-09T17:00:00Z"),
+    clock_in_latitude: 45.4215,
+    clock_in_longitude: -75.6972,
+    clock_in_site_name: "Depot",
+  };
+
+  it("formats the site and the point together", () => {
+    expect(formatEntryLocation(located)).toBe("Depot (45.42150, -75.69720)");
+  });
+
+  it("formats the point alone when no site matched", () => {
+    expect(formatEntryLocation({ ...located, clock_in_site_name: null })).toBe(
+      "45.42150, -75.69720",
+    );
+  });
+
+  it("is empty for an entry with no captured location", () => {
+    expect(
+      formatEntryLocation({
+        ...located,
+        clock_in_latitude: null,
+        clock_in_longitude: null,
+        clock_in_site_name: null,
+      }),
+    ).toBe("");
+  });
+
+  it("falls back to the site name when only the name survived", () => {
+    expect(
+      formatEntryLocation({
+        ...located,
+        clock_in_latitude: null,
+        clock_in_longitude: null,
+      }),
+    ).toBe("Depot");
+  });
+
+  it("leaves the row's location out entirely when nothing was captured", () => {
+    const [row] = buildExportRows(
+      [
+        {
+          id: 1,
+          user_id: "u1",
+          clock_in: new Date("2026-03-09T09:00:00Z"),
+          clock_out: null,
+        },
+      ],
+      () => "Ada",
+    );
+    expect(row).not.toHaveProperty("location");
+  });
+
+  it("carries the location onto the row", () => {
+    const [row] = buildExportRows([located], () => "Ada");
+    expect(row?.location).toBe("Depot (45.42150, -75.69720)");
+  });
+
+  it("leaves the cell empty for a row with no location", () => {
+    const rows = buildExportRows(
+      [
+        located,
+        {
+          id: 2,
+          user_id: "u2",
+          clock_in: new Date("2026-03-10T09:00:00Z"),
+          clock_out: new Date("2026-03-10T17:00:00Z"),
+        },
+      ],
+      (id) => id,
+    );
+    const xml = buildSheetXml(rows, {
+      employee: "Everyone",
+      startDate: "2026-03-09",
+      endDate: "2026-03-10",
+    });
+    expect(xml).toContain("Depot (45.42150, -75.69720)");
+    expect(xml).toContain(
+      '<c r="H7" t="inlineStr"><is><t xml:space="preserve"></t></is></c>',
+    );
+  });
+
+  it("adds a Location column to the spreadsheet only when there is one", () => {
+    const meta = {
+      employee: "Ada",
+      startDate: "2026-03-09",
+      endDate: "2026-03-09",
+    };
+    const withLocation = buildSheetXml(
+      buildExportRows([located], () => "Ada"),
+      meta,
+    );
+    expect(withLocation).toContain("Location");
+    expect(withLocation).toContain("Depot (45.42150, -75.69720)");
+    expect(withLocation).toContain('r="H5"');
+
+    const withoutLocation = buildSheetXml(
+      buildExportRows(
+        [
+          {
+            ...located,
+            clock_in_latitude: null,
+            clock_in_longitude: null,
+            clock_in_site_name: null,
+          },
+        ],
+        () => "Ada",
+      ),
+      meta,
+    );
+    expect(withoutLocation).not.toContain("Location");
+    expect(withoutLocation).not.toContain('r="H5"');
   });
 });

@@ -1,5 +1,6 @@
 import { formatInTimeZone } from "date-fns-tz";
 import { getEffectiveHours } from "./break-utils";
+import { formatCoordinates } from "./geo";
 import type { PdfImage } from "./pdf-image";
 import type { BreakSettingsData } from "./types";
 
@@ -16,6 +17,10 @@ type ExportableEntry = {
   clock_in: Date | string;
   clock_out: Date | string | null;
   skip_lunch?: boolean;
+  /** Present only for orgs that capture location. */
+  clock_in_latitude?: number | null;
+  clock_in_longitude?: number | null;
+  clock_in_site_name?: string | null;
 };
 
 export type ExportFormat = "pdf" | "xlsx";
@@ -30,6 +35,12 @@ export type ExportRow = {
   clockOut: string;
   /** Null while the shift is still open. */
   hours: number | null;
+  /**
+   * Where the clock-in happened, as "<site> (lat, lon)" — empty for orgs that
+   * do not capture location. Only the XLSX export has a column for it; the
+   * PDF's fixed-width layout has no room.
+   */
+  location?: string;
 };
 
 export type ExportMeta = {
@@ -164,6 +175,7 @@ export function buildExportRows(
     )
     .map(({ entry, clockIn, clockOut }) => {
       const date = formatDate(clockIn, timezone);
+      const location = formatEntryLocation(entry);
       return {
         employee: getEmployeeName(entry.user_id),
         date,
@@ -171,8 +183,25 @@ export function buildExportRows(
         clockIn: formatTime(clockIn, timezone),
         clockOut: clockOut ? formatTime(clockOut, timezone) : "In progress",
         hours: clockOut ? getEffectiveHours(entry, breakSettings) : null,
+        // Absent, not empty, for orgs that capture no location at all.
+        ...(location ? { location } : {}),
       };
     });
+}
+
+/** "Main warehouse (45.42100, -75.69000)", or "" when nothing was captured. */
+export function formatEntryLocation(entry: ExportableEntry): string {
+  const { clock_in_latitude, clock_in_longitude, clock_in_site_name } = entry;
+  if (
+    typeof clock_in_latitude !== "number" ||
+    typeof clock_in_longitude !== "number"
+  ) {
+    return clock_in_site_name ?? "";
+  }
+  const coordinates = formatCoordinates(clock_in_latitude, clock_in_longitude);
+  return clock_in_site_name
+    ? `${clock_in_site_name} (${coordinates})`
+    : coordinates;
 }
 
 export const totalHours = (rows: ExportRow[]) =>
@@ -396,7 +425,7 @@ type Cell =
   | { formula: string; cached: number; style?: number }
   | null;
 
-const COLUMN_LETTERS = "ABCDEFG";
+const COLUMN_LETTERS = "ABCDEFGH";
 
 const cellXml = (cell: Cell, ref: string) => {
   if (!cell) return "";
@@ -419,6 +448,7 @@ export function buildSheetXml(rows: ExportRow[], meta: ExportMeta): string {
   const showSections =
     sections.length > 1 || meta.groupBy === "week" || meta.groupBy === "month";
   const employeeSummaries = buildEmployeeSummary(rows);
+  const showLocation = rows.some((r) => Boolean(r.location));
 
   const grid: Cell[][] = [
     [{ text: "Timesheet", style: STYLE.title }],
@@ -433,6 +463,7 @@ export function buildSheetXml(rows: ExportRow[], meta: ExportMeta): string {
       "Clock Out",
       "Hours",
       "Daily Total",
+      ...(showLocation ? ["Location"] : []),
     ].map((text) => ({
       text,
       style: STYLE.header,
@@ -483,6 +514,7 @@ export function buildSheetXml(rows: ExportRow[], meta: ExportMeta): string {
         { text: r.clockOut },
         r.hours === null ? null : { number: r.hours, style: STYLE.hours },
         isLastOfDay ? { number: dayTotal, style: STYLE.boldHours } : null,
+        ...(showLocation ? [{ text: r.location ?? "" }] : []),
       ]);
       globalRowIdx += 1;
     }
@@ -608,7 +640,7 @@ export function buildSheetXml(rows: ExportRow[], meta: ExportMeta): string {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
 <sheetViews><sheetView workbookViewId="0"><pane ySplit="${HEADER_ROW}" topLeftCell="A${firstData}" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
-<cols><col min="1" max="1" width="26" customWidth="1"/><col min="2" max="2" width="13" customWidth="1"/><col min="3" max="3" width="8" customWidth="1"/><col min="4" max="5" width="12" customWidth="1"/><col min="6" max="7" width="12" customWidth="1"/></cols>
+<cols><col min="1" max="1" width="26" customWidth="1"/><col min="2" max="2" width="13" customWidth="1"/><col min="3" max="3" width="8" customWidth="1"/><col min="4" max="5" width="12" customWidth="1"/><col min="6" max="7" width="12" customWidth="1"/><col min="8" max="8" width="34" customWidth="1"/></cols>
 <sheetData>${sheetRows}</sheetData>
 </worksheet>`;
 }

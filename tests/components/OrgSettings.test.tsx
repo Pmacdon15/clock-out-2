@@ -1,7 +1,12 @@
 import { act, render, screen } from "@testing-library/react";
 import { startTransition } from "react";
 import { describe, expect, it, vi } from "vitest";
-import type { BreakSettingsData, ReportingSettingsData } from "@/lib/types";
+import type {
+  BreakSettingsData,
+  LocationSettingsData,
+  ReportingSettingsData,
+  SiteData,
+} from "@/lib/types";
 import { resolved } from "../utils";
 
 type CapturedProps = {
@@ -15,9 +20,16 @@ type CapturedBreakProps = {
   onUpdateOptimistic: (next: Partial<BreakSettingsData>) => void;
 };
 
+type CapturedLocationProps = {
+  initialData: LocationSettingsData | null;
+  sites: SiteData[];
+  onUpdateOptimistic: (next: Partial<LocationSettingsData>) => void;
+};
+
 const captured = vi.hoisted(() => ({
   props: [] as CapturedProps[],
   breakProps: [] as CapturedBreakProps[],
+  locationProps: [] as CapturedLocationProps[],
 }));
 
 vi.mock("@/components/ReportingSettings", () => ({
@@ -38,10 +50,23 @@ vi.mock("@/components/BreakSettings", () => ({
   },
 }));
 
+vi.mock("@/components/LocationSettings", () => ({
+  default: (props: CapturedLocationProps) => {
+    captured.locationProps.push(props);
+    return (
+      <div data-testid="location">
+        {JSON.stringify(props.initialData)}|{props.sites.length}
+      </div>
+    );
+  },
+}));
+
 import OrgSettings from "@/components/OrgSettings";
 
 const latest = () => captured.props[captured.props.length - 1];
 const latestBreak = () => captured.breakProps[captured.breakProps.length - 1];
+const latestLocation = () =>
+  captured.locationProps[captured.locationProps.length - 1];
 
 /** Fires an optimistic update inside a transition that never settles. */
 function updateOptimistically(next: Partial<ReportingSettingsData>) {
@@ -62,6 +87,30 @@ function updateBreaksOptimistically(next: Partial<BreakSettingsData>) {
   });
 }
 
+function updateLocationOptimistically(next: Partial<LocationSettingsData>) {
+  act(() => {
+    startTransition(async () => {
+      latestLocation().onUpdateOptimistic(next);
+      await new Promise(() => {});
+    });
+  });
+}
+
+const locationValue: LocationSettingsData = {
+  org_id: "org_1",
+  capture_mode: "optional",
+  restrict_clock_in: false,
+};
+
+const site: SiteData = {
+  id: 1,
+  org_id: "org_1",
+  name: "Depot",
+  latitude: 45.421,
+  longitude: -75.69,
+  radius_meters: 150,
+};
+
 describe("OrgSettings", () => {
   it("passes no initial data when the settings failed to load", () => {
     render(
@@ -73,6 +122,58 @@ describe("OrgSettings", () => {
     );
     expect(screen.getByTestId("reporting")).toHaveTextContent("true|null");
     expect(screen.getByTestId("breaks")).toHaveTextContent("null");
+  });
+
+  it("renders the location panel with no settings and no sites by default", () => {
+    render(
+      <OrgSettings
+        hasReporting={false}
+        orgSettingsPromise={resolved({ ok: true, value: null })}
+      />,
+    );
+    expect(screen.getByTestId("location")).toHaveTextContent("null|0");
+  });
+
+  it("passes the loaded location settings and sites down", () => {
+    render(
+      <OrgSettings
+        hasReporting={false}
+        locationSettingsPromise={resolved({ ok: true, value: locationValue })}
+        orgSettingsPromise={resolved({ ok: true, value: null })}
+        sitesPromise={resolved({ ok: true, value: [site] })}
+      />,
+    );
+    expect(latestLocation().initialData).toEqual(locationValue);
+    expect(latestLocation().sites).toEqual([site]);
+
+    updateLocationOptimistically({
+      capture_mode: "required",
+      restrict_clock_in: true,
+    });
+    expect(latestLocation().initialData).toEqual({
+      ...locationValue,
+      capture_mode: "required",
+      restrict_clock_in: true,
+    });
+  });
+
+  it("falls back to no settings and no sites when either read failed", () => {
+    render(
+      <OrgSettings
+        hasReporting={false}
+        locationSettingsPromise={resolved({
+          ok: false,
+          error: { reason: "x" },
+        })}
+        orgSettingsPromise={resolved({ ok: true, value: null })}
+        sitesPromise={resolved({ ok: false, error: { reason: "x" } })}
+      />,
+    );
+    expect(latestLocation().initialData).toBeNull();
+    expect(latestLocation().sites).toEqual([]);
+    // Nothing to merge into, so an optimistic update is a no-op.
+    updateLocationOptimistically({ capture_mode: "required" });
+    expect(latestLocation().initialData).toBeNull();
   });
 
   it("ignores optimistic updates when there are no settings yet", () => {

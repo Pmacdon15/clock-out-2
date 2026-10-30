@@ -12,8 +12,10 @@ const mocks = vi.hoisted(() => ({
   ),
   protect: vi.fn(),
   getOrgBreakSettings: vi.fn(),
+  getOrgLocationSettings: vi.fn(),
   getOrgMembers: vi.fn(),
   getOrgReportingSettings: vi.fn(),
+  getOrgSites: vi.fn(),
   getOrgTimeEntries: vi.fn(),
   getTimeEntries: vi.fn(),
 }));
@@ -30,8 +32,10 @@ vi.mock("@clerk/nextjs", () => ({
 vi.mock("@clerk/nextjs/server", () => ({ auth: { protect: mocks.protect } }));
 vi.mock("@/lib/dal", () => ({
   getOrgBreakSettings: mocks.getOrgBreakSettings,
+  getOrgLocationSettings: mocks.getOrgLocationSettings,
   getOrgMembers: mocks.getOrgMembers,
   getOrgReportingSettings: mocks.getOrgReportingSettings,
+  getOrgSites: mocks.getOrgSites,
   getOrgTimeEntries: mocks.getOrgTimeEntries,
   getTimeEntries: mocks.getTimeEntries,
 }));
@@ -69,6 +73,10 @@ function renderHome() {
     has: mocks.has,
   });
   mocks.getOrgBreakSettings.mockReturnValue(Promise.resolve("break_settings"));
+  mocks.getOrgLocationSettings.mockReturnValue(
+    Promise.resolve("location_settings"),
+  );
+  mocks.getOrgSites.mockReturnValue(Promise.resolve("sites"));
   mocks.getOrgMembers.mockReturnValue(Promise.resolve(["members"]));
   mocks.getOrgReportingSettings.mockReturnValue(Promise.resolve("settings"));
   mocks.getOrgTimeEntries.mockImplementation(async (filters) => ({

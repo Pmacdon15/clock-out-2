@@ -2,11 +2,12 @@
 
 import { useMutation } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { Calendar, Check, Edit3, Loader2, X } from "lucide-react";
+import { Calendar, Check, Edit3, Loader2, MapPin, X } from "lucide-react";
 import { startTransition, useState } from "react";
 import { toast } from "sonner";
 import { updateTimeEntryAction } from "@/lib/actions";
 import { getDockedMinutes, getEffectiveHours } from "@/lib/break-utils";
+import { formatCoordinates } from "@/lib/geo";
 import type { EntryAction } from "@/lib/reducers/time-entries";
 import type { BreakSettingsData, TimeEntry } from "@/lib/types";
 import { DeleteConfirmDialog } from "../DeleteConfirmDialog";
@@ -155,6 +156,29 @@ export function EntryItem({
 
   const dockedMinutes = getDockedMinutes(entry, breakSettings);
   const effectiveHours = getEffectiveHours(entry, breakSettings);
+  // Only admins see where a punch happened, and only when the org captured it.
+  const punches = isAdmin
+    ? [
+        {
+          label: "In",
+          latitude: entry.clock_in_latitude,
+          longitude: entry.clock_in_longitude,
+          accuracy: entry.clock_in_accuracy_m,
+          siteName: entry.clock_in_site_name,
+        },
+        {
+          label: "Out",
+          latitude: entry.clock_out_latitude,
+          longitude: entry.clock_out_longitude,
+          accuracy: entry.clock_out_accuracy_m,
+          siteName: entry.clock_out_site_name,
+        },
+      ].filter(
+        (punch) =>
+          typeof punch.latitude === "number" &&
+          typeof punch.longitude === "number",
+      )
+    : [];
 
   return (
     <div className="group flex flex-col gap-2 border-zinc-100 border-b pb-5 transition-all last:border-0 dark:border-zinc-800">
@@ -204,6 +228,31 @@ export function EntryItem({
           </span>
         )}
       </div>
+      {punches.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 font-medium text-[10px] text-muted-foreground">
+          {punches.map((punch) => (
+            <span
+              className="flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400"
+              key={punch.label}
+            >
+              <MapPin className="h-3 w-3" />
+              <span className="font-bold">{punch.label}</span>
+              <span className="tabular-nums">
+                {formatCoordinates(
+                  punch.latitude as number,
+                  punch.longitude as number,
+                )}
+              </span>
+              {typeof punch.accuracy === "number" && (
+                <span>±{Math.round(punch.accuracy)}m</span>
+              )}
+              <span>
+                {punch.siteName ? `· ${punch.siteName}` : "· No site"}
+              </span>
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
