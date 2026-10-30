@@ -146,7 +146,10 @@ describe("sendWeeklyReports", () => {
 
   it("processes every org when no target is given", async () => {
     await expect(sendWeeklyReports(start, end)).resolves.toBe(true);
-    expect(mocks.getOrganizationList).toHaveBeenCalledWith({ limit: 100 });
+    expect(mocks.getOrganizationList).toHaveBeenCalledWith({
+      limit: 100,
+      offset: 0,
+    });
     expect(mocks.getOrganization).not.toHaveBeenCalled();
   });
 
@@ -342,6 +345,104 @@ describe("sendWeeklyReports", () => {
       "Hours Report for Grace (Jan 1, 2026 – Jan 7, 2026)",
     );
     expect(emailProps().timeframe).toBe("custom");
+  });
+
+  describe("pagination", () => {
+    /** Serves `items` the way Clerk does: one `limit`-sized slice per call. */
+    const servePages =
+      <T>(items: T[]) =>
+      async ({ limit, offset }: { limit: number; offset: number }) => ({
+        data: items.slice(offset, offset + limit),
+        totalCount: items.length,
+      });
+
+    const manyOrgs = Array.from({ length: 101 }, (_, i) => ({
+      id: `org_${i + 1}`,
+      name: `Org ${i + 1}`,
+    }));
+    const manyMembers = [
+      admin,
+      ...Array.from({ length: 100 }, (_, i) => ({
+        role: "org:member",
+        publicUserData: {
+          userId: `worker_${i + 1}`,
+          firstName: `Worker${i + 1}`,
+          lastName: null,
+          identifier: `worker${i + 1}@example.com`,
+        },
+      })),
+    ];
+
+    it("processes orgs past the first page", async () => {
+      mocks.getOrganizationList.mockImplementation(servePages(manyOrgs));
+
+      await expect(sendWeeklyReports(start, end)).resolves.toBe(true);
+
+      expect(mocks.getOrganizationList).toHaveBeenCalledTimes(2);
+      expect(mocks.getOrganizationList.mock.calls).toEqual([
+        [{ limit: 100, offset: 0 }],
+        [{ limit: 100, offset: 100 }],
+      ]);
+      // Every org was looked at, including the only one on the second page.
+      expect(mocks.getOrganizationBillingSubscription).toHaveBeenCalledTimes(
+        101,
+      );
+      expect(mocks.getOrganizationBillingSubscription).toHaveBeenCalledWith(
+        "org_101",
+      );
+    });
+
+    it("reports on members past the first page", async () => {
+      mocks.getOrganizationMembershipList.mockImplementation(
+        servePages(manyMembers),
+      );
+      mocks.dbGetTimeEntriesForPeriod.mockResolvedValue([
+        shift("2026-01-02T09:00:00Z", "2026-01-02T10:00:00Z"),
+      ]);
+
+      await sendWeeklyReports(start, end, "org_1");
+
+      expect(mocks.getOrganizationMembershipList).toHaveBeenCalledTimes(2);
+      expect(mocks.getOrganizationMembershipList.mock.calls).toEqual([
+        [{ organizationId: "org_1", limit: 100, offset: 0 }],
+        [{ organizationId: "org_1", limit: 100, offset: 100 }],
+      ]);
+      expect(mocks.dbGetTimeEntriesForPeriod).toHaveBeenCalledTimes(101);
+      expect(mocks.dbGetTimeEntriesForPeriod).toHaveBeenCalledWith(
+        "worker_100",
+        "org_1",
+        start,
+        end,
+      );
+      expect(mocks.send).toHaveBeenCalledTimes(101);
+    });
+
+    it("stops walking members when a page comes back empty", async () => {
+      // totalCount lies about there being more members than Clerk will serve.
+      mocks.getOrganizationMembershipList.mockImplementation(
+        async ({ offset }: { offset: number }) => ({
+          data: offset === 0 ? manyMembers.slice(0, 100) : [],
+          totalCount: 10_000,
+        }),
+      );
+
+      await expect(sendWeeklyReports(start, end, "org_1")).resolves.toBe(true);
+      expect(mocks.getOrganizationMembershipList).toHaveBeenCalledTimes(2);
+      expect(mocks.dbGetTimeEntriesForPeriod).toHaveBeenCalledTimes(100);
+    });
+
+    it("raises a failure part way through the member walk", async () => {
+      mocks.getOrganizationMembershipList
+        .mockResolvedValueOnce({
+          data: manyMembers.slice(0, 100),
+          totalCount: 101,
+        })
+        .mockRejectedValueOnce(new Error("clerk down"));
+
+      await expect(sendWeeklyReports(start, end, "org_1")).rejects.toThrow(
+        "clerk down",
+      );
+    });
   });
 });
 

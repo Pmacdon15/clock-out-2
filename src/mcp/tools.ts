@@ -12,6 +12,7 @@ import {
 import { formatInTimeZone, fromZonedTime, toZonedTime } from "date-fns-tz";
 import { z } from "zod";
 import { getEffectiveDurationMs } from "@/lib/break-utils";
+import { fetchAllPages } from "@/lib/clerk-pagination";
 import { loadPdfImage } from "@/lib/pdf-image";
 import { orgHasReportingFeature, sendWeeklyReports } from "@/lib/reports";
 import {
@@ -654,12 +655,13 @@ async function resolveOrg(
   requestedOrg?: string,
 ): Promise<{ ok: true; org: OrgContext } | { ok: false; result: ToolResult }> {
   const client = await clerkClient();
-  const memberships = await client.users.getOrganizationMembershipList({
-    userId,
-    limit: 100,
-  });
+  const memberships = await fetchAllPages(
+    (params) =>
+      client.users.getOrganizationMembershipList({ userId, ...params }),
+    { label: `organizations of ${userId}` },
+  );
 
-  const list = memberships.data.map((m) => ({
+  const list = memberships.map((m) => ({
     orgId: m.organization.id,
     orgName: m.organization.name,
     orgSlug: m.organization.slug ?? null,
@@ -670,7 +672,7 @@ async function resolveOrg(
 
   // Kept out of `list` so tool responses listing organizations don't change.
   const imageUrls = new Map(
-    memberships.data.map((m) => [
+    memberships.map((m) => [
       m.organization.id,
       m.organization.hasImage ? m.organization.imageUrl : null,
     ]),
@@ -736,10 +738,14 @@ async function resolveOrg(
 
 async function fetchOrgMembers(orgId: string): Promise<OrgMemberInfo[]> {
   const client = await clerkClient();
-  const { data } = await client.organizations.getOrganizationMembershipList({
-    organizationId: orgId,
-    limit: 100,
-  });
+  const data = await fetchAllPages(
+    (params) =>
+      client.organizations.getOrganizationMembershipList({
+        organizationId: orgId,
+        ...params,
+      }),
+    { label: `members of ${orgId}` },
+  );
 
   return data
     .map((m) => {
@@ -911,12 +917,16 @@ export async function listOrganizations(
   caller: McpCaller,
 ): Promise<ToolResult> {
   const client = await clerkClient();
-  const memberships = await client.users.getOrganizationMembershipList({
-    userId: caller.userId,
-    limit: 100,
-  });
+  const memberships = await fetchAllPages(
+    (params) =>
+      client.users.getOrganizationMembershipList({
+        userId: caller.userId,
+        ...params,
+      }),
+    { label: `organizations of ${caller.userId}` },
+  );
 
-  const organizations = memberships.data.map((m) => ({
+  const organizations = memberships.map((m) => ({
     org_id: m.organization.id,
     name: m.organization.name,
     slug: m.organization.slug ?? null,
@@ -2883,14 +2893,17 @@ export async function inviteMemberTool(
   const client = await clerkClient();
 
   if (action === "list") {
-    const invitationsRes =
-      await client.organizations.getOrganizationInvitationList({
-        organizationId: org.orgId,
-        status: ["pending"],
-        limit: 100,
-      });
+    const invitationsRes = await fetchAllPages(
+      (params) =>
+        client.organizations.getOrganizationInvitationList({
+          organizationId: org.orgId,
+          status: ["pending"],
+          ...params,
+        }),
+      { label: `invitations of ${org.orgId}` },
+    );
 
-    const invitations = invitationsRes.data.map((inv) => ({
+    const invitations = invitationsRes.map((inv) => ({
       invitation_id: inv.id,
       email_address: inv.emailAddress,
       role: inv.role,
@@ -2927,13 +2940,16 @@ export async function inviteMemberTool(
     }
 
     if (!targetInvitationId && targetEmail) {
-      const pendingRes =
-        await client.organizations.getOrganizationInvitationList({
-          organizationId: org.orgId,
-          status: ["pending"],
-          limit: 100,
-        });
-      const matched = pendingRes.data.find(
+      const pendingRes = await fetchAllPages(
+        (params) =>
+          client.organizations.getOrganizationInvitationList({
+            organizationId: org.orgId,
+            status: ["pending"],
+            ...params,
+          }),
+        { label: `invitations of ${org.orgId}` },
+      );
+      const matched = pendingRes.find(
         (inv) => inv.emailAddress.toLowerCase() === targetEmail,
       );
       if (!matched) {
@@ -3026,11 +3042,15 @@ export async function inviteMemberTool(
 
   const [existingMembers, pendingInvitationsRes] = await Promise.all([
     fetchOrgMembers(org.orgId),
-    client.organizations.getOrganizationInvitationList({
-      organizationId: org.orgId,
-      status: ["pending"],
-      limit: 100,
-    }),
+    fetchAllPages(
+      (params) =>
+        client.organizations.getOrganizationInvitationList({
+          organizationId: org.orgId,
+          status: ["pending"],
+          ...params,
+        }),
+      { label: `invitations of ${org.orgId}` },
+    ),
   ]);
 
   const memberEmails = new Set(
@@ -3039,10 +3059,7 @@ export async function inviteMemberTool(
       .filter((e): e is string => Boolean(e)),
   );
   const pendingByEmail = new Map(
-    pendingInvitationsRes.data.map((inv) => [
-      inv.emailAddress.toLowerCase(),
-      inv,
-    ]),
+    pendingInvitationsRes.map((inv) => [inv.emailAddress.toLowerCase(), inv]),
   );
 
   const sent: Array<{

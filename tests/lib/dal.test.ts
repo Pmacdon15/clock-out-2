@@ -92,8 +92,27 @@ describe("getOrgMembers", () => {
     await expect(getOrgMembers()).resolves.toEqual([{ id: "u", name: "U" }]);
     expect(mocks.getOrganizationMembershipList).toHaveBeenCalledWith({
       organizationId: "org_1",
+      limit: 100,
+      offset: 0,
     });
     expect(mocks.getProcessedMembers).toHaveBeenCalledWith("org_1", ["raw"]);
+  });
+
+  it("collects members past the first Clerk page", async () => {
+    const members = Array.from({ length: 101 }, (_, i) => `member_${i + 1}`);
+    mocks.protect.mockResolvedValue(admin);
+    mocks.getOrganizationMembershipList.mockImplementation(
+      async ({ limit, offset }: { limit: number; offset: number }) => ({
+        data: members.slice(offset, offset + limit),
+        totalCount: members.length,
+      }),
+    );
+    mocks.getProcessedMembers.mockReturnValue([]);
+
+    await getOrgMembers();
+
+    expect(mocks.getOrganizationMembershipList).toHaveBeenCalledTimes(2);
+    expect(mocks.getProcessedMembers).toHaveBeenCalledWith("org_1", members);
   });
 
   it("returns no members when Clerk fails", async () => {

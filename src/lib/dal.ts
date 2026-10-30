@@ -1,6 +1,7 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { fromZonedTime } from "date-fns-tz";
 import { errAsync, okAsync, type ResultAsync } from "neverthrow";
+import { fetchAllPages } from "./clerk-pagination";
 import {
   dbCheckActiveEntry,
   dbClockIn,
@@ -47,11 +48,16 @@ export async function getOrgMembers() {
 
   return clerkClient()
     .then((client) =>
-      client.organizations.getOrganizationMembershipList({
-        organizationId: orgId,
-      }),
+      fetchAllPages(
+        (params) =>
+          client.organizations.getOrganizationMembershipList({
+            organizationId: orgId,
+            ...params,
+          }),
+        { label: `members of ${orgId}` },
+      ),
     )
-    .then((response) => getProcessedMembers(orgId, response.data))
+    .then((members) => getProcessedMembers(orgId, members))
     .catch((error) => {
       console.error("Error fetching members:", error);
       return [];
@@ -372,11 +378,7 @@ export async function updateBreakSettingsDal(
   minShiftHours: number = 5,
 ) {
   const authUser = await auth.protect();
-  if (
-    !authUser.userId ||
-    !authUser.orgId ||
-    authUser.orgRole !== "org:admin"
-  ) {
+  if (!authUser.userId || !authUser.orgId || authUser.orgRole !== "org:admin") {
     return errAsync({ reason: "Unauthorized" } as const);
   }
   if (
