@@ -217,7 +217,7 @@ describe("GET /api/cron/weekly-report", () => {
     mocks.sendWeeklyReports.mockRejectedValue(new Error("ses down"));
     const body = await runOn("2026-03-08T06:00:00Z");
     expect(body.processed).toEqual([
-      { org: "Acme", status: "error", error: {} },
+      { org: "Acme", status: "error", frequency: "weekly" },
     ]);
     expect(console.error).toHaveBeenCalled();
   });

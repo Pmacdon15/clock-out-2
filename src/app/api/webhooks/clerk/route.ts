@@ -9,7 +9,8 @@ export async function POST(req: NextRequest) {
       signingSecret: process.env.CLERK_WEBHOOK_SIGNING_SECRET, // Added ! to ensure TS it exists
     })) as WebhookEvent;
 
-    console.log("Web Hook :", evt.type, " ", evt.data);
+    // Log the event type only: the payload carries payer emails and billing data.
+    console.log("Web Hook :", evt.type);
 
     try {
       switch (evt.type) {
@@ -22,6 +23,7 @@ export async function POST(req: NextRequest) {
           const orgId = data.payer?.organization_id;
 
           if (orgId && plan) {
+            console.log(`[Webhook] ${evt.type} for ${orgId} (plan ${plan})`);
             await handleSubscriptionUpdate(orgId, plan);
           }
           break; // Break belongs inside the case, but outside the if/logic braces

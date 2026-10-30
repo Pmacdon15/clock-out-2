@@ -84,6 +84,20 @@ describe("POST /api/webhooks/clerk", () => {
     );
   });
 
+  it("never logs the event payload", async () => {
+    verifyWebhook.mockResolvedValue({
+      type: "subscriptionItem.active",
+      data: {
+        plan: { slug: "small_business_plan" },
+        payer: { organization_id: "org_1", email: "payer@example.test" },
+      },
+    });
+    await POST(request);
+    const logged = vi.mocked(console.log).mock.calls.flat();
+    expect(logged.every((arg) => typeof arg === "string")).toBe(true);
+    expect(logged.join(" ")).not.toContain("payer@example.test");
+  });
+
   it("logs and acknowledges unhandled event types", async () => {
     verifyWebhook.mockResolvedValue({ type: "user.created", data: {} });
     const res = await POST(request);
