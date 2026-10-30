@@ -399,9 +399,11 @@ export const manageReportingSettingsInputSchema = z.object({
       "Action to perform: 'get' (view current settings), 'update' (change reporting schedule), or 'send_test_report' (email the last 7 days report to org admins now). Defaults to 'get'.",
     ),
   report_frequency: z
-    .enum(["weekly", "twice-monthly", "custom"])
+    .enum(["off", "weekly", "twice-monthly", "custom"])
     .optional()
-    .describe("Report frequency when action is 'update'."),
+    .describe(
+      "Report frequency when action is 'update': 'off' (no emailed reports), 'weekly' (sent on the 1st, 8th, 16th and 24th), 'twice-monthly' (pay periods, sent on the 1st and 16th), or 'custom' (a chosen weekday, every 1 or 2 weeks). If omitted, it becomes 'custom' when report_day or report_interval is given, otherwise the current frequency is kept.",
+    ),
   report_day: z
     .enum([
       "Monday",
@@ -2372,13 +2374,17 @@ export async function manageReportingSettingsTool(
   const action = input.action ?? "get";
 
   if (action === "get") {
-    const settings = await dbGetReportingSettings(org.orgId);
+    const [settings, reportingEnabled] = await Promise.all([
+      dbGetReportingSettings(org.orgId),
+      orgHasReportingFeature(org.orgId),
+    ]);
     return {
       summary: settings
         ? `Reporting settings for ${org.orgName}: frequency=${settings.report_frequency}, day=${settings.report_day ?? "default"}, interval=${settings.report_interval}.`
         : `No custom reporting settings saved yet for ${org.orgName} (defaults to weekly).`,
       data: {
         organization: { org_id: org.orgId, name: org.orgName },
+        reporting_enabled: reportingEnabled,
         settings: settings ?? {
           org_id: org.orgId,
           report_frequency: "weekly",
@@ -2398,6 +2404,17 @@ export async function manageReportingSettingsTool(
     };
   }
 
+  if (!(await orgHasReportingFeature(org.orgId))) {
+    return {
+      summary: `${org.orgName} isn't on a plan that includes Reporting. Upgrade the organization's plan in Clock Out (https://clockout.patmac.ca) to change reporting settings or send reports.`,
+      data: {
+        status: "reporting_not_enabled",
+        organization: { org_id: org.orgId, name: org.orgName },
+      },
+      isError: true,
+    };
+  }
+
   if (action === "send_test_report") {
     const endDate = new Date();
     const startDate = startOfDay(subDays(endDate, 7));
@@ -2413,9 +2430,19 @@ export async function manageReportingSettingsTool(
     };
   }
 
-  const frequency = input.report_frequency ?? "weekly";
-  const day = frequency === "custom" ? (input.report_day ?? "Monday") : null;
-  const interval = frequency === "custom" ? (input.report_interval ?? 1) : 1;
+  const current = await dbGetReportingSettings(org.orgId);
+  const wantsCustom = input.report_day != null || input.report_interval != null;
+  const frequency =
+    input.report_frequency ??
+    (wantsCustom ? "custom" : (current?.report_frequency ?? "weekly"));
+  const day =
+    frequency === "custom"
+      ? (input.report_day ?? current?.report_day ?? "Monday")
+      : null;
+  const interval =
+    frequency === "custom"
+      ? (input.report_interval ?? current?.report_interval ?? 1)
+      : 1;
 
   const updated = await dbUpdateReportingSettings(
     org.orgId,

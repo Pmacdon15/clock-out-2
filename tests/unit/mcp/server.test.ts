@@ -32,6 +32,8 @@ const mockDbClockOutAt = vi.fn();
 const mockInvalidateTimeEntryCache = vi.fn();
 const mockInvalidateReportingSettingsCache = vi.fn();
 const mockDbGetBreakSettings = vi.fn(async () => undefined);
+const mockDbGetReportingSettings = vi.fn(async () => undefined);
+const mockDbUpdateReportingSettings = vi.fn();
 const mockOrgHasReportingFeature = vi.fn(async () => true);
 const mockSendWeeklyReports = vi.fn(async () => true);
 
@@ -45,11 +47,13 @@ vi.mock("@/mcp/db", () => ({
   dbGetBreakSettings: (...args: unknown[]) => mockDbGetBreakSettings(...args),
   dbGetOrgActiveEntries: vi.fn(async () => []),
   dbGetOrgTimeEntries: (...args: unknown[]) => mockDbGetOrgTimeEntries(...args),
-  dbGetReportingSettings: vi.fn(async () => undefined),
+  dbGetReportingSettings: (...args: unknown[]) =>
+    mockDbGetReportingSettings(...args),
   dbGetTimeEntries: (...args: unknown[]) => mockDbGetTimeEntries(...args),
   dbGetTimeEntryById: (...args: unknown[]) => mockDbGetTimeEntryById(...args),
   dbInsertTimeEntry: (...args: unknown[]) => mockDbInsertTimeEntry(...args),
-  dbUpdateReportingSettings: vi.fn(),
+  dbUpdateReportingSettings: (...args: unknown[]) =>
+    mockDbUpdateReportingSettings(...args),
   dbUpdateTimeEntry: (...args: unknown[]) => mockDbUpdateTimeEntry(...args),
   invalidateReportingSettingsCache: (...args: unknown[]) =>
     mockInvalidateReportingSettingsCache(...args),
@@ -78,6 +82,7 @@ import {
   addTimeEntryTool,
   exportTimesheetTool,
   inviteMemberTool,
+  manageReportingSettingsTool,
   runHoursReportTool,
   updateTimeEntryTool,
 } from "@/mcp/tools";
@@ -722,5 +727,116 @@ describe("run_hours_report", () => {
     expect(mockSendWeeklyReports).not.toHaveBeenCalled();
     expect(res.data.email).toMatchObject({ status: "no_completed_shifts" });
     expect(res.data.reports).toBeUndefined();
+  });
+});
+
+describe("manage_reporting_settings", () => {
+  const adminMembership = {
+    role: "org:admin",
+    organization: { id: "org_1", name: "PatMac Org", slug: "patmac-org" },
+  };
+  const caller = { userId: "user_admin", client: "Claude" };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockOrgHasReportingFeature.mockResolvedValue(true);
+    mockGetUserOrgMemberships.mockResolvedValue({ data: [adminMembership] });
+    mockDbGetReportingSettings.mockResolvedValue(undefined);
+    mockDbUpdateReportingSettings.mockImplementation(
+      async (
+        orgId: string,
+        report_frequency: string,
+        report_day: string | null,
+        report_interval: number,
+      ) => ({ org_id: orgId, report_frequency, report_day, report_interval }),
+    );
+  });
+
+  it("reports whether the plan includes Reporting when viewing settings", async () => {
+    mockOrgHasReportingFeature.mockResolvedValue(false);
+    const res = await manageReportingSettingsTool(caller, { action: "get" });
+    expect(res.isError).toBeUndefined();
+    expect(res.data.reporting_enabled).toBe(false);
+  });
+
+  it("requires the paid reporting feature to update settings", async () => {
+    mockOrgHasReportingFeature.mockResolvedValue(false);
+    const res = await manageReportingSettingsTool(caller, {
+      action: "update",
+      report_frequency: "twice-monthly",
+    });
+    expect(res.isError).toBe(true);
+    expect(res.data.status).toBe("reporting_not_enabled");
+    expect(mockDbUpdateReportingSettings).not.toHaveBeenCalled();
+  });
+
+  it("requires the paid reporting feature to send a test report", async () => {
+    mockOrgHasReportingFeature.mockResolvedValue(false);
+    const res = await manageReportingSettingsTool(caller, {
+      action: "send_test_report",
+    });
+    expect(res.data.status).toBe("reporting_not_enabled");
+    expect(mockSendWeeklyReports).not.toHaveBeenCalled();
+  });
+
+  it("rejects updates from non-admins", async () => {
+    mockGetUserOrgMemberships.mockResolvedValue({
+      data: [{ ...adminMembership, role: "org:member" }],
+    });
+    const res = await manageReportingSettingsTool(
+      { userId: "user_adam", client: "Claude" },
+      { action: "update", report_frequency: "weekly" },
+    );
+    expect(res.data.status).toBe("forbidden");
+    expect(mockDbUpdateReportingSettings).not.toHaveBeenCalled();
+  });
+
+  it("updates the schedule and invalidates the settings cache", async () => {
+    const res = await manageReportingSettingsTool(caller, {
+      action: "update",
+      report_frequency: "custom",
+      report_day: "Friday",
+      report_interval: 2,
+    });
+    expect(res.data.status).toBe("updated");
+    expect(mockDbUpdateReportingSettings).toHaveBeenCalledWith(
+      "org_1",
+      "custom",
+      "Friday",
+      2,
+    );
+    expect(mockInvalidateReportingSettingsCache).toHaveBeenCalledWith("org_1");
+  });
+
+  it("can turn emailed reports off", async () => {
+    await manageReportingSettingsTool(caller, {
+      action: "update",
+      report_frequency: "off",
+    });
+    expect(mockDbUpdateReportingSettings).toHaveBeenCalledWith(
+      "org_1",
+      "off",
+      null,
+      1,
+    );
+  });
+
+  it("treats a day-only update as a custom schedule, keeping the current interval", async () => {
+    mockDbGetReportingSettings.mockResolvedValue({
+      org_id: "org_1",
+      report_frequency: "custom",
+      report_day: "Monday",
+      report_interval: 2,
+    } as never);
+    await manageReportingSettingsTool(caller, {
+      action: "update",
+      report_day: "Thursday",
+    });
+    expect(mockDbUpdateReportingSettings).toHaveBeenCalledWith(
+      "org_1",
+      "custom",
+      "Thursday",
+      2,
+    );
   });
 });
