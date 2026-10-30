@@ -88,6 +88,7 @@ import {
   addTimeEntryTool,
   exportTimesheetTool,
   inviteMemberTool,
+  listOrganizations,
   manageBreakSettingsTool,
   manageReportingSettingsTool,
   runHoursReportTool,
@@ -952,5 +953,91 @@ describe("manage_break_settings", () => {
       60,
       6,
     );
+  });
+});
+
+describe("Clerk pagination in MCP tools", () => {
+  const caller = { userId: "user_admin", client: null };
+
+  /** Serves `items` the way Clerk does: one `limit`-sized slice per call. */
+  const servePages =
+    <T>(items: T[]) =>
+    async ({ limit, offset }: { limit: number; offset: number }) => ({
+      data: items.slice(offset, offset + limit),
+      totalCount: items.length,
+    });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  it("lists every organization the caller belongs to, past the first page", async () => {
+    const memberships = Array.from({ length: 101 }, (_, i) => ({
+      role: "org:member",
+      organization: { id: `org_${i + 1}`, name: `Org ${i + 1}`, slug: null },
+    }));
+    mockGetUserOrgMemberships.mockImplementation(servePages(memberships));
+
+    const result = await listOrganizations(caller);
+
+    expect(mockGetUserOrgMemberships.mock.calls).toEqual([
+      [{ userId: "user_admin", limit: 100, offset: 0 }],
+      [{ userId: "user_admin", limit: 100, offset: 100 }],
+    ]);
+    const data = result.data as { organizations: { org_id: string }[] };
+    expect(data.organizations).toHaveLength(101);
+    expect(data.organizations.at(-1)?.org_id).toBe("org_101");
+  });
+
+  it("sees members and pending invitations past the first page", async () => {
+    mockGetUserOrgMemberships.mockResolvedValue({
+      data: [
+        {
+          role: "org:admin",
+          organization: { id: "org_1", name: "PatMac Org", slug: null },
+        },
+      ],
+    });
+    const members = Array.from({ length: 101 }, (_, i) => ({
+      role: "org:member",
+      publicUserData: {
+        userId: `user_${i + 1}`,
+        firstName: `Member${i + 1}`,
+        lastName: null,
+        identifier: `member${i + 1}@patmac.ca`,
+      },
+    }));
+    mockGetOrgMemberships.mockImplementation(servePages(members));
+    const invitations = Array.from({ length: 101 }, (_, i) => ({
+      id: `orginv_${i + 1}`,
+      emailAddress: `invited${i + 1}@patmac.ca`,
+      role: "org:member",
+      status: "pending",
+      createdAt: 0,
+      updatedAt: 0,
+    }));
+    mockGetOrganizationInvitationList.mockImplementation(
+      servePages(invitations),
+    );
+
+    // An invite for someone already invited on the second page is caught.
+    const result = await inviteMemberTool(caller, {
+      email: "invited101@patmac.ca",
+    });
+
+    expect(mockGetOrgMemberships).toHaveBeenCalledTimes(2);
+    expect(mockGetOrganizationInvitationList).toHaveBeenCalledTimes(2);
+    expect(mockCreateOrganizationInvitation).not.toHaveBeenCalled();
+    expect(result.data).toMatchObject({
+      status: "skipped",
+      skipped: [
+        {
+          email_address: "invited101@patmac.ca",
+          reason: "already_invited",
+          invitation_id: "orginv_101",
+        },
+      ],
+    });
   });
 });

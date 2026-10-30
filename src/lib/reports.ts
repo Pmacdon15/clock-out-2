@@ -4,6 +4,7 @@ import { render } from "@react-email/render";
 import { format, subDays } from "date-fns";
 import { WeeklyReportEmail } from "@/components/emails/WeeklyReportEmail";
 import { getEffectiveDurationMs } from "./break-utils";
+import { fetchAllPages } from "./clerk-pagination";
 import { dbGetBreakSettings, dbGetTimeEntriesForPeriod } from "./db";
 
 const sesClient = new SESClient({
@@ -67,11 +68,11 @@ export async function sendWeeklyReports(
     });
     allOrgs = [org];
   } else {
-    // Fetch all organizations in the instance
-    const orgsResult = await client.organizations.getOrganizationList({
-      limit: 100,
-    });
-    allOrgs = orgsResult.data;
+    // Fetch all organizations in the instance, page by page
+    allOrgs = await fetchAllPages(
+      (params) => client.organizations.getOrganizationList(params),
+      { label: "organizations" },
+    );
   }
 
   console.log(`[Reports] Found ${allOrgs.length} organizations to process.`);
@@ -91,13 +92,17 @@ export async function sendWeeklyReports(
 
     console.log(`[Reports] Processing Organization: ${org.name} (${orgId})`);
 
-    // Get members of this org
-    const membersData =
-      await client.organizations.getOrganizationMembershipList({
-        organizationId: orgId,
-        limit: 100,
-      });
-    const members = membersData.data;
+    // Get every member of this org, not just the first page. A failure part
+    // way through throws out of this org only: the cron records it and reports
+    // already emailed for earlier orgs stay sent.
+    const members = await fetchAllPages(
+      (params) =>
+        client.organizations.getOrganizationMembershipList({
+          organizationId: orgId,
+          ...params,
+        }),
+      { label: `members of ${orgId}` },
+    );
     console.log(
       `[Reports] Found ${members.length} members in organization ${org.name}.`,
     );
