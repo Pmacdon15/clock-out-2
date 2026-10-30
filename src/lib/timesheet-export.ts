@@ -5,9 +5,9 @@ import type { BreakSettingsData } from "./types";
 
 /**
  * Timesheet export: turns time entries into a downloadable Excel spreadsheet
- * (.xlsx) or PDF. Dependency-free on purpose — both files are written by hand
- * (the PDF with the built-in Helvetica fonts), so nothing extra ships in the
- * client bundle.
+ * (.xlsx), a PDF, or a flat CSV. Dependency-free on purpose — every file is
+ * written by hand (the PDF with the built-in Helvetica fonts), so nothing
+ * extra ships in the client bundle.
  */
 
 type ExportableEntry = {
@@ -18,7 +18,7 @@ type ExportableEntry = {
   skip_lunch?: boolean;
 };
 
-export type ExportFormat = "pdf" | "xlsx";
+export type ExportFormat = "pdf" | "xlsx" | "csv";
 
 export type ExportGrouping = "auto" | "week" | "month" | "none";
 
@@ -966,6 +966,197 @@ export function buildPdf(
 export const toPdf = (rows: ExportRow[], meta: ExportMeta) =>
   buildPdf(layoutPdfPages(rows, meta), meta.orgLogo);
 
+/* ------------------------------------------------------------------ CSV -- */
+
+/*
+ * The CSV is the flat, machine-readable sibling of the spreadsheet: one header
+ * row and one record per row, so payroll tools can import it without having to
+ * understand the PDF's visual grouping or the workbook's summary blocks. Every
+ * row names its own "Record Type", which lets a consumer keep just the shift
+ * rows (or read the subtotals and summaries too) with a single filter.
+ */
+
+export const CSV_COLUMNS = [
+  "Record Type",
+  "Employee",
+  "Date",
+  "Day",
+  "Clock In",
+  "Clock Out",
+  "Hours",
+  "Daily Total",
+  "Period",
+  "Days Worked",
+  "Shifts",
+  "Avg Hours/Day",
+] as const;
+
+/** RFC 4180 record separator; Excel on Windows still expects CRLF. */
+const CSV_EOL = "\r\n";
+
+/**
+ * Excel and Google Sheets evaluate any cell whose text starts with one of
+ * these as a formula, so a member name (or, soon, a free-text note) like
+ * `=1+1` or `@SUM(A1)` would run when the file is opened. An apostrophe in
+ * front forces the value to be read as text.
+ */
+const FORMULA_PREFIX = /^[=+\-@\t\r]/;
+
+/**
+ * The guard is deliberately unconditional: a leading `-` or `+` is prefixed
+ * even on something that looks like a number, because Excel treats `+1` and
+ * `-2+3` alike as formulas and the exported columns never hold a negative
+ * value anyway.
+ */
+export const neutralizeCsvValue = (value: string) =>
+  FORMULA_PREFIX.test(value) ? `'${value}` : value;
+
+/**
+ * Quote one CSV field: anything containing a comma, a double quote, a line
+ * break or padding whitespace is wrapped in double quotes, and embedded quotes
+ * are doubled. Formula-looking values are neutralised first.
+ */
+export const csvField = (value: string | number | null | undefined) => {
+  if (value === null || value === undefined) return "";
+  const text = neutralizeCsvValue(
+    typeof value === "number" ? String(value) : value,
+  );
+  return /[",\r\n]|^\s|\s$/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+};
+
+export const csvRow = (fields: (string | number | null | undefined)[]) =>
+  fields.map(csvField).join(",");
+
+type CsvCell = string | number | null;
+
+export function buildCsvRows(rows: ExportRow[], meta: ExportMeta): CsvCell[][] {
+  const sections = buildPeriodSections(rows, meta);
+  const showSections =
+    sections.length > 1 || meta.groupBy === "week" || meta.groupBy === "month";
+  const periodLabel = formatPeriod(meta);
+
+  // Daily totals per employee+date, exactly as the spreadsheet computes them.
+  const dayTotals = new Map<string, number>();
+  const dayLastIndex = new Map<string, number>();
+  rows.forEach((r, idx) => {
+    const key = `${r.employee}__${r.date}`;
+    dayTotals.set(key, (dayTotals.get(key) ?? 0) + (r.hours ?? 0));
+    dayLastIndex.set(key, idx);
+  });
+
+  const out: CsvCell[][] = [[...CSV_COLUMNS]];
+  let globalRowIdx = 0;
+
+  for (const section of sections) {
+    const label = showSections ? section.label : periodLabel;
+
+    for (const r of section.rows) {
+      const dayKey = `${r.employee}__${r.date}`;
+      const isLastOfDay = dayLastIndex.get(dayKey) === globalRowIdx;
+      out.push([
+        "Shift",
+        r.employee,
+        r.date,
+        r.dayOfWeek ?? getDayOfWeekShort(r.date),
+        r.clockIn,
+        r.clockOut,
+        r.hours === null ? null : formatHours(r.hours),
+        isLastOfDay ? formatHours(dayTotals.get(dayKey) as number) : null,
+        label,
+        null,
+        null,
+        null,
+      ]);
+      globalRowIdx += 1;
+    }
+
+    if (showSections && section.rows.length > 0) {
+      out.push([
+        "Period Subtotal",
+        null,
+        null,
+        null,
+        null,
+        null,
+        formatHours(section.totalHours),
+        null,
+        section.label,
+        section.daysWorked,
+        section.shiftsCount,
+        null,
+      ]);
+    }
+  }
+
+  out.push([
+    "Total",
+    null,
+    null,
+    null,
+    null,
+    null,
+    formatHours(totalHours(rows)),
+    null,
+    periodLabel,
+    new Set(rows.map((r) => r.date)).size,
+    rows.length,
+    null,
+  ]);
+
+  for (const emp of buildEmployeeSummary(rows)) {
+    out.push([
+      "Employee Summary",
+      emp.employee,
+      null,
+      null,
+      null,
+      null,
+      formatHours(emp.totalHours),
+      null,
+      periodLabel,
+      emp.daysWorked,
+      emp.shiftsCount,
+      formatHours(emp.totalHours / emp.daysWorked),
+    ]);
+  }
+
+  if (sections.length > 1) {
+    for (const sec of sections) {
+      out.push([
+        "Period Summary",
+        null,
+        null,
+        null,
+        null,
+        null,
+        formatHours(sec.totalHours),
+        null,
+        sec.label,
+        sec.daysWorked,
+        sec.shiftsCount,
+        null,
+      ]);
+    }
+  }
+
+  return out;
+}
+
+export const toCsvText = (rows: ExportRow[], meta: ExportMeta) =>
+  `${buildCsvRows(rows, meta).map(csvRow).join(CSV_EOL)}${CSV_EOL}`;
+
+/**
+ * Byte-order mark. Without it Excel reads a .csv as the machine's legacy
+ * 8-bit codepage and mangles every non-ASCII name; every other spreadsheet
+ * app skips it silently.
+ */
+const UTF8_BOM = "﻿";
+
+export const toCsv = (rows: ExportRow[], meta: ExportMeta) =>
+  utf8(`${UTF8_BOM}${toCsvText(rows, meta)}`);
+
+export const CSV_MIME = "text/csv; charset=utf-8";
+
 /* ------------------------------------------------------------- download -- */
 
 export function downloadFile(
@@ -990,6 +1181,8 @@ export function exportTimesheet(
   const fileName = exportFileName(meta, format);
   if (format === "pdf") {
     downloadFile(toPdf(rows, meta) as BlobPart, "application/pdf", fileName);
+  } else if (format === "csv") {
+    downloadFile(toCsv(rows, meta) as BlobPart, CSV_MIME, fileName);
   } else {
     downloadFile(toXlsx(rows, meta) as BlobPart, XLSX_MIME, fileName);
   }

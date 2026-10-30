@@ -399,6 +399,51 @@ describe("Double / overlapping time prevention & cache invalidation", () => {
     expect(pdfContent).toContain("(Alex Smith) Tj");
   });
 
+  it("exports a CSV timesheet as the primary file while still linking the PDF and spreadsheet", async () => {
+    mockDbGetOrgTimeEntries.mockResolvedValueOnce([
+      {
+        id: 1,
+        user_id: "user_worker",
+        org_id: "org_1",
+        clock_in: new Date("2026-10-26T15:00:00.000Z"),
+        clock_out: new Date("2026-10-26T23:00:00.000Z"),
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+    ]);
+
+    const res = await exportTimesheetTool(
+      { userId: "user_admin", client: "Claude" },
+      {
+        start_date: "2026-10-26",
+        end_date: "2026-10-28",
+        format: "csv",
+        timezone: "America/Edmonton",
+      },
+    );
+
+    expect(res.isError).toBeUndefined();
+    expect(res.data.file_name).toBe(
+      "timesheet-entire-organization-2026-10-26-to-2026-10-28.csv",
+    );
+    expect(res.data.mime_type).toBe("text/csv; charset=utf-8");
+    expect(res.data.download_url).toContain("format=csv");
+    expect(res.data.csv).toEqual({
+      file_name: "timesheet-entire-organization-2026-10-26-to-2026-10-28.csv",
+      mime_type: "text/csv; charset=utf-8",
+      download_url: expect.stringContaining("format=csv"),
+    });
+    expect(res.resource?.mimeType).toBe("text/csv; charset=utf-8");
+
+    const csv = Buffer.from(res.resource?.blob ?? "", "base64")
+      .toString("utf8")
+      .slice(1);
+    expect(csv.split("\r\n")[0]).toBe(
+      "Record Type,Employee,Date,Day,Clock In,Clock Out,Hours,Daily Total,Period,Days Worked,Shifts,Avg Hours/Day",
+    );
+    expect(csv).toContain("Shift,Alex Smith,2026-10-26,Mon,");
+  });
+
   it("forbids non-admin members from exporting timesheets for other members or 'all'", async () => {
     mockGetUserOrgMemberships.mockResolvedValueOnce({
       data: [

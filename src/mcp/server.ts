@@ -293,7 +293,7 @@ export function registerClockOutTools(server: McpServer) {
     {
       title: "Export timesheet as PDF and Excel spreadsheet",
       description:
-        "Generates downloadable PDF and Excel (.xlsx) spreadsheet timesheets for any selected time period (start_date/end_date, week_of, full month via year+month, or Clock Out month-week 1–4 via year+month+week), with Day of Week, Daily Totals, Employee Summaries, and Weekly/Monthly section breakdowns (group_by: 'week' | 'month' | 'none' | 'auto'). Returns both embedded file resources and Clerk-authenticated download links for both PDF and Spreadsheet.",
+        "Generates downloadable PDF, Excel (.xlsx) spreadsheet and flat CSV timesheets for any selected time period (start_date/end_date, week_of, full month via year+month, or Clock Out month-week 1–4 via year+month+week), with Day of Week, Daily Totals, Employee Summaries, and Weekly/Monthly section breakdowns (group_by: 'week' | 'month' | 'none' | 'auto'). Returns embedded PDF and Spreadsheet file resources plus Clerk-authenticated download links for the PDF, the Spreadsheet and the CSV (one flat row per shift, for payroll imports).",
       inputSchema: portable(exportTimesheetInputSchema),
       annotations: { readOnlyHint: true, openWorldHint: false },
     },

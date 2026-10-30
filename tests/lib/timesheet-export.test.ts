@@ -5,7 +5,10 @@ import {
   buildPeriodSections,
   buildSheetXml,
   buildZip,
+  CSV_MIME,
   crc32,
+  csvField,
+  csvRow,
   downloadFile,
   type ExportRow,
   exportFileName,
@@ -16,8 +19,11 @@ import {
   getMonthBounds,
   getWeekBounds,
   layoutPdfPages,
+  neutralizeCsvValue,
   pdfText,
   resolveGrouping,
+  toCsv,
+  toCsvText,
   toPdf,
   totalHours,
   toXlsx,
@@ -546,5 +552,256 @@ describe("downloads", () => {
     expect(layoutPdfPages([row()], { ...meta, groupBy: "month" })[0]).toContain(
       "Subtotal",
     );
+  });
+});
+
+describe("CSV field quoting", () => {
+  it("leaves simple values untouched", () => {
+    expect(csvField("Ada")).toBe("Ada");
+    expect(csvField("2026-03-09")).toBe("2026-03-09");
+    expect(csvField("9:00 AM")).toBe("9:00 AM");
+    expect(csvField("8.00")).toBe("8.00");
+  });
+
+  it("renders empty, null and undefined fields as nothing", () => {
+    expect(csvField("")).toBe("");
+    expect(csvField(null)).toBe("");
+    expect(csvField(undefined)).toBe("");
+  });
+
+  it("stringifies numbers, including zero and negatives", () => {
+    expect(csvField(0)).toBe("0");
+    expect(csvField(8.5)).toBe("8.5");
+    expect(csvField(-2)).toBe("'-2");
+  });
+
+  it("quotes fields containing a comma", () => {
+    expect(csvField("Lovelace, Ada")).toBe('"Lovelace, Ada"');
+    expect(csvField(",")).toBe('","');
+  });
+
+  it("quotes fields containing a double quote and doubles the quote", () => {
+    expect(csvField('Ada "The Countess"')).toBe('"Ada ""The Countess"""');
+    expect(csvField('"')).toBe('""""');
+    expect(csvField('a""b')).toBe('"a""""b"');
+  });
+
+  it("quotes fields containing line breaks", () => {
+    expect(csvField("line1\nline2")).toBe('"line1\nline2"');
+    expect(csvField("line1\r\nline2")).toBe('"line1\r\nline2"');
+    expect(csvField("trailing\n")).toBe('"trailing\n"');
+  });
+
+  it("quotes fields with leading or trailing whitespace", () => {
+    expect(csvField(" Ada")).toBe('" Ada"');
+    expect(csvField("Ada ")).toBe('"Ada "');
+    expect(csvField("  ")).toBe('"  "');
+    expect(csvField("A B")).toBe("A B");
+  });
+
+  it("passes unicode through unquoted", () => {
+    expect(csvField("Zoë Ångström")).toBe("Zoë Ångström");
+    expect(csvField("山田太郎")).toBe("山田太郎");
+    expect(csvField("naïve, café")).toBe('"naïve, café"');
+  });
+
+  it("joins a record with commas", () => {
+    expect(csvRow(["Shift", "Lovelace, Ada", null, 8])).toBe(
+      'Shift,"Lovelace, Ada",,8',
+    );
+  });
+});
+
+describe("CSV formula injection", () => {
+  it("neutralises values Excel and Sheets would execute", () => {
+    expect(neutralizeCsvValue("=1+1")).toBe("'=1+1");
+    expect(neutralizeCsvValue("+1")).toBe("'+1");
+    expect(neutralizeCsvValue("-2+3")).toBe("'-2+3");
+    expect(neutralizeCsvValue("@SUM(A1:A9)")).toBe("'@SUM(A1:A9)");
+    expect(neutralizeCsvValue("\tcmd")).toBe("'\tcmd");
+    expect(neutralizeCsvValue("\rcmd")).toBe("'\rcmd");
+    expect(neutralizeCsvValue('=HYPERLINK("http://evil.test","x")')).toBe(
+      '\'=HYPERLINK("http://evil.test","x")',
+    );
+  });
+
+  it("leaves values that cannot start a formula alone", () => {
+    expect(neutralizeCsvValue("Ada")).toBe("Ada");
+    expect(neutralizeCsvValue("2026-03-09")).toBe("2026-03-09");
+    expect(neutralizeCsvValue("a=b")).toBe("a=b");
+    expect(neutralizeCsvValue("8.00")).toBe("8.00");
+    expect(neutralizeCsvValue("")).toBe("");
+    expect(neutralizeCsvValue(" =1+1")).toBe(" =1+1");
+  });
+
+  it("guards leading signs too, since Excel evaluates those as well", () => {
+    expect(neutralizeCsvValue("-5")).toBe("'-5");
+    expect(neutralizeCsvValue("+3")).toBe("'+3");
+  });
+
+  it("neutralises before quoting so the guard survives escaping", () => {
+    expect(csvField('=cmd|"calc"!A1')).toBe('"\'=cmd|""calc""!A1"');
+    expect(csvField("=1+1,2")).toBe('"\'=1+1,2"');
+    expect(csvField("\t=1+1")).toBe("'\t=1+1");
+  });
+
+  it("neutralises employee names flowing into the sheet", () => {
+    const csv = toCsvText([row({ employee: "=cmd()" })], meta);
+    expect(csv).toContain("Shift,'=cmd()");
+    expect(csv).not.toContain("Shift,=cmd()");
+  });
+});
+
+describe("CSV output", () => {
+  const PERIOD = '"Mar 8, 2026 - Mar 14, 2026"';
+
+  it("writes one header row followed by flat data rows", () => {
+    const lines = toCsvText([row(), row({ date: "2026-03-10" })], meta)
+      .split("\r\n")
+      .filter(Boolean);
+
+    expect(lines[0]).toBe(
+      "Record Type,Employee,Date,Day,Clock In,Clock Out,Hours,Daily Total,Period,Days Worked,Shifts,Avg Hours/Day",
+    );
+    expect(lines[1]).toBe(
+      `Shift,Ada,2026-03-09,Mon,9:00 AM,5:00 PM,8.00,8.00,${PERIOD},,,`,
+    );
+    expect(lines).toContain(`Total,,,,,,16.00,,${PERIOD},2,2,`);
+    expect(lines).toContain(
+      `Employee Summary,Ada,,,,,16.00,,${PERIOD},2,2,8.00`,
+    );
+  });
+
+  it("totals a day only on its last shift and leaves open shifts blank", () => {
+    const rows = [
+      row({ clockIn: "9:00 AM", clockOut: "12:00 PM", hours: 3 }),
+      row({ clockIn: "1:00 PM", clockOut: "6:00 PM", hours: 5 }),
+      row({ date: "2026-03-10", clockOut: "In progress", hours: null }),
+    ];
+    const shifts = toCsvText(rows, meta)
+      .split("\r\n")
+      .filter((l) => l.startsWith("Shift,"));
+
+    expect(shifts[0]).toContain(",3.00,,");
+    expect(shifts[1]).toContain(",5.00,8.00,");
+    expect(shifts[2]).toContain("In progress,,0.00,");
+  });
+
+  it("writes subtotal and period summary rows when grouped", () => {
+    const rows = [
+      row({ date: "2026-03-08", hours: 4 }),
+      row({ date: "2026-03-09", hours: 6 }),
+    ];
+    const lines = toCsvText(rows, { ...meta, groupBy: "week" }).split("\r\n");
+
+    expect(lines.filter((l) => l.startsWith("Period Subtotal,"))).toHaveLength(
+      2,
+    );
+    expect(lines).toContain(
+      'Period Subtotal,,,,,,4.00,,"Week of Mar 2, 2026 - Mar 8, 2026",1,1,',
+    );
+    expect(lines.filter((l) => l.startsWith("Period Summary,"))).toHaveLength(
+      2,
+    );
+    expect(lines).toContain(`Total,,,,,,10.00,,${PERIOD},2,2,`);
+  });
+
+  it("writes a zero total and no summaries when there are no entries", () => {
+    const lines = toCsvText([], meta).split("\r\n").filter(Boolean);
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toBe(`Total,,,,,,0.00,,${PERIOD},0,0,`);
+  });
+
+  it("carries the lunch dock applied by buildExportRows", () => {
+    const rows = buildExportRows(
+      [
+        makeEntry({
+          id: 1,
+          user_id: "u1",
+          clock_in: new Date("2026-03-09T09:00:00Z"),
+          clock_out: new Date("2026-03-09T17:30:00Z"),
+          skip_lunch: false,
+        }),
+        makeEntry({
+          id: 2,
+          user_id: "u1",
+          clock_in: new Date("2026-03-10T09:00:00Z"),
+          clock_out: new Date("2026-03-10T17:30:00Z"),
+          skip_lunch: true,
+        }),
+      ],
+      () => "Ada",
+      undefined,
+      {
+        dock_lunch: true,
+        lunch_duration_minutes: 30,
+        lunch_min_shift_hours: 5,
+      },
+    );
+
+    const shifts = toCsvText(rows, meta)
+      .split("\r\n")
+      .filter((l) => l.startsWith("Shift,"));
+    expect(shifts[0]).toContain(",8.00,8.00,");
+    expect(shifts[1]).toContain(",8.50,8.50,");
+  });
+
+  it("names every member when exporting the whole organization", () => {
+    const rows = [
+      row({ employee: "Ada" }),
+      row({ employee: "Grace", date: "2026-03-10", hours: 7 }),
+    ];
+    const summaries = toCsvText(rows, meta)
+      .split("\r\n")
+      .filter((l) => l.startsWith("Employee Summary,"));
+    expect(summaries.map((l) => l.split(",")[1])).toEqual(["Ada", "Grace"]);
+  });
+
+  it("prefixes a UTF-8 BOM, ends records with CRLF and encodes unicode", () => {
+    const bytes = toCsv([row({ employee: "Zoë" })], meta);
+    expect(Array.from(bytes.subarray(0, 3))).toEqual([0xef, 0xbb, 0xbf]);
+
+    const text = new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes);
+    expect(text.startsWith("﻿Record Type,")).toBe(true);
+    expect(text.endsWith("\r\n")).toBe(true);
+    expect(text).not.toMatch(/[^\r]\n/);
+    expect(text).toContain("Zoë");
+  });
+
+  it("serves CSV with a text/csv mime type and a .csv file name", () => {
+    expect(CSV_MIME).toBe("text/csv; charset=utf-8");
+    expect(exportFileName(meta, "csv")).toBe(
+      "timesheet-ada-lovelace-2026-03-08-to-2026-03-14.csv",
+    );
+  });
+});
+
+describe("CSV download", () => {
+  const createObjectURL = vi.fn((_blob: Blob) => "blob:csv");
+  const revokeObjectURL = vi.fn();
+  let clickSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    Object.assign(URL, { createObjectURL, revokeObjectURL });
+    clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    clickSpy.mockRestore();
+  });
+
+  it("downloads the CSV as a text/csv blob", () => {
+    const createSpy = vi.spyOn(document, "createElement");
+    exportTimesheet("csv", [row()], meta);
+
+    const blob = createObjectURL.mock.calls.at(-1)?.[0] as Blob;
+    expect(blob.type).toBe("text/csv; charset=utf-8");
+    const link = createSpy.mock.results.at(-1)?.value as HTMLAnchorElement;
+    expect(link.download).toBe(
+      "timesheet-ada-lovelace-2026-03-08-to-2026-03-14.csv",
+    );
+    createSpy.mockRestore();
   });
 });
