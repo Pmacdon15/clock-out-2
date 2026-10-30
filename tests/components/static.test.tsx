@@ -21,8 +21,14 @@ import MainPageHeader from "@/components/headers/main-page-header";
 
 describe("fallbacks", () => {
   it("renders the dashboard skeleton", () => {
-    const { container } = render(<DashboardSkeleton />);
+    const { container, getByRole } = render(<DashboardSkeleton />);
     expect(container.firstChild).toHaveClass("animate-pulse");
+    expect(getByRole("status", { name: "Loading dashboard" })).toBeVisible();
+    // Three tab placeholders and three recent-activity rows.
+    expect(container.querySelectorAll(".h-8.w-24")).toHaveLength(3);
+    expect(container.querySelectorAll(".rounded-xl.border.p-4")).toHaveLength(
+      3,
+    );
   });
 
   it("renders a placeholder for each settings option", () => {
