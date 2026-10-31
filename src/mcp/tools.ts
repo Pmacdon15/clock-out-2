@@ -36,12 +36,14 @@ import {
   buildEmployeeSummary,
   buildExportRows,
   buildPeriodSections,
+  CSV_MIME,
   type ExportFormat,
   type ExportGrouping,
   type ExportMeta,
   exportFileName,
   formatHours,
   formatPeriod,
+  toCsv,
   toPdf,
   totalHours,
   toXlsx,
@@ -357,16 +359,16 @@ export const exportTimesheetInputSchema = z.object({
       "Target member (name, email, or user_id), or 'all' (admins only) to export a timesheet for everyone in the organization. Admins default to 'all'; regular members default to themselves.",
     ),
   format: z
-    .enum(["pdf", "xlsx"])
+    .enum(["pdf", "xlsx", "csv"])
     .optional()
     .describe(
-      "Preferred file format ('pdf' or 'xlsx'). Note: export_timesheet always provides download links for both PDF and Excel spreadsheet (.xlsx).",
+      "Preferred file format ('pdf', 'xlsx', or 'csv'). Note: export_timesheet always provides download links for the PDF, the Excel spreadsheet (.xlsx) and the flat CSV.",
     ),
   group_by: z
     .enum(["auto", "week", "month", "none"])
     .optional()
     .describe(
-      "How to group shifts and subtotal rows in the exported PDF and spreadsheet: 'week' (weekly sections with subtotals), 'month' (monthly sections with subtotals), 'none' (flat list), or 'auto' (default: groups by week or month based on date range).",
+      "How to group shifts and subtotal rows in the exported PDF and spreadsheet: 'week' (weekly sections with subtotals), 'month' (monthly sections with subtotals), 'none' (flat list), or 'auto' (default: groups by week or month based on date range). The CSV is always a flat table; grouping only changes its subtotal rows.",
     ),
   week_of: z
     .string()
@@ -2211,6 +2213,9 @@ export type GeneratedTimesheetExport = {
   xlsxBytes: Uint8Array;
   xlsxFileName: string;
   xlsxDownloadUrl: string;
+  csvBytes: Uint8Array;
+  csvFileName: string;
+  csvDownloadUrl: string;
   groupBy: ExportGrouping;
   org: OrgContext;
   employeeLabel: string;
@@ -2246,7 +2251,8 @@ export async function generateTimesheetExport(
   }
   const { org } = orgRes;
   const tz = validTimezone(input.timezone);
-  const exportFormat: ExportFormat = input.format === "xlsx" ? "xlsx" : "pdf";
+  const exportFormat: ExportFormat =
+    input.format === "xlsx" || input.format === "csv" ? input.format : "pdf";
   const groupBy: ExportGrouping = input.group_by ?? "auto";
 
   let startDate: Date;
@@ -2387,12 +2393,21 @@ export async function generateTimesheetExport(
   };
   const pdfFileName = exportFileName(meta, "pdf");
   const xlsxFileName = exportFileName(meta, "xlsx");
+  const csvFileName = exportFileName(meta, "csv");
   const pdfBytes = toPdf(rows, meta);
   const xlsxBytes = toXlsx(rows, meta);
+  const csvBytes = toCsv(rows, meta);
 
-  const fileName = exportFormat === "pdf" ? pdfFileName : xlsxFileName;
-  const bytes = exportFormat === "pdf" ? pdfBytes : xlsxBytes;
-  const mimeType = exportFormat === "pdf" ? "application/pdf" : XLSX_MIME;
+  const byFormat = {
+    pdf: {
+      fileName: pdfFileName,
+      bytes: pdfBytes,
+      mimeType: "application/pdf",
+    },
+    xlsx: { fileName: xlsxFileName, bytes: xlsxBytes, mimeType: XLSX_MIME },
+    csv: { fileName: csvFileName, bytes: csvBytes, mimeType: CSV_MIME },
+  } as const;
+  const { fileName, bytes, mimeType } = byFormat[exportFormat];
   const hours = Number(totalHours(rows).toFixed(2));
   const daysWorked = new Set(rows.map((r) => r.date)).size;
   const periodSections = buildPeriodSections(rows, meta);
@@ -2421,7 +2436,12 @@ export async function generateTimesheetExport(
 
   const pdfDownloadUrl = buildUrl("pdf");
   const xlsxDownloadUrl = buildUrl("xlsx");
-  const downloadUrl = exportFormat === "pdf" ? pdfDownloadUrl : xlsxDownloadUrl;
+  const csvDownloadUrl = buildUrl("csv");
+  const downloadUrl = {
+    pdf: pdfDownloadUrl,
+    xlsx: xlsxDownloadUrl,
+    csv: csvDownloadUrl,
+  }[exportFormat];
 
   return {
     ok: true,
@@ -2436,6 +2456,9 @@ export async function generateTimesheetExport(
       xlsxBytes,
       xlsxFileName,
       xlsxDownloadUrl,
+      csvBytes,
+      csvFileName,
+      csvDownloadUrl,
       groupBy,
       org,
       employeeLabel,
@@ -2472,6 +2495,8 @@ export async function exportTimesheetTool(
     xlsxBytes,
     xlsxFileName,
     xlsxDownloadUrl,
+    csvFileName,
+    csvDownloadUrl,
     groupBy,
     org,
     employeeLabel,
@@ -2505,7 +2530,7 @@ export async function exportTimesheetTool(
   };
 
   return {
-    summary: `Timesheet for ${employeeLabel} (${formattedPeriod}: ${entriesCount} entr${entriesCount === 1 ? "y" : "ies"} across ${daysWorked} day${daysWorked === 1 ? "" : "s"}, ${formatHours(hours)} hrs) is ready in both PDF and Excel Spreadsheet formats. Download (requires Clock Out sign-in): PDF [${pdfFileName}](${pdfDownloadUrl}) | Spreadsheet [${xlsxFileName}](${xlsxDownloadUrl})`,
+    summary: `Timesheet for ${employeeLabel} (${formattedPeriod}: ${entriesCount} entr${entriesCount === 1 ? "y" : "ies"} across ${daysWorked} day${daysWorked === 1 ? "" : "s"}, ${formatHours(hours)} hrs) is ready in PDF, Excel Spreadsheet and CSV formats. Download (requires Clock Out sign-in): PDF [${pdfFileName}](${pdfDownloadUrl}) | Spreadsheet [${xlsxFileName}](${xlsxDownloadUrl}) | CSV [${csvFileName}](${csvDownloadUrl})`,
     data: {
       status: "ready",
       organization: { org_id: org.orgId, name: org.orgName },
@@ -2535,6 +2560,11 @@ export async function exportTimesheetTool(
         file_name: xlsxFileName,
         mime_type: XLSX_MIME,
         download_url: xlsxDownloadUrl,
+      },
+      csv: {
+        file_name: csvFileName,
+        mime_type: CSV_MIME,
+        download_url: csvDownloadUrl,
       },
       period_breakdown: periodSections.map((s) => ({
         label: s.label,

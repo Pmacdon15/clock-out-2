@@ -64,6 +64,12 @@ describe("TimesheetExport", () => {
       expect.any(Array),
       { employee: "Me", ...period },
     );
+
+    fireEvent.click(screen.getByRole("button", { name: "CSV" }));
+    expect(exportTimesheet).toHaveBeenLastCalledWith("csv", expect.any(Array), {
+      employee: "Me",
+      ...period,
+    });
   });
 
   it("brands the PDF with the org name and uploaded logo", async () => {
@@ -155,10 +161,11 @@ describe("TimesheetExport", () => {
     expect(rows.map((r) => r.employee)).toEqual(["Ada", "Unknown member"]);
   });
 
-  it("disables both downloads when there is nothing to export", () => {
+  it("disables every download when there is nothing to export", () => {
     render(<TimesheetExport employeeName="Me" entries={[]} {...period} />);
     expect(screen.getByText(/0 entries · 0.00 hrs/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "PDF" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Spreadsheet" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "CSV" })).toBeDisabled();
   });
 });

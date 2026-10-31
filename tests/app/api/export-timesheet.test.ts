@@ -240,11 +240,49 @@ describe("GET /api/export/timesheet", () => {
     expect(res.status).toBe(401);
   });
 
+  it("downloads a CSV attachment with text/csv headers", async () => {
+    mockAuth.mockResolvedValueOnce({ userId: "user_admin" });
+    mockDbGetOrgTimeEntries.mockResolvedValueOnce([
+      {
+        id: 1,
+        user_id: "user_worker",
+        org_id: "org_1",
+        clock_in: new Date("2026-10-26T15:00:00.000Z"),
+        clock_out: new Date("2026-10-26T23:00:00.000Z"),
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+    ]);
+
+    const req = new Request(
+      "https://clockout.patmac.ca/api/export/timesheet?org_id=org_1&member=all&start_date=2026-10-26&end_date=2026-10-28&format=csv&timezone=America/Edmonton",
+    );
+    const res = await GET(req);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("text/csv; charset=utf-8");
+    expect(res.headers.get("content-disposition")).toBe(
+      'attachment; filename="timesheet-entire-organization-2026-10-26-to-2026-10-28.csv"',
+    );
+    expect(res.headers.get("cache-control")).toBe("private, no-store");
+
+    const buffer = Buffer.from(await res.arrayBuffer());
+    expect(Array.from(buffer.subarray(0, 3))).toEqual([0xef, 0xbb, 0xbf]);
+    const text = buffer.toString("utf8").slice(1);
+    const lines = text.split("\r\n").filter(Boolean);
+    expect(lines[0]).toBe(
+      "Record Type,Employee,Date,Day,Clock In,Clock Out,Hours,Daily Total,Period,Days Worked,Shifts,Avg Hours/Day",
+    );
+    expect(lines[1]).toContain("Shift,Alex Smith,2026-10-26,Mon,");
+    expect(lines[1]).toContain(",8.00,8.00,");
+    expect(text).toContain("Total,,,,,,8.00,");
+  });
+
   it("returns 400 when invalid query parameters are provided", async () => {
     mockAuth.mockResolvedValueOnce({ userId: "user_admin" });
 
     const req = new Request(
-      "https://clockout.patmac.ca/api/export/timesheet?org_id=org_1&format=csv",
+      "https://clockout.patmac.ca/api/export/timesheet?org_id=org_1&format=docx",
     );
     const res = await GET(req);
 

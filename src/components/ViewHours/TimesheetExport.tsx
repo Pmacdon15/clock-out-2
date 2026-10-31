@@ -105,6 +105,15 @@ export function TimesheetExport({
           <Download className="mr-2 h-4 w-4" />
           Spreadsheet
         </Button>
+        <Button
+          disabled={isEmpty}
+          onClick={() => handleExport("csv")}
+          size="sm"
+          variant="outline"
+        >
+          <Download className="mr-2 h-4 w-4" />
+          CSV
+        </Button>
       </div>
     </Card>
   );
