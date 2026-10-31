@@ -68,15 +68,14 @@ export default function ReportingSettings({
       ? "bi-weekly"
       : initialData?.report_frequency;
 
+  const initialDay = initialData?.report_day || "Monday";
+  const initialInterval = initialData?.report_interval || 1;
+
   const [frequency, setFrequency] = useState<string>(
     normalizedInitialFreq || "weekly",
   );
-  const [reportDay, setReportDay] = useState<string>(
-    initialData?.report_day || "Monday",
-  );
-  const [reportInterval, setReportInterval] = useState<number>(
-    initialData?.report_interval || 1,
-  );
+  const [reportDay, setReportDay] = useState<string>(initialDay);
+  const [reportInterval, setReportInterval] = useState<number>(initialInterval);
 
   const { mutate, isPending } = useMutation({
     mutationFn: ({
@@ -120,11 +119,8 @@ export default function ReportingSettings({
   const hasChanged =
     frequency !== normalizedInitialFreq ||
     (frequency === "custom" &&
-      (reportDay !== (initialData?.report_day || "Monday") ||
-        reportInterval !== (initialData?.report_interval || 1))) ||
-    (frequency === "bi-weekly" &&
-      (reportDay !== (initialData?.report_day || "Monday") ||
-        (initialData?.report_interval ?? 2) !== 2));
+      (reportDay !== initialDay || reportInterval !== initialInterval)) ||
+    (frequency === "bi-weekly" && reportDay !== initialDay);
 
   return (
     <Card className="p-8">

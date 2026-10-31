@@ -222,4 +222,16 @@ describe("ReportingSettings", () => {
     });
     expect(save()).toBeEnabled();
   });
+
+  it("normalizes stored 'biweekly' frequency to 'bi-weekly'", () => {
+    const biweeklySaved: ReportingSettingsData = {
+      org_id: "org_1",
+      report_frequency: "biweekly",
+      report_day: "Friday",
+      report_interval: 2,
+    };
+    renderSettings(biweeklySaved);
+    expect(option(/Bi-weekly/)).toHaveTextContent("Current");
+    expect(screen.getByLabelText("Reporting Day")).toHaveValue("Friday");
+  });
 });
