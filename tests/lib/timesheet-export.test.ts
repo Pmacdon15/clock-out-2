@@ -1019,6 +1019,72 @@ describe("break records in exports", () => {
       breakSettings,
     );
     expect(withoutBreak.hours).toBe(7.5);
+    expect(withoutBreak.breaks).toEqual([
+      {
+        type: "Meal period",
+        start: "-",
+        end: "-",
+        hours: 0.5,
+        paid: false,
+      },
+    ]);
+    expect(withoutBreak.unpaidBreakHours).toBe(0.5);
+  });
+
+  it("includes automatically docked breaks in break records without clock times, even if not clocked out", () => {
+    const breakSettings = {
+      org_id: "o1",
+      dock_lunch: true,
+      lunch_duration_minutes: 30,
+      lunch_min_shift_hours: 5,
+    };
+
+    // An open shift where user didn't clock out, started 6 hours ago
+    const sixHoursAgo = new Date(Date.now() - 6 * 3_600_000);
+    const [openShiftRow] = buildExportRows(
+      [
+        makeEntry({
+          id: 5,
+          user_id: "u1",
+          clock_in: sixHoursAgo,
+          clock_out: null,
+          skip_lunch: false,
+        }),
+      ],
+      () => "Ada",
+      undefined,
+      breakSettings,
+    );
+
+    expect(openShiftRow.clockOut).toBe("In progress");
+    expect(openShiftRow.hours).toBeNull();
+    expect(openShiftRow.breaks).toEqual([
+      {
+        type: "Meal period",
+        start: "-",
+        end: "-",
+        hours: 0.5,
+        paid: false,
+      },
+    ]);
+    expect(openShiftRow.unpaidBreakHours).toBe(0.5);
+
+    // If admin marked no break taken (skip_lunch: true), no break is docked
+    const [skippedShiftRow] = buildExportRows(
+      [
+        makeEntry({
+          id: 6,
+          user_id: "u1",
+          clock_in: sixHoursAgo,
+          clock_out: null,
+          skip_lunch: true,
+        }),
+      ],
+      () => "Ada",
+      undefined,
+      breakSettings,
+    );
+    expect(skippedShiftRow.breaks).toBeUndefined();
   });
 
   it("lists the break records in the spreadsheet", () => {
@@ -1277,6 +1343,29 @@ describe("captured location in the export", () => {
     expect(totalLine).toBe(
       'Total,,,,,,16.00,,"Mar 9, 2026 - Mar 10, 2026",2,2,,',
     );
+
+    // Multi-week grouped CSV with location covers Period Subtotal and Period Summary location branches
+    const multiWeekRows = [
+      row({ date: "2026-03-08", hours: 4, location: "Site A" }),
+      row({ date: "2026-03-15", hours: 6, location: "Site B" }),
+    ];
+    const multiWeekCsv = toCsvText(multiWeekRows, {
+      ...meta,
+      startDate: "2026-03-08",
+      endDate: "2026-03-21",
+      groupBy: "week",
+    });
+    const multiWeekLines = multiWeekCsv.split("\r\n").filter(Boolean);
+    const subtotalLine = multiWeekLines.find((l) =>
+      l.startsWith("Period Subtotal,"),
+    );
+    expect(subtotalLine).toBeDefined();
+    expect(subtotalLine?.endsWith(",")).toBe(true);
+    const periodSummaryLine = multiWeekLines.find((l) =>
+      l.startsWith("Period Summary,"),
+    );
+    expect(periodSummaryLine).toBeDefined();
+    expect(periodSummaryLine?.endsWith(",")).toBe(true);
 
     const rowsWithoutLocation = buildExportRows(
       [

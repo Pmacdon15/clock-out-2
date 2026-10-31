@@ -3,6 +3,7 @@ import {
   type BreakLike,
   breakTypeLabel,
   getBreakDurationMs,
+  getDockedMinutes,
   getEffectiveHours,
   getPaidBreakMs,
   getUnpaidBreakMs,
@@ -203,7 +204,7 @@ export function buildExportRows(
     )
     .map(({ entry, clockIn, clockOut }) => {
       const date = formatDate(clockIn, timezone);
-      const breaks = (entry.breaks ?? []).map((brk) => ({
+      const clickedBreaks = (entry.breaks ?? []).map((brk) => ({
         type: breakTypeLabel(brk.break_type),
         start: formatTime(new Date(brk.break_start), timezone),
         end: brk.break_end
@@ -212,7 +213,24 @@ export function buildExportRows(
         hours: getBreakDurationMs(brk) / 3_600_000,
         paid: isPaidBreakType(brk.break_type),
       }));
+
+      const dockedMinutes = getDockedMinutes(entry, breakSettings);
+      const breaks = [...clickedBreaks];
+      if (dockedMinutes > 0) {
+        breaks.push({
+          type: "Meal period",
+          start: "-",
+          end: "-",
+          hours: dockedMinutes / 60,
+          paid: false,
+        });
+      }
+
       const location = formatEntryLocation(entry);
+      const unpaidBreakHours =
+        (getUnpaidBreakMs(entry) + dockedMinutes * 60_000) / 3_600_000;
+      const paidBreakHours = getPaidBreakMs(entry) / 3_600_000;
+
       return {
         employee: getEmployeeName(entry.user_id),
         date,
@@ -220,12 +238,12 @@ export function buildExportRows(
         clockIn: formatTime(clockIn, timezone),
         clockOut: clockOut ? formatTime(clockOut, timezone) : "In progress",
         hours: clockOut ? getEffectiveHours(entry, breakSettings) : null,
-        // Only shifts with recorded breaks carry the break columns.
+        // Only shifts with recorded or docked breaks carry the break columns.
         ...(breaks.length > 0
           ? {
               breaks,
-              unpaidBreakHours: getUnpaidBreakMs(entry) / 3_600_000,
-              paidBreakHours: getPaidBreakMs(entry) / 3_600_000,
+              unpaidBreakHours,
+              paidBreakHours,
             }
           : {}),
         // Absent, not empty, for orgs that capture no location at all.
