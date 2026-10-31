@@ -565,13 +565,13 @@ export const manageReportingSettingsInputSchema = z.object({
     .enum(["get", "update", "send_test_report"])
     .optional()
     .describe(
-      "Action to perform: 'get' (view current settings), 'update' (change reporting schedule), or 'send_test_report' (email the last 7 days report to org admins now). Defaults to 'get'.",
+      "Action to perform: 'get' (view current settings), 'update' (change reporting schedule), or 'send_test_report' (email the last 7 days report to org admins now). Defaults to 'get', or 'update' if schedule settings are provided.",
     ),
   report_frequency: z
-    .enum(["off", "weekly", "twice-monthly", "custom"])
+    .enum(["off", "weekly", "twice-monthly", "custom", "bi-weekly", "biweekly"])
     .optional()
     .describe(
-      "Report frequency when action is 'update': 'off' (no emailed reports), 'weekly' (sent on the 1st, 8th, 16th and 24th), 'twice-monthly' (pay periods, sent on the 1st and 16th), or 'custom' (a chosen weekday, every 1 or 2 weeks). If omitted, it becomes 'custom' when report_day or report_interval is given, otherwise the current frequency is kept.",
+      "Report frequency when action is 'update': 'off' (no emailed reports), 'weekly' (sent on the 1st, 8th, 16th and 24th), 'twice-monthly' (pay periods, sent on the 1st and 16th), 'bi-weekly' (sent every 2 weeks on report_day, e.g. Friday), or 'custom' (a chosen weekday, every 1 or 2 weeks). If omitted, it becomes 'custom' (or 'bi-weekly' if interval is 2) when report_day or report_interval is given, otherwise the current frequency is kept.",
     ),
   report_day: z
     .enum([
@@ -585,14 +585,18 @@ export const manageReportingSettingsInputSchema = z.object({
     ])
     .nullable()
     .optional()
-    .describe("Day of the week when report_frequency is 'custom'."),
+    .describe(
+      "Day of the week when report_frequency is 'custom' or 'bi-weekly'.",
+    ),
   report_interval: z
     .number()
     .int()
     .min(1)
     .max(2)
     .optional()
-    .describe("Interval in weeks (1 or 2) when report_frequency is 'custom'."),
+    .describe(
+      "Interval in weeks (1 or 2) when report_frequency is 'custom'. Bi-weekly always uses interval 2.",
+    ),
 });
 
 export const manageBreakSettingsInputSchema = z.object({
@@ -3759,7 +3763,12 @@ export async function manageReportingSettingsTool(
   if (!orgRes.ok) return orgRes.result;
   const { org } = orgRes;
 
-  const action = input.action ?? "get";
+  const hasSettingsInput =
+    input.report_frequency !== undefined ||
+    input.report_day !== undefined ||
+    input.report_interval !== undefined;
+
+  const action = input.action ?? (hasSettingsInput ? "update" : "get");
 
   if (action === "get") {
     const [settings, reportingEnabled] = await Promise.all([
@@ -3820,17 +3829,29 @@ export async function manageReportingSettingsTool(
 
   const current = await dbGetReportingSettings(org.orgId);
   const wantsCustom = input.report_day != null || input.report_interval != null;
+
+  let rawFreq = input.report_frequency;
+  if (rawFreq === "biweekly") rawFreq = "bi-weekly";
+
   const frequency =
-    input.report_frequency ??
-    (wantsCustom ? "custom" : (current?.report_frequency ?? "weekly"));
-  const day =
-    frequency === "custom"
-      ? (input.report_day ?? current?.report_day ?? "Monday")
-      : null;
+    rawFreq ??
+    (wantsCustom
+      ? current?.report_frequency === "bi-weekly" || input.report_interval === 2
+        ? "bi-weekly"
+        : (current?.report_frequency ?? "custom")
+      : (current?.report_frequency ?? "weekly"));
+
+  const isDayBased = frequency === "custom" || frequency === "bi-weekly";
+  const defaultDay = frequency === "bi-weekly" ? "Friday" : "Monday";
+  const day = isDayBased
+    ? (input.report_day ?? current?.report_day ?? defaultDay)
+    : null;
   const interval =
-    frequency === "custom"
-      ? (input.report_interval ?? current?.report_interval ?? 1)
-      : 1;
+    frequency === "bi-weekly"
+      ? 2
+      : frequency === "custom"
+        ? (input.report_interval ?? current?.report_interval ?? 1)
+        : 1;
 
   const updated = await dbUpdateReportingSettings(
     org.orgId,

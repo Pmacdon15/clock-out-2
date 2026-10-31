@@ -99,13 +99,19 @@ export async function GET(request: Request) {
         const prevMonth = subMonths(today, 1);
         startDate = new Date(prevMonth.getFullYear(), prevMonth.getMonth(), 16);
       }
-    } else if (frequency === "custom") {
+    } else if (
+      frequency === "custom" ||
+      frequency === "bi-weekly" ||
+      frequency === "biweekly"
+    ) {
       // Weekday-based
       if (weekday === settingDay) {
-        if (interval === 1) {
+        const effectiveInterval =
+          frequency === "bi-weekly" || frequency === "biweekly" ? 2 : interval;
+        if (effectiveInterval === 1) {
           shouldSend = true;
           startDate = subDays(today, 7);
-        } else if (interval === 2) {
+        } else if (effectiveInterval === 2) {
           // Every 2nd Tuesday kinda thing
           // Use week number to determine parity (even weeks)
           if (getWeek(today) % 2 === 0) {
@@ -122,7 +128,12 @@ export async function GET(request: Request) {
       );
       try {
         const emailTimeframe =
-          frequency === "twice-monthly" ? "custom" : "week";
+          frequency === "twice-monthly" ||
+          frequency === "bi-weekly" ||
+          frequency === "biweekly" ||
+          interval === 2
+            ? "custom"
+            : "week";
         await sendWeeklyReports(
           startOfDay(startDate),
           endDate,

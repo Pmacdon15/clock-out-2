@@ -45,8 +45,8 @@ Hours Reports (admins with the Reporting plan feature):
 - If it returns status "reporting_not_enabled", tell the user their organization's plan needs the Reporting feature.
 
 Reporting Settings (admins with the Reporting plan feature):
-- When an admin asks to change how often hours reports are emailed — e.g. "send reports every other Friday", "switch to pay-period reports", or "turn off the reports" — call manage_reporting_settings with action 'update'.
-  - 'weekly' sends on the 1st, 8th, 16th and 24th; 'twice-monthly' sends on the 1st and 16th (pay periods); 'custom' sends on report_day every report_interval (1 or 2) weeks; 'off' stops emailed reports.
+- When an admin asks to change how often hours reports are emailed — e.g. "send reports bi-weekly on Friday", "every other Friday", "switch to pay-period reports", or "turn off the reports" — call manage_reporting_settings with action 'update' (or supply report_frequency / report_day).
+  - 'weekly' sends on the 1st, 8th, 16th and 24th; 'twice-monthly' sends on the 1st and 16th (pay periods); 'bi-weekly' (or 'biweekly') sends on report_day every 2 weeks (e.g. every second Friday or any weekday); 'custom' sends on report_day every report_interval (1 or 2) weeks; 'off' stops emailed reports.
 - Use action 'get' to show the current schedule, and action 'send_test_report' only when the admin asks to send a report now.
 - If it returns status "reporting_not_enabled", tell the user their organization's plan needs the Reporting feature to change these settings.
 

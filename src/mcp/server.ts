@@ -409,7 +409,7 @@ export function registerClockOutTools(server: McpServer) {
     {
       title: "View or update organization reporting settings",
       description:
-        "Views or updates the organization's automated email report schedule ('off', 'weekly', 'twice-monthly', or 'custom' weekday every 1 or 2 weeks) or sends a test weekly report email to organization admins. Anyone can view the settings; updating or sending reports is admin-only ('org:admin') and requires a plan that includes Reporting.",
+        "Views or updates the organization's automated email report schedule ('off', 'weekly', 'bi-weekly', 'twice-monthly', or 'custom' weekday every 1 or 2 weeks) or sends a test weekly report email to organization admins. Anyone can view the settings; updating or sending reports is admin-only ('org:admin') and requires a plan that includes Reporting.",
       inputSchema: portable(manageReportingSettingsInputSchema),
       annotations: {
         readOnlyHint: false,
