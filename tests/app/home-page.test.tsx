@@ -51,6 +51,9 @@ vi.mock("@/components/headers/main-page-header", () => ({
 vi.mock("@/components/fallbacks/home-page-fallback", () => ({
   default: () => <div data-testid="skeleton" />,
 }));
+vi.mock("@/components/InstallPrompt", () => ({
+  default: () => <div data-testid="install-prompt" />,
+}));
 
 import Home from "@/app/page";
 
