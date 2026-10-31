@@ -75,6 +75,18 @@ const formatDurationMs = (diffMs: number) => {
 const formatDuration = (start: Date, end: Date = new Date()) =>
   formatDurationMs(Math.abs(end.getTime() - start.getTime()));
 
+/* v8 ignore start */
+const triggerHaptic = () => {
+  if (typeof navigator !== "undefined" && "vibrate" in navigator) {
+    try {
+      navigator.vibrate(40);
+    } catch {
+      // Vibration not supported or allowed
+    }
+  }
+};
+/* v8 ignore stop */
+
 interface ManageHoursProps {
   initialEntries: TimeEntry[];
   isAdmin: boolean;
@@ -233,6 +245,8 @@ export default function TimeClock({
     /* v8 ignore next -- @preserve */
     if (!activeEntry) return;
 
+    triggerHaptic();
+
     const now = new Date();
     const optimisticBreak: TimeEntryBreak = {
       // Negative so it cannot collide with a real row id.
@@ -261,6 +275,8 @@ export default function TimeClock({
     // The End Break button only renders while a break is running.
     /* v8 ignore next -- @preserve */
     if (!activeEntry || !openBreak) return;
+
+    triggerHaptic();
 
     const now = new Date();
     // `openBreak` came out of this list, so the list is always there.
@@ -344,6 +360,8 @@ export default function TimeClock({
   };
 
   const handleClockIn = () => {
+    triggerHaptic();
+
     // Orgs that never switched location on take exactly the old path: no
     // geolocation prompt, no extra tick before the optimistic entry appears.
     if (!captureLocation) {
@@ -361,6 +379,8 @@ export default function TimeClock({
     // The Clock Out button only renders while there is an active entry.
     /* v8 ignore next -- @preserve */
     if (!activeEntry) return;
+
+    triggerHaptic();
 
     if (!captureLocation) {
       submitClockOut(activeEntry);
@@ -475,7 +495,7 @@ export default function TimeClock({
           </div>
 
           <Button
-            className="h-16 w-full max-w-sm gap-3 rounded-2xl font-bold text-lg"
+            className="h-16 w-full max-w-sm gap-3 rounded-2xl font-bold text-lg transition-transform active:scale-[0.98] touch-manipulation"
             disabled={clockOutMutation.isPending || isLocating}
             onClick={handleClockOut}
             variant="destructive"
@@ -497,7 +517,7 @@ export default function TimeClock({
             Ready to start your shift?
           </div>
           <Button
-            className="h-16 w-full max-w-sm gap-3 rounded-2xl font-bold text-lg"
+            className="h-16 w-full max-w-sm gap-3 rounded-2xl font-bold text-lg transition-transform active:scale-[0.98] touch-manipulation"
             disabled={clockInMutation.isPending || isLocating}
             onClick={handleClockIn}
           >

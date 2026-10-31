@@ -11,7 +11,7 @@ import { Suspense } from "react";
 
 export default function MainPageHeader() {
   return (
-    <header className="mb-12 flex flex-col items-center justify-between gap-4 border-zinc-200 border-b pb-6 md:flex-row dark:border-zinc-800">
+    <header className="mb-6 flex flex-col items-center justify-between gap-4 border-zinc-200 border-b pb-6 sm:mb-12 md:flex-row dark:border-zinc-800">
       <div>
         <h1 className="font-bold text-3xl tracking-tight">Clock Out</h1>
         <p className="mt-1 text-muted-foreground">

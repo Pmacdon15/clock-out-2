@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import DashboardTabs from "@/components/DashboardTabs";
 import DashboardSkeleton from "@/components/fallbacks/home-page-fallback";
 import MainPageHeader from "@/components/headers/main-page-header";
+import InstallPrompt from "@/components/InstallPrompt";
 import McpConnectCard from "@/components/McpConnectCard";
 import {
   getOrgBreakSettings,
@@ -20,8 +21,9 @@ export default function Home(props: PageProps<"/">) {
   const authPromise = auth.protect();
   const hasPromise = authPromise.then((data) => data.has);
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-4 py-8">
+    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-3 py-4 sm:px-4 sm:py-8">
       <MainPageHeader />
+      <InstallPrompt />
       {/* Show reads the session, so this boundary is the dashboard's hole:
           the skeleton holds its place until auth and the entries resolve. */}
       <Suspense fallback={<DashboardSkeleton />}>

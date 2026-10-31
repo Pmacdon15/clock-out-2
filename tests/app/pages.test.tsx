@@ -23,7 +23,7 @@ vi.mock("@clerk/nextjs", () => ({
   ),
 }));
 
-import RootLayout, { metadata } from "@/app/layout";
+import RootLayout, { metadata, viewport } from "@/app/layout";
 import PlansPage from "@/app/plans/page";
 import PrivacyPage from "@/app/privacy/page";
 import TOSPage from "@/app/tos/page";
@@ -47,10 +47,32 @@ describe("RootLayout", () => {
     expect(providers?.querySelector('[data-testid="footer"]')).not.toBeNull();
   });
 
-  it("describes the app in its metadata", () => {
+  it("describes the app in its metadata and viewport", () => {
     expect(metadata).toEqual({
       title: "Clock Out | Simple Time Tracking",
       description: "Clean and efficient time tracking for your organization.",
+      manifest: "/manifest.webmanifest",
+      appleWebApp: {
+        capable: true,
+        statusBarStyle: "default",
+        title: "Clock Out",
+      },
+      icons: {
+        icon: [
+          { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+          { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
+          { url: "/icon.svg", type: "image/svg+xml" },
+        ],
+        apple: [
+          { url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
+        ],
+      },
+    });
+    expect(viewport).toEqual({
+      themeColor: "#09090b",
+      width: "device-width",
+      initialScale: 1,
+      viewportFit: "cover",
     });
   });
 });
