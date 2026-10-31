@@ -15,6 +15,8 @@ import {
   exportTimesheetTool,
   getClockStatus,
   getClockStatusInputSchema,
+  getLocationSettingsInputSchema,
+  getLocationSettingsTool,
   getWeeklyTimecardInputSchema,
   getWeeklyTimecardTool,
   inviteMemberInputSchema,
@@ -211,7 +213,7 @@ export function registerClockOutTools(server: McpServer) {
     {
       title: "Clock in",
       description:
-        "Starts a live shift for yourself, or (when called by an org admin) clocks in any organization member by name, email, or user_id. Rejects the request if the person is already clocked in or if a custom clock_in time overlaps with an existing shift, and invalidates the cache immediately.",
+        "Starts a live shift for yourself, or (when called by an org admin) clocks in any organization member by name, email, or user_id. If the organization requires location capture, location (site name, street address, or latitude/longitude) must be provided. Rejects the request if the person is already clocked in, if location is required but omitted, if outside an approved site when geofencing is restricted, or if a custom clock_in time overlaps with an existing shift, and invalidates the cache immediately.",
       inputSchema: portable(clockInInputSchema),
       annotations: {
         readOnlyHint: false,
@@ -229,7 +231,7 @@ export function registerClockOutTools(server: McpServer) {
     {
       title: "Clock out",
       description:
-        "Ends the active shift for yourself, or (when called by an org admin) clocks out any organization member by name, email, or user_id. Optionally accepts a custom clock_out time, verifies there are no overlapping shifts, and invalidates the cache immediately.",
+        "Ends the active shift for yourself, or (when called by an org admin) clocks out any organization member by name, email, or user_id. Optionally accepts a custom clock_out time, records clock-out location (site name, street address, or coordinates), verifies there are no overlapping shifts, and invalidates the cache immediately.",
       inputSchema: portable(clockOutInputSchema),
       annotations: {
         readOnlyHint: false,
@@ -240,6 +242,21 @@ export function registerClockOutTools(server: McpServer) {
     },
     (args, ctx) =>
       run(server, ctx.http?.authInfo, (caller) => clockOutTool(caller, args)),
+  );
+
+  server.registerTool(
+    "get_location_settings",
+    {
+      title: "Get organization location settings and sites",
+      description:
+        "Returns the organization's location settings (whether location capture is 'off', 'optional', or 'required', and whether clock-in is restricted to approved sites) and the list of configured work sites. Call this to check if location is required before clocking in, or to see available work sites.",
+      inputSchema: portable(getLocationSettingsInputSchema),
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    (args, ctx) =>
+      run(server, ctx.http?.authInfo, (caller) =>
+        getLocationSettingsTool(caller, args),
+      ),
   );
 
   server.registerTool(

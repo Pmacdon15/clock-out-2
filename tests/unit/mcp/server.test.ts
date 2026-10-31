@@ -41,6 +41,10 @@ const mockInvalidateReportingSettingsCache = vi.fn();
 const mockDbGetBreakSettings = vi.fn(async () => undefined);
 const mockDbGetReportingSettings = vi.fn(async () => undefined);
 const mockDbGetSites = vi.fn(async () => []);
+const mockDbGetLocationSettings = vi.fn(async () => ({
+  capture_mode: "optional",
+  restrict_clock_in: false,
+}));
 const mockDbUpdateReportingSettings = vi.fn();
 const mockDbUpdateBreakSettings = vi.fn();
 const mockInvalidateBreakSettingsCache = vi.fn();
@@ -59,6 +63,8 @@ vi.mock("@/mcp/db", () => ({
   dbGetBreakSettings: (...args: unknown[]) => mockDbGetBreakSettings(...args),
   dbGetBreakWithEntry: (...args: unknown[]) => mockDbGetBreakWithEntry(...args),
   dbGetEntryBreaks: (...args: unknown[]) => mockDbGetEntryBreaks(...args),
+  dbGetLocationSettings: (...args: unknown[]) =>
+    mockDbGetLocationSettings(...args),
   dbGetOrgActiveEntries: vi.fn(async () => []),
   dbGetOrgTimeEntries: (...args: unknown[]) => mockDbGetOrgTimeEntries(...args),
   dbGetReportingSettings: (...args: unknown[]) =>
@@ -113,6 +119,8 @@ import {
   clockInTool,
   clockOutTool,
   exportTimesheetTool,
+  getClockStatus,
+  getLocationSettingsTool,
   inviteMemberTool,
   listOrganizations,
   manageBreakSettingsTool,
@@ -155,6 +163,7 @@ describe("Clock Out MCP server", () => {
       "delete_time_entry",
       "export_timesheet",
       "get_clock_status",
+      "get_location_settings",
       "get_weekly_timecard",
       "invite_member",
       "list_members",
@@ -184,6 +193,7 @@ describe("Clock Out MCP server", () => {
       "list_members",
       "who_is_working",
       "get_clock_status",
+      "get_location_settings",
       "list_time_entries",
       "get_weekly_timecard",
       "export_timesheet",
@@ -1801,6 +1811,190 @@ describe("Clerk pagination in MCP tools", () => {
         }),
       );
       expect(res.summary).toContain("Remote Office (200 Queen St, Ottawa, ON)");
+    });
+
+    it("strictly rejects clock-in without location when capture_mode is required", async () => {
+      mockDbGetLocationSettings.mockResolvedValueOnce({
+        org_id: "org_1",
+        capture_mode: "required",
+        restrict_clock_in: false,
+      });
+
+      const res = await clockInTool(caller, { timezone: "America/Edmonton" });
+
+      expect(res.isError).toBe(true);
+      expect(res.data.status).toBe("location_required");
+      expect(res.summary).toContain("requires your location to clock in");
+      expect(mockDbClockInAt).not.toHaveBeenCalled();
+    });
+
+    it("allows clock-in with site name when capture_mode is required", async () => {
+      mockDbGetLocationSettings.mockResolvedValueOnce({
+        org_id: "org_1",
+        capture_mode: "required",
+        restrict_clock_in: false,
+      });
+      mockDbGetSites.mockResolvedValueOnce([
+        {
+          id: 1,
+          org_id: "org_1",
+          name: "Main Office",
+          latitude: 45.4215,
+          longitude: -75.6972,
+          radius_meters: 100,
+          address: "100 Main St",
+        },
+      ]);
+      mockDbClockInAt.mockResolvedValueOnce({
+        id: 105,
+        user_id: "user_admin",
+        org_id: "org_1",
+        clock_in: new Date("2026-10-30T14:00:00.000Z"),
+        clock_out: null,
+        clock_in_latitude: 45.4215,
+        clock_in_longitude: -75.6972,
+        clock_in_accuracy_m: 0,
+        clock_in_site_name: "Main Office",
+        clock_in_address: "100 Main St",
+        created_at: new Date(),
+        updated_at: new Date(),
+      });
+
+      const res = await clockInTool(caller, {
+        site: "Main Office",
+        timezone: "America/Edmonton",
+      });
+
+      expect(res.isError).toBeUndefined();
+      expect(res.data.status).toBe("clocked_in");
+      expect(res.data.location).toMatchObject({
+        siteName: "Main Office",
+        address: "100 Main St",
+      });
+      expect(res.data.entry.clock_in_location).toMatchObject({
+        site_name: "Main Office",
+        address: "100 Main St",
+      });
+    });
+
+    it("does not store location when capture_mode is off", async () => {
+      mockDbGetLocationSettings.mockResolvedValueOnce({
+        org_id: "org_1",
+        capture_mode: "off",
+        restrict_clock_in: false,
+      });
+      mockDbClockInAt.mockResolvedValueOnce({
+        id: 106,
+        user_id: "user_admin",
+        org_id: "org_1",
+        clock_in: new Date("2026-10-30T14:00:00.000Z"),
+        clock_out: null,
+        created_at: new Date(),
+        updated_at: new Date(),
+      });
+
+      const res = await clockInTool(caller, {
+        site: "Headquarters",
+        latitude: 45.4215,
+        longitude: -75.6972,
+        timezone: "America/Edmonton",
+      });
+
+      expect(res.isError).toBeUndefined();
+      expect(mockDbClockInAt).toHaveBeenCalledWith(
+        "user_admin",
+        "org_1",
+        undefined,
+        null,
+      );
+      expect(res.data.location).toBeNull();
+    });
+
+    it("rejects clock-in when restricted to approved sites and user is outside", async () => {
+      mockDbGetLocationSettings.mockResolvedValueOnce({
+        org_id: "org_1",
+        capture_mode: "required",
+        restrict_clock_in: true,
+      });
+      mockDbGetSites.mockResolvedValueOnce([
+        {
+          id: 1,
+          org_id: "org_1",
+          name: "HQ",
+          latitude: 45.4215,
+          longitude: -75.6972,
+          radius_meters: 100,
+        },
+      ]);
+
+      const res = await clockInTool(caller, {
+        latitude: 51.0447,
+        longitude: -114.0719,
+        timezone: "America/Edmonton",
+      });
+
+      expect(res.isError).toBe(true);
+      expect(res.data.status).toBe("geofence_rejected");
+      expect(res.summary).toContain("not at an approved work site");
+      expect(mockDbClockInAt).not.toHaveBeenCalled();
+    });
+
+    it("returns organization location settings and sites via getLocationSettingsTool", async () => {
+      mockDbGetLocationSettings.mockResolvedValueOnce({
+        org_id: "org_1",
+        capture_mode: "required",
+        restrict_clock_in: true,
+      });
+      mockDbGetSites.mockResolvedValueOnce([
+        {
+          id: 1,
+          org_id: "org_1",
+          name: "Main Campus",
+          address: "500 Main St",
+          latitude: 45.4215,
+          longitude: -75.6972,
+          radius_meters: 200,
+        },
+      ]);
+
+      const res = await getLocationSettingsTool(caller, { org_id: "org_1" });
+
+      expect(res.isError).toBeUndefined();
+      expect(res.data.settings).toEqual({
+        capture_mode: "required",
+        restrict_clock_in: true,
+      });
+      expect(res.data.sites).toHaveLength(1);
+      expect(res.data.sites[0]).toMatchObject({
+        name: "Main Campus",
+        address: "500 Main St",
+      });
+      expect(res.summary).toContain("REQUIRED");
+    });
+
+    it("includes location in getClockStatus and whoIsWorking responses", async () => {
+      mockDbGetActiveEntry.mockResolvedValueOnce({
+        id: 201,
+        user_id: "user_admin",
+        org_id: "org_1",
+        clock_in: new Date("2026-10-30T10:00:00.000Z"),
+        clock_in_site_name: "Downtown Hub",
+        clock_in_address: "100 Bay St, Toronto",
+        clock_in_latitude: 43.6532,
+        clock_in_longitude: -79.3832,
+      });
+
+      const statusRes = await getClockStatus(caller, {
+        timezone: "America/Edmonton",
+      });
+
+      expect(statusRes.isError).toBeUndefined();
+      expect(statusRes.data.is_clocked_in).toBe(true);
+      expect(statusRes.data.active_entry.clock_in_location).toMatchObject({
+        site_name: "Downtown Hub",
+        address: "100 Bay St, Toronto",
+      });
+      expect(statusRes.summary).toContain("Downtown Hub (100 Bay St, Toronto)");
     });
   });
 });

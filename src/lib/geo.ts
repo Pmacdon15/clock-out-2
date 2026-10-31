@@ -184,7 +184,7 @@ export const isLocationRequired = (
   settings: LocationSettingsData | null | undefined,
 ) => captureMode(settings) === "required" || isRestricted(settings);
 
-const formatMeters = (meters: number) =>
+export const formatMeters = (meters: number) =>
   meters >= 1000
     ? `${(meters / 1000).toFixed(meters >= 10_000 ? 0 : 1)} km`
     : `${Math.round(meters)} m`;
