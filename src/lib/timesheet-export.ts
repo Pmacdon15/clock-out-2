@@ -3,6 +3,7 @@ import {
   type BreakLike,
   breakTypeLabel,
   getBreakDurationMs,
+  getDockedMinutes,
   getEffectiveHours,
   getPaidBreakMs,
   getUnpaidBreakMs,
@@ -19,7 +20,7 @@ import type { BreakSettingsData } from "./types";
  * extra ships in the client bundle.
  */
 
-type ExportableEntry = {
+export type ExportableEntry = {
   id: number;
   user_id: string;
   clock_in: Date | string;
@@ -31,6 +32,10 @@ type ExportableEntry = {
   clock_in_longitude?: number | null;
   clock_in_site_name?: string | null;
   clock_in_address?: string | null;
+  clock_out_latitude?: number | null;
+  clock_out_longitude?: number | null;
+  clock_out_site_name?: string | null;
+  clock_out_address?: string | null;
 };
 
 export type ExportFormat = "pdf" | "xlsx" | "csv";
@@ -60,9 +65,9 @@ export type ExportRow = {
   unpaidBreakHours?: number;
   paidBreakHours?: number;
   /**
-   * Where the clock-in happened, as "<site> (lat, lon)" — empty for orgs that
-   * do not capture location. Only the XLSX export has a column for it; the
-   * PDF's fixed-width layout has no room.
+   * Where the shift punches happened, as "<site> (lat, lon)" or "In: ... | Out: ..."
+   * — empty for orgs that do not capture location. Included across XLSX, CSV, and PDF
+   * exports when punch locations are captured.
    */
   location?: string;
 };
@@ -199,7 +204,7 @@ export function buildExportRows(
     )
     .map(({ entry, clockIn, clockOut }) => {
       const date = formatDate(clockIn, timezone);
-      const breaks = (entry.breaks ?? []).map((brk) => ({
+      const clickedBreaks = (entry.breaks ?? []).map((brk) => ({
         type: breakTypeLabel(brk.break_type),
         start: formatTime(new Date(brk.break_start), timezone),
         end: brk.break_end
@@ -208,7 +213,24 @@ export function buildExportRows(
         hours: getBreakDurationMs(brk) / 3_600_000,
         paid: isPaidBreakType(brk.break_type),
       }));
+
+      const dockedMinutes = getDockedMinutes(entry, breakSettings);
+      const breaks = [...clickedBreaks];
+      if (dockedMinutes > 0) {
+        breaks.push({
+          type: "Meal period",
+          start: "-",
+          end: "-",
+          hours: dockedMinutes / 60,
+          paid: false,
+        });
+      }
+
       const location = formatEntryLocation(entry);
+      const unpaidBreakHours =
+        (getUnpaidBreakMs(entry) + dockedMinutes * 60_000) / 3_600_000;
+      const paidBreakHours = getPaidBreakMs(entry) / 3_600_000;
+
       return {
         employee: getEmployeeName(entry.user_id),
         date,
@@ -216,12 +238,12 @@ export function buildExportRows(
         clockIn: formatTime(clockIn, timezone),
         clockOut: clockOut ? formatTime(clockOut, timezone) : "In progress",
         hours: clockOut ? getEffectiveHours(entry, breakSettings) : null,
-        // Only shifts with recorded breaks carry the break columns.
+        // Only shifts with recorded or docked breaks carry the break columns.
         ...(breaks.length > 0
           ? {
               breaks,
-              unpaidBreakHours: getUnpaidBreakMs(entry) / 3_600_000,
-              paidBreakHours: getPaidBreakMs(entry) / 3_600_000,
+              unpaidBreakHours,
+              paidBreakHours,
             }
           : {}),
         // Absent, not empty, for orgs that capture no location at all.
@@ -237,24 +259,48 @@ export function collectBreakRecords(
   return rows.flatMap((row) => (row.breaks ?? []).map((brk) => ({ row, brk })));
 }
 
-/** "Main warehouse (45.42100, -75.69000)", or "" when nothing was captured. */
-export function formatEntryLocation(entry: ExportableEntry): string {
-  const {
-    clock_in_latitude,
-    clock_in_longitude,
-    clock_in_site_name,
-    clock_in_address,
-  } = entry;
-  if (
-    typeof clock_in_latitude !== "number" ||
-    typeof clock_in_longitude !== "number"
-  ) {
-    return clock_in_address ?? clock_in_site_name ?? "";
+function formatPunchLocation(
+  latitude?: number | null,
+  longitude?: number | null,
+  siteName?: string | null,
+  address?: string | null,
+): string {
+  if (typeof latitude !== "number" || typeof longitude !== "number") {
+    return address ?? siteName ?? "";
   }
-  const place =
-    clock_in_address ||
-    formatCoordinates(clock_in_latitude, clock_in_longitude);
-  return clock_in_site_name ? `${clock_in_site_name} (${place})` : place;
+  const place = address || formatCoordinates(latitude, longitude);
+  return siteName ? `${siteName} (${place})` : place;
+}
+
+/**
+ * Returns formatted location text for a shift:
+ * - If only clock-in location: "<site> (<address/coords>)" or "<address/coords>" or "<site>"
+ * - If only clock-out location: "Out: <location>"
+ * - If both are identical: "<location>"
+ * - If both are present and differ: "In: <in-location> | Out: <out-location>"
+ * - If neither is present: ""
+ */
+export function formatEntryLocation(entry: ExportableEntry): string {
+  const inLoc = formatPunchLocation(
+    entry.clock_in_latitude,
+    entry.clock_in_longitude,
+    entry.clock_in_site_name,
+    entry.clock_in_address,
+  );
+  const outLoc = formatPunchLocation(
+    entry.clock_out_latitude,
+    entry.clock_out_longitude,
+    entry.clock_out_site_name,
+    entry.clock_out_address,
+  );
+
+  if (inLoc && outLoc) {
+    if (inLoc === outLoc) return inLoc;
+    return `In: ${inLoc} | Out: ${outLoc}`;
+  }
+  if (inLoc) return inLoc;
+  if (outLoc) return `Out: ${outLoc}`;
+  return "";
 }
 
 export const totalHours = (rows: ExportRow[]) =>
@@ -756,7 +802,15 @@ const PAGE_WIDTH = 612; // US Letter, in points
 const PAGE_HEIGHT = 792;
 const MARGIN = 48;
 const ROW_HEIGHT = 18;
-const COLUMNS = [
+
+export type PdfColumn = {
+  title: string;
+  x: number;
+  width: number;
+  alignRight?: boolean;
+};
+
+export const COLUMNS: PdfColumn[] = [
   { title: "Employee", x: MARGIN, width: 135 },
   { title: "Date", x: 187, width: 68 },
   { title: "Day", x: 259, width: 32 },
@@ -765,6 +819,20 @@ const COLUMNS = [
   { title: "Hours", x: 498, width: 0, alignRight: true },
   { title: "Day Total", x: PAGE_WIDTH - MARGIN, width: 0, alignRight: true },
 ];
+
+export const COLUMNS_WITH_LOCATION: PdfColumn[] = [
+  { title: "Employee", x: MARGIN, width: 90 },
+  { title: "Date", x: 142, width: 56 },
+  { title: "Day", x: 202, width: 24 },
+  { title: "Clock In", x: 230, width: 48 },
+  { title: "Clock Out", x: 282, width: 50 },
+  { title: "Location", x: 336, width: 130 },
+  { title: "Hours", x: 512, width: 0, alignRight: true },
+  { title: "Day Total", x: PAGE_WIDTH - MARGIN, width: 0, alignRight: true },
+];
+
+export const getPdfColumns = (showLocation: boolean): PdfColumn[] =>
+  showLocation ? COLUMNS_WITH_LOCATION : COLUMNS;
 
 /**
  * The break-records table at the end of the report: its own columns, so a
@@ -816,7 +884,7 @@ const line = (pen: Pen, y: number, gray = 0.8) => {
 
 const writeCell = (
   pen: Pen,
-  column: (typeof COLUMNS)[number],
+  column: PdfColumn,
   text: string,
   y: number,
   bold = false,
@@ -827,8 +895,8 @@ const writeCell = (
   write(pen, value, x, y, size, bold);
 };
 
-const writeHeaderRow = (pen: Pen, y: number) => {
-  for (const column of COLUMNS) writeCell(pen, column, column.title, y, true);
+const writeHeaderRow = (pen: Pen, y: number, columns: PdfColumn[]) => {
+  for (const column of columns) writeCell(pen, column, column.title, y, true);
   line(pen, y - 6, 0.2);
 };
 
@@ -870,6 +938,17 @@ export function layoutPdfPages(rows: ExportRow[], meta: ExportMeta): string[] {
   let pen: Pen = [];
   let y = 0;
 
+  const showLocation = rows.some((r) => Boolean(r.location));
+  const columns = getPdfColumns(showLocation);
+  const colEmp = columns[0];
+  const colDate = columns[1];
+  const colDay = columns[2];
+  const colClockIn = columns[3];
+  const colClockOut = columns[4];
+  const colLocation = showLocation ? columns[5] : undefined;
+  const colHours = showLocation ? columns[6] : columns[5];
+  const colDayTotal = showLocation ? columns[7] : columns[6];
+
   const ensureSpace = (neededRows: number) => {
     if (y < MARGIN + ROW_HEIGHT * neededRows) startPage(false);
   };
@@ -896,7 +975,7 @@ export function layoutPdfPages(rows: ExportRow[], meta: ExportMeta): string[] {
       );
       y -= 34;
     }
-    writeHeaderRow(pen, y);
+    writeHeaderRow(pen, y, columns);
     y -= ROW_HEIGHT + 2;
   };
 
@@ -935,25 +1014,23 @@ export function layoutPdfPages(rows: ExportRow[], meta: ExportMeta): string[] {
       const isLastOfDay = dayLastIndex.get(dayKey) === globalIdx;
       const dayTotal = dayTotals.get(dayKey) as number;
 
-      writeCell(pen, COLUMNS[0], row.employee, y);
-      writeCell(pen, COLUMNS[1], row.date, y);
+      writeCell(pen, colEmp, row.employee, y);
+      writeCell(pen, colDate, row.date, y);
+      writeCell(pen, colDay, row.dayOfWeek ?? getDayOfWeekShort(row.date), y);
+      writeCell(pen, colClockIn, row.clockIn, y);
+      writeCell(pen, colClockOut, row.clockOut, y);
+      if (colLocation) {
+        writeCell(pen, colLocation, row.location ?? "", y);
+      }
       writeCell(
         pen,
-        COLUMNS[2],
-        row.dayOfWeek ?? getDayOfWeekShort(row.date),
-        y,
-      );
-      writeCell(pen, COLUMNS[3], row.clockIn, y);
-      writeCell(pen, COLUMNS[4], row.clockOut, y);
-      writeCell(
-        pen,
-        COLUMNS[5],
+        colHours,
         row.hours === null ? "-" : formatHours(row.hours),
         y,
       );
       writeCell(
         pen,
-        COLUMNS[6],
+        colDayTotal,
         isLastOfDay ? formatHours(dayTotal) : "",
         y,
         true,
@@ -965,16 +1042,16 @@ export function layoutPdfPages(rows: ExportRow[], meta: ExportMeta): string[] {
 
     if (showSections && section.rows.length > 0) {
       ensureSpace(2);
-      writeCell(pen, COLUMNS[0], `Subtotal (${section.label})`, y, true);
+      writeCell(pen, colEmp, `Subtotal (${section.label})`, y, true);
       writeCell(
         pen,
-        COLUMNS[3],
+        colClockIn,
         `${section.daysWorked}d / ${section.shiftsCount}s`,
         y,
         true,
       );
-      writeCell(pen, COLUMNS[5], formatHours(section.totalHours), y, true);
-      writeCell(pen, COLUMNS[6], formatHours(section.totalHours), y, true);
+      writeCell(pen, colHours, formatHours(section.totalHours), y, true);
+      writeCell(pen, colDayTotal, formatHours(section.totalHours), y, true);
       line(pen, y - 6, 0.4);
       y -= ROW_HEIGHT + 4;
     }
@@ -982,12 +1059,12 @@ export function layoutPdfPages(rows: ExportRow[], meta: ExportMeta): string[] {
 
   const uniqueDays = new Set(rows.map((r) => r.date)).size;
   ensureSpace(2);
-  writeCell(pen, COLUMNS[0], "Total hours", y - 4, true);
+  writeCell(pen, colEmp, "Total hours", y - 4, true);
   if (rows.length > 0) {
-    writeCell(pen, COLUMNS[3], `${uniqueDays}d / ${rows.length}s`, y - 4, true);
+    writeCell(pen, colClockIn, `${uniqueDays}d / ${rows.length}s`, y - 4, true);
   }
-  writeCell(pen, COLUMNS[5], formatHours(totalHours(rows)), y - 4, true);
-  writeCell(pen, COLUMNS[6], formatHours(totalHours(rows)), y - 4, true);
+  writeCell(pen, colHours, formatHours(totalHours(rows)), y - 4, true);
+  writeCell(pen, colDayTotal, formatHours(totalHours(rows)), y - 4, true);
   y -= ROW_HEIGHT + 10;
 
   // Employee summary table when there are multiple employees
@@ -999,10 +1076,10 @@ export function layoutPdfPages(rows: ExportRow[], meta: ExportMeta): string[] {
     y -= ROW_HEIGHT;
     for (const emp of employeeSummaries) {
       ensureSpace(2);
-      writeCell(pen, COLUMNS[0], emp.employee, y, true);
-      writeCell(pen, COLUMNS[1], `${emp.daysWorked} days`, y);
-      writeCell(pen, COLUMNS[3], `${emp.shiftsCount} shifts`, y);
-      writeCell(pen, COLUMNS[5], formatHours(emp.totalHours), y, true);
+      writeCell(pen, colEmp, emp.employee, y, true);
+      writeCell(pen, colDate, `${emp.daysWorked} days`, y);
+      writeCell(pen, colClockIn, `${emp.shiftsCount} shifts`, y);
+      writeCell(pen, colHours, formatHours(emp.totalHours), y, true);
       line(pen, y - 6);
       y -= ROW_HEIGHT;
     }
@@ -1199,7 +1276,11 @@ export function buildCsvRows(rows: ExportRow[], meta: ExportMeta): CsvCell[][] {
     dayLastIndex.set(key, idx);
   });
 
-  const out: CsvCell[][] = [[...CSV_COLUMNS]];
+  const showLocation = rows.some((r) => Boolean(r.location));
+  const headers: CsvCell[] = showLocation
+    ? [...CSV_COLUMNS, "Location"]
+    : [...CSV_COLUMNS];
+  const out: CsvCell[][] = [headers];
   let globalRowIdx = 0;
 
   for (const section of sections) {
@@ -1221,6 +1302,7 @@ export function buildCsvRows(rows: ExportRow[], meta: ExportMeta): CsvCell[][] {
         null,
         null,
         null,
+        ...(showLocation ? [r.location ?? ""] : []),
       ]);
       globalRowIdx += 1;
     }
@@ -1239,6 +1321,7 @@ export function buildCsvRows(rows: ExportRow[], meta: ExportMeta): CsvCell[][] {
         section.daysWorked,
         section.shiftsCount,
         null,
+        ...(showLocation ? [null] : []),
       ]);
     }
   }
@@ -1256,6 +1339,7 @@ export function buildCsvRows(rows: ExportRow[], meta: ExportMeta): CsvCell[][] {
     new Set(rows.map((r) => r.date)).size,
     rows.length,
     null,
+    ...(showLocation ? [null] : []),
   ]);
 
   for (const emp of buildEmployeeSummary(rows)) {
@@ -1272,6 +1356,7 @@ export function buildCsvRows(rows: ExportRow[], meta: ExportMeta): CsvCell[][] {
       emp.daysWorked,
       emp.shiftsCount,
       formatHours(emp.totalHours / emp.daysWorked),
+      ...(showLocation ? [null] : []),
     ]);
   }
 
@@ -1290,6 +1375,7 @@ export function buildCsvRows(rows: ExportRow[], meta: ExportMeta): CsvCell[][] {
         sec.daysWorked,
         sec.shiftsCount,
         null,
+        ...(showLocation ? [null] : []),
       ]);
     }
   }

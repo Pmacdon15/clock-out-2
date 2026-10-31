@@ -5,6 +5,8 @@ import {
   buildPeriodSections,
   buildSheetXml,
   buildZip,
+  COLUMNS,
+  COLUMNS_WITH_LOCATION,
   CSV_MIME,
   collectBreakRecords,
   crc32,
@@ -19,6 +21,7 @@ import {
   formatPeriod,
   formatTime,
   getMonthBounds,
+  getPdfColumns,
   getWeekBounds,
   layoutPdfPages,
   neutralizeCsvValue,
@@ -483,6 +486,80 @@ describe("PDF output", () => {
       expect(bothPdf.slice(offset).startsWith(`${i + 1} 0 obj`)).toBe(true);
     });
   });
+
+  it("dynamically returns PDF columns based on location availability", () => {
+    expect(getPdfColumns(false)).toEqual(COLUMNS);
+    expect(getPdfColumns(false).map((c) => c.title)).toEqual([
+      "Employee",
+      "Date",
+      "Day",
+      "Clock In",
+      "Clock Out",
+      "Hours",
+      "Day Total",
+    ]);
+    expect(getPdfColumns(true)).toEqual(COLUMNS_WITH_LOCATION);
+    expect(getPdfColumns(true).map((c) => c.title)).toEqual([
+      "Employee",
+      "Date",
+      "Day",
+      "Clock In",
+      "Clock Out",
+      "Location",
+      "Hours",
+      "Day Total",
+    ]);
+  });
+
+  it("includes locations in the PDF when they are available on time entries", () => {
+    const rowsWithLocation: ExportRow[] = [
+      row({
+        employee: "Ada",
+        date: "2026-03-09",
+        location: "Main Office (100 Main St)",
+      }),
+      row({
+        employee: "Ada",
+        date: "2026-03-10",
+        location: "Warehouse (Site 2)",
+      }),
+      row({
+        employee: "Ada",
+        date: "2026-03-11",
+        // Mixed: this row has no location captured
+      }),
+    ];
+
+    const pages = layoutPdfPages(rowsWithLocation, meta);
+    expect(pages).toHaveLength(1);
+    expect(pages[0]).toContain("(Location) Tj");
+    expect(pages[0]).toContain("(Main Office \\(100 Main St\\)) Tj");
+    expect(pages[0]).toContain("(Warehouse \\(Site 2\\)) Tj");
+
+    // Also verify binary PDF rendering
+    const pdfBytes = toPdf(rowsWithLocation, meta);
+    const decoded = decode(pdfBytes);
+    expect(decoded.startsWith("%PDF-1.4\n")).toBe(true);
+    expect(decoded).toContain("(Location) Tj");
+    expect(decoded).toContain("(Main Office \\(100 Main St\\)) Tj");
+  });
+
+  it("truncates excessively long locations in PDF to fit within column width", () => {
+    const longLocation =
+      "Super Long Building Name On A Very Long Street In A Far Away Suburb (45.12345, -75.12345)";
+    const pages = layoutPdfPages(
+      [row({ employee: "Ada", location: longLocation })],
+      meta,
+    );
+    expect(pages[0]).toContain("(Location) Tj");
+    // fitText with column.width 130 and 9pt Helvetica yields 26 chars plus ellipsis
+    expect(pages[0]).toContain("(Super Long Building Name O...) Tj");
+  });
+
+  it("omits the location column in PDF when no entries have location", () => {
+    const pages = layoutPdfPages([row({ employee: "Ada" })], meta);
+    expect(pages[0]).not.toContain("(Location) Tj");
+  });
 });
 
 describe("downloads", () => {
@@ -942,6 +1019,72 @@ describe("break records in exports", () => {
       breakSettings,
     );
     expect(withoutBreak.hours).toBe(7.5);
+    expect(withoutBreak.breaks).toEqual([
+      {
+        type: "Meal period",
+        start: "-",
+        end: "-",
+        hours: 0.5,
+        paid: false,
+      },
+    ]);
+    expect(withoutBreak.unpaidBreakHours).toBe(0.5);
+  });
+
+  it("includes automatically docked breaks in break records without clock times, even if not clocked out", () => {
+    const breakSettings = {
+      org_id: "o1",
+      dock_lunch: true,
+      lunch_duration_minutes: 30,
+      lunch_min_shift_hours: 5,
+    };
+
+    // An open shift where user didn't clock out, started 6 hours ago
+    const sixHoursAgo = new Date(Date.now() - 6 * 3_600_000);
+    const [openShiftRow] = buildExportRows(
+      [
+        makeEntry({
+          id: 5,
+          user_id: "u1",
+          clock_in: sixHoursAgo,
+          clock_out: null,
+          skip_lunch: false,
+        }),
+      ],
+      () => "Ada",
+      undefined,
+      breakSettings,
+    );
+
+    expect(openShiftRow.clockOut).toBe("In progress");
+    expect(openShiftRow.hours).toBeNull();
+    expect(openShiftRow.breaks).toEqual([
+      {
+        type: "Meal period",
+        start: "-",
+        end: "-",
+        hours: 0.5,
+        paid: false,
+      },
+    ]);
+    expect(openShiftRow.unpaidBreakHours).toBe(0.5);
+
+    // If admin marked no break taken (skip_lunch: true), no break is docked
+    const [skippedShiftRow] = buildExportRows(
+      [
+        makeEntry({
+          id: 6,
+          user_id: "u1",
+          clock_in: sixHoursAgo,
+          clock_out: null,
+          skip_lunch: true,
+        }),
+      ],
+      () => "Ada",
+      undefined,
+      breakSettings,
+    );
+    expect(skippedShiftRow.breaks).toBeUndefined();
   });
 
   it("lists the break records in the spreadsheet", () => {
@@ -1121,5 +1264,125 @@ describe("captured location in the export", () => {
     );
     expect(withoutLocation).not.toContain("Location");
     expect(withoutLocation).not.toContain('r="H5"');
+  });
+
+  it("formats dual punch locations when clock in and clock out differ", () => {
+    expect(
+      formatEntryLocation({
+        ...located,
+        clock_out_latitude: 45.424,
+        clock_out_longitude: -75.695,
+        clock_out_site_name: "Warehouse",
+        clock_out_address: "200 Queen St, Ottawa, ON",
+      }),
+    ).toBe(
+      "In: Depot (45.42150, -75.69720) | Out: Warehouse (200 Queen St, Ottawa, ON)",
+    );
+  });
+
+  it("formats single location when clock in and clock out are identical", () => {
+    expect(
+      formatEntryLocation({
+        ...located,
+        clock_out_latitude: 45.4215,
+        clock_out_longitude: -75.6972,
+        clock_out_site_name: "Depot",
+      }),
+    ).toBe("Depot (45.42150, -75.69720)");
+  });
+
+  it("formats clock out location alone when clock in was not captured", () => {
+    expect(
+      formatEntryLocation({
+        ...located,
+        clock_in_latitude: null,
+        clock_in_longitude: null,
+        clock_in_site_name: null,
+        clock_out_latitude: 45.424,
+        clock_out_longitude: -75.695,
+        clock_out_site_name: "Warehouse",
+      }),
+    ).toBe("Out: Warehouse (45.42400, -75.69500)");
+  });
+
+  it("adds a Location column to the CSV export only when there is one", () => {
+    const meta = {
+      employee: "Ada",
+      startDate: "2026-03-09",
+      endDate: "2026-03-10",
+    };
+    const rowsWithLocation = buildExportRows(
+      [
+        located,
+        {
+          id: 2,
+          user_id: "u1",
+          clock_in: new Date("2026-03-10T09:00:00Z"),
+          clock_out: new Date("2026-03-10T17:00:00Z"),
+        },
+      ],
+      () => "Ada",
+    );
+    const csvWithLocation = toCsvText(rowsWithLocation, meta);
+    const linesWithLoc = csvWithLocation.split("\r\n").filter(Boolean);
+
+    // Header has Location appended
+    expect(linesWithLoc[0]).toBe(
+      "Record Type,Employee,Date,Day,Clock In,Clock Out,Hours,Daily Total,Period,Days Worked,Shifts,Avg Hours/Day,Location",
+    );
+    // Row 1 has location
+    expect(linesWithLoc[1]).toContain(
+      'Shift,Ada,2026-03-09,Mon,9:00 AM,5:00 PM,8.00,8.00,"Mar 9, 2026 - Mar 10, 2026",,,,"Depot (45.42150, -75.69720)"',
+    );
+    // Row 2 without location has empty cell at the end
+    expect(linesWithLoc[2]).toContain(
+      'Shift,Ada,2026-03-10,Tue,9:00 AM,5:00 PM,8.00,8.00,"Mar 9, 2026 - Mar 10, 2026",,,,',
+    );
+    // Summary rows end with empty cell
+    const totalLine = linesWithLoc.find((l) => l.startsWith("Total,"));
+    expect(totalLine).toBe(
+      'Total,,,,,,16.00,,"Mar 9, 2026 - Mar 10, 2026",2,2,,',
+    );
+
+    // Multi-week grouped CSV with location covers Period Subtotal and Period Summary location branches
+    const multiWeekRows = [
+      row({ date: "2026-03-08", hours: 4, location: "Site A" }),
+      row({ date: "2026-03-15", hours: 6, location: "Site B" }),
+    ];
+    const multiWeekCsv = toCsvText(multiWeekRows, {
+      ...meta,
+      startDate: "2026-03-08",
+      endDate: "2026-03-21",
+      groupBy: "week",
+    });
+    const multiWeekLines = multiWeekCsv.split("\r\n").filter(Boolean);
+    const subtotalLine = multiWeekLines.find((l) =>
+      l.startsWith("Period Subtotal,"),
+    );
+    expect(subtotalLine).toBeDefined();
+    expect(subtotalLine?.endsWith(",")).toBe(true);
+    const periodSummaryLine = multiWeekLines.find((l) =>
+      l.startsWith("Period Summary,"),
+    );
+    expect(periodSummaryLine).toBeDefined();
+    expect(periodSummaryLine?.endsWith(",")).toBe(true);
+
+    const rowsWithoutLocation = buildExportRows(
+      [
+        {
+          id: 1,
+          user_id: "u1",
+          clock_in: new Date("2026-03-09T09:00:00Z"),
+          clock_out: new Date("2026-03-09T17:00:00Z"),
+        },
+      ],
+      () => "Ada",
+    );
+    const csvWithoutLocation = toCsvText(rowsWithoutLocation, meta);
+    const linesWithoutLoc = csvWithoutLocation.split("\r\n").filter(Boolean);
+    expect(linesWithoutLoc[0]).toBe(
+      "Record Type,Employee,Date,Day,Clock In,Clock Out,Hours,Daily Total,Period,Days Worked,Shifts,Avg Hours/Day",
+    );
+    expect(linesWithoutLoc[1]).not.toContain("Location");
   });
 });
