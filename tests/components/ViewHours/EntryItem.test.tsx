@@ -124,6 +124,27 @@ describe("EntryItem editing", () => {
     expect(screen.getByLabelText("Clock Out")).toHaveValue("");
   });
 
+  it("resets edit fields to the entry's values when opening edit mode", () => {
+    renderItem({
+      entry: {
+        ...entry,
+        clock_in: new Date("2026-01-05T09:00:00Z"),
+        clock_out: new Date("2026-01-05T17:00:00Z"),
+      },
+    });
+    startEditing();
+    fireEvent.change(screen.getByLabelText("Clock In"), {
+      target: { value: "2026-01-05T07:00" },
+    });
+    // Cancel editing
+    fireEvent.click(screen.getAllByRole("button")[0]);
+    expect(screen.queryByLabelText("Clock In")).not.toBeInTheDocument();
+
+    // Reopen editing
+    startEditing();
+    expect(screen.getByLabelText("Clock In")).toHaveValue("2026-01-05T09:00");
+  });
+
   it("saves edited times optimistically and closes on success", async () => {
     mocks.updateTimeEntryAction.mockResolvedValue({ success: true });
     const { setOptimisticEntries } = renderItem();
