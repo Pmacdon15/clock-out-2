@@ -1,7 +1,15 @@
 "use client";
 
 import { useMutation } from "@tanstack/react-query";
-import { Clock, Coffee, Loader2, Play, Square, Trash2 } from "lucide-react";
+import {
+  Clock,
+  Coffee,
+  Loader2,
+  MapPin,
+  Play,
+  Square,
+  Trash2,
+} from "lucide-react";
 import { startTransition, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useTimeframeDefaults } from "@/hooks/useTimeframeDefaults";
@@ -23,10 +31,17 @@ import {
   getUnpaidBreakMs,
   isPaidBreakType,
 } from "@/lib/break-utils";
+import {
+  type Coordinates,
+  isCaptureEnabled,
+  isLocationRequired,
+} from "@/lib/geo";
+import { captureCurrentPosition } from "@/lib/geolocation";
 import type { EntryAction } from "@/lib/reducers/time-entries";
 import type {
   BreakSettingsData,
   BreakType,
+  LocationSettingsData,
   TimeEntry,
   TimeEntryBreak,
 } from "@/lib/types";
@@ -52,6 +67,7 @@ interface ManageHoursProps {
   isAdmin: boolean;
   setOptimisticEntries: (action: EntryAction) => void;
   breakSettings?: BreakSettingsData | null;
+  locationSettings?: LocationSettingsData | null;
 }
 
 export default function TimeClock({
@@ -59,11 +75,15 @@ export default function TimeClock({
   isAdmin,
   setOptimisticEntries,
   breakSettings,
+  locationSettings,
 }: ManageHoursProps) {
   useTimeframeDefaults();
   const [elapsedTime, setElapsedTime] = useState<string>("");
   const [breakElapsed, setBreakElapsed] = useState<string>("");
   const [breakType, setBreakType] = useState<BreakType>(DEFAULT_BREAK_TYPE);
+  const [isLocating, setIsLocating] = useState(false);
+  const captureLocation = isCaptureEnabled(locationSettings);
+  const locationRequired = isLocationRequired(locationSettings);
 
   const activeEntry = initialEntries
     .filter((entry: TimeEntry) => entry.clock_out === null)
@@ -100,7 +120,7 @@ export default function TimeClock({
   }, [openBreak]);
 
   const clockInMutation = useMutation({
-    mutationFn: clockInAction,
+    mutationFn: (coordinates?: Coordinates) => clockInAction(coordinates),
     onSuccess: (res) => {
       if (res.success) toast.success("Clocked in");
       else if ("error" in res) toast.error(res.error || "Failed to clock in");
@@ -108,7 +128,7 @@ export default function TimeClock({
   });
 
   const clockOutMutation = useMutation({
-    mutationFn: clockOutAction,
+    mutationFn: (coordinates?: Coordinates) => clockOutAction(coordinates),
     onSuccess: (res) => {
       if (res.success) toast.success("Clocked out");
       else if ("error" in res) toast.error(res.error || "Failed to clock out");
@@ -186,7 +206,32 @@ export default function TimeClock({
     });
   };
 
-  const handleClockIn = () => {
+  /**
+   * Asks the browser for coordinates. `undefined` means "send nothing": either
+   * the browser could not help and capture is only optional, or the punch is
+   * being abandoned (`aborted`), which happens when capture is required and
+   * the browser refused. The server re-checks either way — the client's word
+   * is evidence, never the verdict.
+   */
+  const resolveCoordinates = async (): Promise<
+    { send: Coordinates | undefined } | { aborted: true }
+  > => {
+    setIsLocating(true);
+    const capture = await captureCurrentPosition();
+    setIsLocating(false);
+
+    if (capture.ok) return { send: capture.coordinates };
+
+    if (locationRequired) {
+      toast.error(capture.failure.message);
+      return { aborted: true };
+    }
+    // Capture is optional: say what happened, but don't block the punch.
+    toast.warning(capture.failure.message);
+    return { send: undefined };
+  };
+
+  const submitClockIn = (coordinates?: Coordinates) => {
     const now = new Date();
 
     const tempEntry: TimeEntry = {
@@ -201,7 +246,38 @@ export default function TimeClock({
 
     startTransition(() => {
       setOptimisticEntries({ type: "ADD", payload: tempEntry });
-      clockInMutation.mutate();
+      clockInMutation.mutate(coordinates);
+    });
+  };
+
+  const submitClockOut = (entry: TimeEntry, coordinates?: Coordinates) => {
+    const now = new Date();
+
+    startTransition(() => {
+      setOptimisticEntries({
+        type: "UPDATE",
+        payload: {
+          id: entry.id,
+          clock_out: now,
+          updated_at: now,
+        },
+      });
+
+      clockOutMutation.mutate(coordinates);
+    });
+  };
+
+  const handleClockIn = () => {
+    // Orgs that never switched location on take exactly the old path: no
+    // geolocation prompt, no extra tick before the optimistic entry appears.
+    if (!captureLocation) {
+      submitClockIn();
+      return;
+    }
+
+    void resolveCoordinates().then((resolved) => {
+      if ("aborted" in resolved) return;
+      submitClockIn(resolved.send);
     });
   };
 
@@ -210,19 +286,17 @@ export default function TimeClock({
     /* v8 ignore next -- @preserve */
     if (!activeEntry) return;
 
-    const now = new Date();
+    if (!captureLocation) {
+      submitClockOut(activeEntry);
+      return;
+    }
 
-    startTransition(() => {
-      setOptimisticEntries({
-        type: "UPDATE",
-        payload: {
-          id: activeEntry.id,
-          clock_out: now,
-          updated_at: now,
-        },
-      });
-
-      clockOutMutation.mutate();
+    // Clocking out is never geofenced, so a capture failure is not fatal.
+    void resolveCoordinates().then((resolved) => {
+      submitClockOut(
+        activeEntry,
+        "aborted" in resolved ? undefined : resolved.send,
+      );
     });
   };
 
@@ -314,11 +388,11 @@ export default function TimeClock({
 
           <Button
             className="h-16 w-full max-w-sm gap-3 rounded-2xl font-bold text-lg"
-            disabled={clockOutMutation.isPending}
+            disabled={clockOutMutation.isPending || isLocating}
             onClick={handleClockOut}
             variant="destructive"
           >
-            {clockOutMutation.isPending ? (
+            {clockOutMutation.isPending || isLocating ? (
               <Loader2 className="animate-spin" />
             ) : (
               <Square className="fill-current" />
@@ -336,16 +410,24 @@ export default function TimeClock({
           </div>
           <Button
             className="h-16 w-full max-w-sm gap-3 rounded-2xl font-bold text-lg"
-            disabled={clockInMutation.isPending}
+            disabled={clockInMutation.isPending || isLocating}
             onClick={handleClockIn}
           >
-            {clockInMutation.isPending ? (
+            {clockInMutation.isPending || isLocating ? (
               <Loader2 className="animate-spin" />
             ) : (
               <Play className="fill-current" />
             )}
-            Clock In
+            {isLocating ? "Checking location..." : "Clock In"}
           </Button>
+          {captureLocation && (
+            <p className="mt-4 flex items-center gap-1.5 text-muted-foreground text-xs">
+              <MapPin className="h-3 w-3" />
+              {locationRequired
+                ? "Your organization requires your location to clock in."
+                : "Your location is recorded with this punch when your browser shares it."}
+            </p>
+          )}
         </>
       )}
 

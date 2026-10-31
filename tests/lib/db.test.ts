@@ -147,7 +147,17 @@ describe("mutations", () => {
     expect(textOf(1)).toContain("INSERT INTO time_entries");
     expect(textOf(1)).toContain("WHERE NOT EXISTS");
     expect(textOf(1)).toContain("clock_out IS NULL");
-    expect(valuesOf(1)).toEqual(["u1", "o1", "u1", "o1"]);
+    // The four nulls are the (unused) location columns.
+    expect(valuesOf(1)).toEqual([
+      "u1",
+      "o1",
+      null,
+      null,
+      null,
+      null,
+      "u1",
+      "o1",
+    ]);
   });
 
   it("dbClockIn returns undefined when an open entry already exists", async () => {
@@ -505,5 +515,203 @@ describe("breaks", () => {
     await expect(db.dbDeleteBreak(6, "o1")).resolves.toEqual({ id: 6 });
     expect(textOf()).toContain("DELETE FROM time_entry_breaks");
     expect(valuesOf()).toEqual([6, "o1"]);
+  });
+});
+
+describe("location settings and sites", () => {
+  beforeEach(() => {
+    db.resetLocationTablesCheck();
+  });
+
+  it("ensureLocationTables creates the tables and the entry columns", async () => {
+    sql.mockResolvedValue([]);
+    await db.ensureLocationTables();
+    expect(sql).toHaveBeenCalledTimes(4);
+    expect(textOf(0)).toContain("CREATE TABLE IF NOT EXISTS settings");
+    expect(textOf(1)).toContain("CREATE TABLE IF NOT EXISTS location_settings");
+    expect(textOf(1)).toContain("capture_mode TEXT NOT NULL DEFAULT 'off'");
+    expect(textOf(1)).toContain(
+      "restrict_clock_in BOOLEAN NOT NULL DEFAULT FALSE",
+    );
+    expect(textOf(2)).toContain("CREATE TABLE IF NOT EXISTS sites");
+    expect(textOf(2)).toContain("radius_meters DOUBLE PRECISION");
+    expect(textOf(3)).toContain("ALTER TABLE time_entries");
+    expect(textOf(3)).toContain("clock_in_latitude DOUBLE PRECISION");
+    expect(textOf(3)).toContain("clock_out_site_name TEXT");
+  });
+
+  it("ensureLocationTables only runs once per instance", async () => {
+    sql.mockResolvedValue([]);
+    await Promise.all([db.ensureLocationTables(), db.ensureLocationTables()]);
+    await db.ensureLocationTables();
+    expect(sql).toHaveBeenCalledTimes(4);
+  });
+
+  it("ensureLocationTables retries after a failure", async () => {
+    sql.mockRejectedValueOnce(new Error("db down"));
+    await expect(db.ensureLocationTables()).rejects.toThrow("db down");
+    sql.mockReset();
+    sql.mockResolvedValue([]);
+    await db.ensureLocationTables();
+    expect(sql).toHaveBeenCalledTimes(4);
+  });
+
+  it("dbGetLocationSettings creates the tables first, then reads and tags the cache", async () => {
+    sql.mockResolvedValue([]);
+    sql
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ org_id: "o1", capture_mode: "required" }]);
+    await expect(db.dbGetLocationSettings("o1")).resolves.toEqual({
+      org_id: "o1",
+      capture_mode: "required",
+    });
+    expect(textOf(4)).toContain("SELECT * FROM location_settings");
+    expect(valuesOf(4)).toEqual(["o1"]);
+    expect(cacheTag).toHaveBeenCalledWith("location-settings-o1");
+  });
+
+  it("dbGetLocationSettings returns undefined for an org with nothing saved", async () => {
+    sql.mockResolvedValue([]);
+    await expect(db.dbGetLocationSettings("o2")).resolves.toBeUndefined();
+  });
+
+  it("dbGetLocationSettings rejects when the tables can't be created", async () => {
+    sql.mockRejectedValueOnce(new Error("permission denied"));
+    await expect(db.dbGetLocationSettings("o1")).rejects.toThrow(
+      "permission denied",
+    );
+  });
+
+  it("dbUpdateLocationSettings upserts the parent settings row and the mode", async () => {
+    sql.mockResolvedValue([]);
+    await db.ensureLocationTables();
+    sql.mockReset();
+    sql
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ org_id: "o1", capture_mode: "optional" }]);
+    await expect(
+      db.dbUpdateLocationSettings("o1", "optional", true),
+    ).resolves.toEqual({ org_id: "o1", capture_mode: "optional" });
+    expect(textOf(0)).toContain("INSERT INTO settings");
+    expect(textOf(1)).toContain("INSERT INTO location_settings");
+    expect(valuesOf(1)).toEqual(["o1", "optional", true, "optional", true]);
+  });
+
+  it("dbGetSites reads the org's sites in name order and tags the cache", async () => {
+    sql.mockResolvedValue([]);
+    await db.ensureLocationTables();
+    sql.mockReset();
+    sql.mockResolvedValue([{ id: 1, name: "Depot" }]);
+    await expect(db.dbGetSites("o1")).resolves.toEqual([
+      { id: 1, name: "Depot" },
+    ]);
+    expect(textOf(0)).toContain("SELECT * FROM sites WHERE org_id =");
+    expect(textOf(0)).toContain("ORDER BY name ASC");
+    expect(valuesOf(0)).toEqual(["o1"]);
+    expect(cacheTag).toHaveBeenCalledWith("sites-o1");
+  });
+
+  it("dbGetSitesForEnforcement reads the sites without the cache", async () => {
+    sql.mockResolvedValue([]);
+    await db.ensureLocationTables();
+    sql.mockReset();
+    sql.mockResolvedValue([{ id: 1, name: "Depot" }]);
+    await expect(db.dbGetSitesForEnforcement("o1")).resolves.toEqual([
+      { id: 1, name: "Depot" },
+    ]);
+    expect(sql).toHaveBeenCalledTimes(1);
+    expect(textOf(0)).toContain("SELECT * FROM sites WHERE org_id =");
+    expect(valuesOf(0)).toEqual(["o1"]);
+  });
+
+  it("dbCreateSite upserts the parent settings row, then inserts the site", async () => {
+    sql.mockResolvedValue([]);
+    await db.ensureLocationTables();
+    sql.mockReset();
+    sql
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: 1, name: "Depot" }]);
+    await expect(
+      db.dbCreateSite("o1", "Depot", 45.4215, -75.6972, 150),
+    ).resolves.toEqual({ id: 1, name: "Depot" });
+    expect(textOf(0)).toContain("INSERT INTO settings");
+    expect(textOf(1)).toContain("INSERT INTO sites");
+    expect(valuesOf(1)).toEqual(["o1", "Depot", 45.4215, -75.6972, 150]);
+  });
+
+  it("dbUpdateSite updates by id within the org", async () => {
+    sql.mockResolvedValue([]);
+    await db.ensureLocationTables();
+    sql.mockReset();
+    sql.mockResolvedValue([{ id: 1, name: "Yard" }]);
+    await expect(
+      db.dbUpdateSite(1, "o1", "Yard", 45, -75, 200),
+    ).resolves.toEqual({ id: 1, name: "Yard" });
+    expect(textOf(0)).toContain("UPDATE sites");
+    expect(valuesOf(0)).toEqual(["Yard", 45, -75, 200, 1, "o1"]);
+  });
+
+  it("dbUpdateSite returns undefined when no row matches", async () => {
+    sql.mockResolvedValue([]);
+    await expect(
+      db.dbUpdateSite(1, "o1", "Yard", 45, -75, 200),
+    ).resolves.toBeUndefined();
+  });
+
+  it("dbDeleteSite deletes by id within the org", async () => {
+    sql.mockResolvedValue([]);
+    await db.ensureLocationTables();
+    sql.mockReset();
+    sql.mockResolvedValue([{ id: 1 }]);
+    await expect(db.dbDeleteSite(1, "o1")).resolves.toEqual({ id: 1 });
+    expect(textOf(0)).toContain("DELETE FROM sites");
+    expect(valuesOf(0)).toEqual([1, "o1"]);
+  });
+
+  it("dbDeleteSite returns undefined when no row matches", async () => {
+    sql.mockResolvedValue([]);
+    await expect(db.dbDeleteSite(1, "o1")).resolves.toBeUndefined();
+  });
+});
+
+describe("clock in and out store location when given one", () => {
+  const location = {
+    latitude: 45.4215,
+    longitude: -75.6972,
+    accuracy: 7,
+    siteName: "Depot",
+  };
+
+  it("dbClockIn writes the captured clock-in location", async () => {
+    sql.mockReturnValueOnce("lock-query").mockReturnValueOnce("insert-query");
+    sql.transaction.mockResolvedValue([[{}], [{ id: 5 }]]);
+    await db.dbClockIn("u1", "o1", location);
+    expect(textOf(1)).toContain("clock_in_site_name");
+    expect(valuesOf(1)).toEqual([
+      "u1",
+      "o1",
+      45.4215,
+      -75.6972,
+      7,
+      "Depot",
+      "u1",
+      "o1",
+    ]);
+  });
+
+  it("dbClockOut writes the captured clock-out location", async () => {
+    sql.mockResolvedValue([{ id: 6 }]);
+    await db.dbClockOut("u1", "o1", location);
+    expect(textOf()).toContain("clock_out_site_name =");
+    expect(valuesOf()).toEqual([45.4215, -75.6972, 7, "Depot", "u1", "o1"]);
+  });
+
+  it("dbClockOut writes nulls when there is no location", async () => {
+    sql.mockResolvedValue([{ id: 6 }]);
+    await db.dbClockOut("u1", "o1", null);
+    expect(valuesOf()).toEqual([null, null, null, null, "u1", "o1"]);
   });
 });

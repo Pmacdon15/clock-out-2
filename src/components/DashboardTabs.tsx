@@ -16,6 +16,8 @@ export default function DashboardTabs({
   defaultTabPromise,
   orgSettingsPromise,
   breakSettingsPromise,
+  locationSettingsPromise,
+  sitesPromise,
   entriesPromise,
   orgTimeEntriesPromise,
   recentEntriesPromise,
@@ -29,11 +31,15 @@ export default function DashboardTabs({
   endDatePromise,
   isAdminPromise,
   hasReportingPromise,
+  hasGeofencingPromise,
   userIdPromise,
   orgIdPromise,
 }: DashboardTabsProps) {
   useOrgSwitcher(orgIdPromise);
   const hasReporting = use(hasReportingPromise);
+  const hasGeofencing = hasGeofencingPromise
+    ? use(hasGeofencingPromise)
+    : false;
   const isAdmin = use(isAdminPromise);
   const result = use(entriesPromise);
   const recentEntriesResult = use(recentEntriesPromise);
@@ -43,6 +49,15 @@ export default function DashboardTabs({
   const breakSettings = breakSettingsResult?.ok
     ? breakSettingsResult.value
     : null;
+  const locationSettingsResult = locationSettingsPromise
+    ? use(locationSettingsPromise)
+    : null;
+  // Without the paid feature the clock behaves exactly as it always has: no
+  // location prompt, nothing captured.
+  const locationSettings =
+    hasGeofencing && locationSettingsResult?.ok
+      ? locationSettingsResult.value
+      : null;
   const defaultTab = use(defaultTabPromise) || "time-clock";
 
   const [optimisticEntries, setOptimisticEntries] = useOptimistic(
@@ -77,6 +92,7 @@ export default function DashboardTabs({
           breakSettings={breakSettings}
           initialEntries={optimisticRecentEntries}
           isAdmin={isAdmin}
+          locationSettings={locationSettings}
           setOptimisticEntries={setOptimisticRecentEntries}
         />
       </TabsContent>
@@ -107,8 +123,11 @@ export default function DashboardTabs({
           <Suspense fallback={<SettingsFallback />}>
             <OrgSettings
               breakSettingsPromise={breakSettingsPromise}
+              hasGeofencing={hasGeofencing}
               hasReporting={hasReporting}
+              locationSettingsPromise={locationSettingsPromise}
               orgSettingsPromise={orgSettingsPromise}
+              sitesPromise={sitesPromise}
             />
           </Suspense>
         </TabsContent>

@@ -8,7 +8,8 @@ const mocks = vi.hoisted(() => ({
   startBreakAction: vi.fn(),
   endBreakAction: vi.fn(),
   useTimeframeDefaults: vi.fn(),
-  toast: { success: vi.fn(), error: vi.fn() },
+  captureCurrentPosition: vi.fn(),
+  toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
 }));
 
 vi.mock("@/lib/actions", () => ({
@@ -16,6 +17,9 @@ vi.mock("@/lib/actions", () => ({
   clockOutAction: mocks.clockOutAction,
   startBreakAction: mocks.startBreakAction,
   endBreakAction: mocks.endBreakAction,
+}));
+vi.mock("@/lib/geolocation", () => ({
+  captureCurrentPosition: mocks.captureCurrentPosition,
 }));
 vi.mock("@/hooks/useTimeframeDefaults", () => ({
   useTimeframeDefaults: mocks.useTimeframeDefaults,
@@ -567,5 +571,198 @@ describe("TimeClock break control", () => {
     ]);
     expect(screen.getByText("-30m unpaid break")).toBeInTheDocument();
     expect(screen.getByText("7h 30m")).toBeInTheDocument();
+  });
+});
+
+describe("TimeClock with location capture", () => {
+  const coordinates = { latitude: 45.4215, longitude: -75.6972, accuracy: 6 };
+  const active = makeEntry({
+    id: 2,
+    clock_in: new Date("2026-01-05T10:55:00Z"),
+    clock_out: null,
+  });
+
+  const locationSettings = (
+    capture_mode: string,
+    restrict_clock_in = false,
+  ) => ({ org_id: "org_1", capture_mode, restrict_clock_in });
+
+  function renderWithLocation(
+    settings: ReturnType<typeof locationSettings> | null,
+    entries: ReturnType<typeof makeEntry>[] = [],
+  ) {
+    const setOptimisticEntries = vi.fn();
+    renderWithClient(
+      <TimeClock
+        initialEntries={entries}
+        isAdmin={false}
+        locationSettings={settings}
+        setOptimisticEntries={setOptimisticEntries}
+      />,
+    );
+    return setOptimisticEntries;
+  }
+
+  it("asks for no location at all when capture is off", async () => {
+    mocks.clockInAction.mockResolvedValue({ success: true });
+    renderWithLocation(locationSettings("off"));
+
+    expect(screen.queryByText(/location is recorded/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Clock In" }));
+    await waitFor(() => expect(mocks.clockInAction).toHaveBeenCalled());
+    expect(mocks.captureCurrentPosition).not.toHaveBeenCalled();
+    expect(mocks.clockInAction).toHaveBeenCalledWith(undefined);
+  });
+
+  it("sends the captured coordinates when capture is optional", async () => {
+    mocks.captureCurrentPosition.mockResolvedValue({ ok: true, coordinates });
+    mocks.clockInAction.mockResolvedValue({ success: true });
+    const setOptimisticEntries = renderWithLocation(
+      locationSettings("optional"),
+    );
+
+    expect(screen.getByText(/location is recorded/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Clock In" }));
+
+    await waitFor(() =>
+      expect(mocks.clockInAction).toHaveBeenCalledWith(coordinates),
+    );
+    expect(setOptimisticEntries).toHaveBeenCalled();
+  });
+
+  it("tells a member their org requires location", () => {
+    renderWithLocation(locationSettings("required"));
+    expect(
+      screen.getByText(/requires your location to clock in/),
+    ).toBeInTheDocument();
+  });
+
+  it("shows a spinner and a locating label while it waits for the browser", async () => {
+    mocks.captureCurrentPosition.mockReturnValue(new Promise(() => {}));
+    renderWithLocation(locationSettings("required"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Clock In" }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Checking location..." }),
+      ).toBeDisabled(),
+    );
+  });
+
+  it.each([
+    [
+      "permission denied",
+      {
+        code: "denied",
+        message: "Location access is blocked. Allow location for this site.",
+      },
+    ],
+    [
+      "an unsupported browser",
+      {
+        code: "unsupported",
+        message: "This browser can't share your location.",
+      },
+    ],
+    [
+      "an insecure page",
+      { code: "insecure", message: "Location sharing needs https." },
+    ],
+    [
+      "a timeout",
+      { code: "timeout", message: "Getting your location took too long." },
+    ],
+  ])(
+    "abandons a required clock-in on %s and says what to do",
+    async (_label, failure) => {
+      mocks.captureCurrentPosition.mockResolvedValue({ ok: false, failure });
+      const setOptimisticEntries = renderWithLocation(
+        locationSettings("required"),
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Clock In" }));
+
+      await waitFor(() =>
+        expect(mocks.toast.error).toHaveBeenCalledWith(failure.message),
+      );
+      expect(mocks.clockInAction).not.toHaveBeenCalled();
+      expect(setOptimisticEntries).not.toHaveBeenCalled();
+    },
+  );
+
+  it("clocks in anyway when capture is optional and the browser refuses", async () => {
+    mocks.captureCurrentPosition.mockResolvedValue({
+      ok: false,
+      failure: { code: "denied", message: "Location access is blocked." },
+    });
+    mocks.clockInAction.mockResolvedValue({ success: true });
+    renderWithLocation(locationSettings("optional"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Clock In" }));
+
+    await waitFor(() =>
+      expect(mocks.clockInAction).toHaveBeenCalledWith(undefined),
+    );
+    expect(mocks.toast.warning).toHaveBeenCalledWith(
+      "Location access is blocked.",
+    );
+    expect(mocks.toast.error).not.toHaveBeenCalled();
+  });
+
+  it("captures the clock-out location too", async () => {
+    mocks.captureCurrentPosition.mockResolvedValue({ ok: true, coordinates });
+    mocks.clockOutAction.mockResolvedValue({ success: true });
+    renderWithLocation(locationSettings("optional"), [active]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Clock Out" }));
+
+    await waitFor(() =>
+      expect(mocks.clockOutAction).toHaveBeenCalledWith(coordinates),
+    );
+  });
+
+  it("clocks out even when the browser refuses and location is required", async () => {
+    mocks.captureCurrentPosition.mockResolvedValue({
+      ok: false,
+      failure: { code: "denied", message: "Location access is blocked." },
+    });
+    mocks.clockOutAction.mockResolvedValue({ success: true });
+    const setOptimisticEntries = renderWithLocation(
+      locationSettings("required"),
+      [active],
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Clock Out" }));
+
+    await waitFor(() =>
+      expect(mocks.clockOutAction).toHaveBeenCalledWith(undefined),
+    );
+    expect(setOptimisticEntries).toHaveBeenCalledWith({
+      type: "UPDATE",
+      payload: { id: 2, clock_out: NOW, updated_at: NOW },
+    });
+  });
+
+  it("clocks out without a location prompt when capture is off", async () => {
+    mocks.clockOutAction.mockResolvedValue({ success: true });
+    renderWithLocation(locationSettings("off"), [active]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Clock Out" }));
+    await waitFor(() => expect(mocks.clockOutAction).toHaveBeenCalled());
+    expect(mocks.captureCurrentPosition).not.toHaveBeenCalled();
+  });
+
+  it("captures and enforces when only the restriction is switched on", async () => {
+    mocks.captureCurrentPosition.mockResolvedValue({ ok: true, coordinates });
+    mocks.clockInAction.mockResolvedValue({ success: true });
+    renderWithLocation(locationSettings("off", true));
+
+    expect(
+      screen.getByText(/requires your location to clock in/),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Clock In" }));
+    await waitFor(() =>
+      expect(mocks.clockInAction).toHaveBeenCalledWith(coordinates),
+    );
   });
 });

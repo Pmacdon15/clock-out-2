@@ -6,20 +6,30 @@ import { updateTag } from "next/cache";
 import {
   clockIn as dalClockIn,
   clockOut as dalClockOut,
+  createSiteDal as dalCreateSite,
   deleteBreakDal as dalDeleteBreak,
+  deleteSiteDal as dalDeleteSite,
   deleteTimeEntry as dalDeleteTimeEntry,
   endBreak as dalEndBreak,
   startBreak as dalStartBreak,
   updateBreakDal as dalUpdateBreak,
+  updateSiteDal as dalUpdateSite,
   updateTimeEntry as dalUpdateTimeEntry,
   updateBreakSettingsDal,
+  updateLocationSettingsDal,
   updateReportingSettingsDal,
 } from "./dal";
+import type { Coordinates } from "./geo";
 import { sendWeeklyReports } from "./reports";
 import type { BreakType } from "./types";
 
-export async function clockInAction() {
-  const result = await dalClockIn();
+/**
+ * `coordinates` is whatever the browser's Geolocation API gave the client, or
+ * undefined when it gave nothing. It is only ever evidence: the DAL reads the
+ * org's settings and sites and makes the geofence decision server-side.
+ */
+export async function clockInAction(coordinates?: Coordinates | null) {
+  const result = await dalClockIn(coordinates);
 
   return result.match(
     (entry) => {
@@ -32,8 +42,8 @@ export async function clockInAction() {
   );
 }
 
-export async function clockOutAction() {
-  const result = await dalClockOut();
+export async function clockOutAction(coordinates?: Coordinates | null) {
+  const result = await dalClockOut(coordinates);
 
   return result.match(
     (entry) => {
@@ -215,6 +225,68 @@ export async function updateBreakAction(
   );
 }
 
+export async function updateLocationSettingsAction(
+  captureMode: string,
+  restrictClockIn: boolean,
+) {
+  const result = await updateLocationSettingsDal(captureMode, restrictClockIn);
+
+  return result.match(
+    (entry) => {
+      updateTag(`location-settings-${entry.org_id}`);
+      return { success: true, data: entry };
+    },
+    (err) => {
+      return { success: false, error: err.reason };
+    },
+  );
+}
+
+export async function createSiteAction(
+  name: string,
+  latitude: number,
+  longitude: number,
+  radiusMeters: number,
+) {
+  const result = await dalCreateSite(name, latitude, longitude, radiusMeters);
+
+  return result.match(
+    (site) => {
+      updateTag(`sites-${site.org_id}`);
+      return { success: true, data: site };
+    },
+    (err) => {
+      return { success: false, error: err.reason };
+    },
+  );
+}
+
+export async function updateSiteAction(
+  id: number,
+  name: string,
+  latitude: number,
+  longitude: number,
+  radiusMeters: number,
+) {
+  const result = await dalUpdateSite(
+    id,
+    name,
+    latitude,
+    longitude,
+    radiusMeters,
+  );
+
+  return result.match(
+    (site) => {
+      updateTag(`sites-${site.org_id}`);
+      return { success: true, data: site };
+    },
+    (err) => {
+      return { success: false, error: err.reason };
+    },
+  );
+}
+
 export async function deleteBreakAction(id: number) {
   const result = await dalDeleteBreak(id);
 
@@ -222,6 +294,20 @@ export async function deleteBreakAction(id: number) {
     (brk) => {
       updateBreakTags(brk);
       return { success: true };
+    },
+    (err) => {
+      return { success: false, error: err.reason };
+    },
+  );
+}
+
+export async function deleteSiteAction(id: number) {
+  const result = await dalDeleteSite(id);
+
+  return result.match(
+    (site) => {
+      updateTag(`sites-${site.org_id}`);
+      return { success: true, data: site };
     },
     (err) => {
       return { success: false, error: err.reason };

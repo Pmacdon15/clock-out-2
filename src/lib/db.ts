@@ -1,9 +1,12 @@
 import { neon } from "@neondatabase/serverless";
 import { cacheLife, cacheTag } from "next/cache";
+import type { StoredLocation } from "./geo";
 import type {
   BreakSettingsData,
   BreakType,
+  LocationSettingsData,
   ReportingSettingsData,
+  SiteData,
   TimeEntry,
   TimeEntryBreak,
 } from "./types";
@@ -105,12 +108,21 @@ export async function dbGetActiveEntry(userId: string, orgId: string) {
  * so two simultaneous requests cannot both insert. Returns undefined when
  * an open entry already exists.
  */
-export async function dbClockIn(userId: string, orgId: string) {
+export async function dbClockIn(
+  userId: string,
+  orgId: string,
+  location?: StoredLocation | null,
+) {
   const [, inserted] = await sql.transaction([
     sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${userId}:${orgId}`}::text, 0))`,
     sql`
-        INSERT INTO time_entries (user_id, org_id, clock_in)
-        SELECT ${userId}, ${orgId}, NOW()
+        INSERT INTO time_entries (
+            user_id, org_id, clock_in,
+            clock_in_latitude, clock_in_longitude, clock_in_accuracy_m, clock_in_site_name
+        )
+        SELECT ${userId}, ${orgId}, NOW(),
+            ${location?.latitude ?? null}, ${location?.longitude ?? null},
+            ${location?.accuracy ?? null}, ${location?.siteName ?? null}
         WHERE NOT EXISTS (
             SELECT 1 FROM time_entries
             WHERE user_id = ${userId} AND org_id = ${orgId} AND clock_out IS NULL
@@ -121,10 +133,19 @@ export async function dbClockIn(userId: string, orgId: string) {
   return inserted[0] as unknown as TimeEntry | undefined;
 }
 
-export async function dbClockOut(userId: string, orgId: string) {
+export async function dbClockOut(
+  userId: string,
+  orgId: string,
+  location?: StoredLocation | null,
+) {
   const [activeEntry] = await sql`
         UPDATE time_entries
-        SET clock_out = NOW(), updated_at = NOW()
+        SET clock_out = NOW(),
+            updated_at = NOW(),
+            clock_out_latitude = ${location?.latitude ?? null},
+            clock_out_longitude = ${location?.longitude ?? null},
+            clock_out_accuracy_m = ${location?.accuracy ?? null},
+            clock_out_site_name = ${location?.siteName ?? null}
         WHERE user_id = ${userId} AND org_id = ${orgId} AND clock_out IS NULL
         RETURNING *
     `;
@@ -520,4 +541,177 @@ export async function dbDeleteBreak(id: number, orgId: string) {
 		RETURNING *
 	`;
   return deleted as unknown as TimeEntryBreak | undefined;
+}
+
+let locationTablesReady: Promise<void> | null = null;
+
+/**
+ * Location capture is opt-in per org. Production databases that predate
+ * `location_settings` / `sites` in schema.sql don't have them (nor the
+ * location columns on `time_entries`), so create them on first use, the same
+ * way `ensureBreakSettingsTable` does. Runs once per server instance; a
+ * failure is not cached, so the next call retries.
+ */
+export function ensureLocationTables(): Promise<void> {
+  locationTablesReady ??= (async () => {
+    await sql`
+		CREATE TABLE IF NOT EXISTS settings (
+			org_id TEXT PRIMARY KEY,
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+		)
+	`;
+    await sql`
+		CREATE TABLE IF NOT EXISTS location_settings (
+			org_id TEXT PRIMARY KEY REFERENCES settings(org_id) ON DELETE CASCADE,
+			capture_mode TEXT NOT NULL DEFAULT 'off',
+			restrict_clock_in BOOLEAN NOT NULL DEFAULT FALSE,
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+		)
+	`;
+    await sql`
+		CREATE TABLE IF NOT EXISTS sites (
+			id SERIAL PRIMARY KEY,
+			org_id TEXT NOT NULL REFERENCES settings(org_id) ON DELETE CASCADE,
+			name TEXT NOT NULL,
+			latitude DOUBLE PRECISION NOT NULL,
+			longitude DOUBLE PRECISION NOT NULL,
+			radius_meters DOUBLE PRECISION NOT NULL DEFAULT 150,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+		)
+	`;
+    await sql`
+		ALTER TABLE time_entries
+			ADD COLUMN IF NOT EXISTS clock_in_latitude DOUBLE PRECISION,
+			ADD COLUMN IF NOT EXISTS clock_in_longitude DOUBLE PRECISION,
+			ADD COLUMN IF NOT EXISTS clock_in_accuracy_m DOUBLE PRECISION,
+			ADD COLUMN IF NOT EXISTS clock_in_site_name TEXT,
+			ADD COLUMN IF NOT EXISTS clock_out_latitude DOUBLE PRECISION,
+			ADD COLUMN IF NOT EXISTS clock_out_longitude DOUBLE PRECISION,
+			ADD COLUMN IF NOT EXISTS clock_out_accuracy_m DOUBLE PRECISION,
+			ADD COLUMN IF NOT EXISTS clock_out_site_name TEXT
+	`;
+  })().catch((error) => {
+    locationTablesReady = null;
+    throw error;
+  });
+  return locationTablesReady;
+}
+
+/** Test-only: forget that the table check ran. */
+export function resetLocationTablesCheck() {
+  locationTablesReady = null;
+}
+
+export async function dbGetLocationSettings(orgId: string) {
+  "use cache";
+  cacheTag(`location-settings-${orgId}`);
+  cacheLife("hours");
+  await ensureLocationTables();
+  const [settings] = await sql`
+		SELECT * FROM location_settings WHERE org_id = ${orgId}
+	`;
+  return settings as LocationSettingsData | undefined;
+}
+
+export async function dbUpdateLocationSettings(
+  orgId: string,
+  captureMode: string,
+  restrictClockIn: boolean,
+) {
+  await ensureLocationTables();
+  await sql`
+		INSERT INTO settings (org_id, updated_at)
+		VALUES (${orgId}, NOW())
+		ON CONFLICT (org_id) DO UPDATE SET updated_at = NOW()
+	`;
+
+  const [updated] = await sql`
+		INSERT INTO location_settings (org_id, capture_mode, restrict_clock_in, updated_at)
+		VALUES (${orgId}, ${captureMode}, ${restrictClockIn}, NOW())
+		ON CONFLICT (org_id)
+		DO UPDATE SET
+            capture_mode = ${captureMode},
+            restrict_clock_in = ${restrictClockIn},
+            updated_at = NOW()
+		RETURNING *
+	`;
+  return updated as LocationSettingsData;
+}
+
+export async function dbGetSites(orgId: string) {
+  "use cache";
+  cacheTag(`sites-${orgId}`);
+  cacheLife("hours");
+  await ensureLocationTables();
+  const rows = await sql`
+		SELECT * FROM sites WHERE org_id = ${orgId} ORDER BY name ASC, id ASC
+	`;
+  return rows as unknown as SiteData[];
+}
+
+/**
+ * Sites are read on every clock-in, where a cached read would let a member
+ * clock in against a site an admin has just removed. This uncached read is the
+ * one the enforcement path uses.
+ */
+export async function dbGetSitesForEnforcement(orgId: string) {
+  await ensureLocationTables();
+  const rows = await sql`
+		SELECT * FROM sites WHERE org_id = ${orgId}
+	`;
+  return rows as unknown as SiteData[];
+}
+
+export async function dbCreateSite(
+  orgId: string,
+  name: string,
+  latitude: number,
+  longitude: number,
+  radiusMeters: number,
+) {
+  await ensureLocationTables();
+  await sql`
+		INSERT INTO settings (org_id, updated_at)
+		VALUES (${orgId}, NOW())
+		ON CONFLICT (org_id) DO UPDATE SET updated_at = NOW()
+	`;
+
+  const [created] = await sql`
+		INSERT INTO sites (org_id, name, latitude, longitude, radius_meters)
+		VALUES (${orgId}, ${name}, ${latitude}, ${longitude}, ${radiusMeters})
+		RETURNING *
+	`;
+  return created as unknown as SiteData;
+}
+
+export async function dbUpdateSite(
+  id: number,
+  orgId: string,
+  name: string,
+  latitude: number,
+  longitude: number,
+  radiusMeters: number,
+) {
+  await ensureLocationTables();
+  const [updated] = await sql`
+		UPDATE sites
+		SET name = ${name},
+			latitude = ${latitude},
+			longitude = ${longitude},
+			radius_meters = ${radiusMeters},
+			updated_at = NOW()
+		WHERE id = ${id} AND org_id = ${orgId}
+		RETURNING *
+	`;
+  return updated as unknown as SiteData | undefined;
+}
+
+export async function dbDeleteSite(id: number, orgId: string) {
+  await ensureLocationTables();
+  const [deleted] = await sql`
+		DELETE FROM sites WHERE id = ${id} AND org_id = ${orgId}
+		RETURNING *
+	`;
+  return deleted as unknown as SiteData | undefined;
 }

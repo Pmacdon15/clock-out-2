@@ -325,3 +325,53 @@ describe("EntryItem break records", () => {
     expect(mocks.toast.error).not.toHaveBeenCalled();
   });
 });
+describe("EntryItem captured location", () => {
+  const located = makeEntry({
+    id: 6,
+    clock_in: new Date("2026-01-05T09:00:00Z"),
+    clock_out: new Date("2026-01-05T17:30:00Z"),
+    clock_in_latitude: 45.4215,
+    clock_in_longitude: -75.6972,
+    clock_in_accuracy_m: 12.6,
+    clock_in_site_name: "Depot",
+    clock_out_latitude: 43.6532,
+    clock_out_longitude: -79.3832,
+    clock_out_accuracy_m: null,
+    clock_out_site_name: null,
+  });
+
+  it("shows both punches, their accuracy and the matched site to admins", () => {
+    renderItem({ entry: located });
+    expect(screen.getByText("In")).toBeInTheDocument();
+    expect(screen.getByText("45.42150, -75.69720")).toBeInTheDocument();
+    expect(screen.getByText("±13m")).toBeInTheDocument();
+    expect(screen.getByText("· Depot")).toBeInTheDocument();
+    expect(screen.getByText("Out")).toBeInTheDocument();
+    expect(screen.getByText("43.65320, -79.38320")).toBeInTheDocument();
+    expect(screen.getByText("· No site")).toBeInTheDocument();
+  });
+
+  it("hides the location from members", () => {
+    renderItem({ entry: located, isAdmin: false });
+    expect(screen.queryByText("In")).not.toBeInTheDocument();
+    expect(screen.queryByText("45.42150, -75.69720")).not.toBeInTheDocument();
+  });
+
+  it("shows nothing extra when no location was captured", () => {
+    renderItem({ entry });
+    expect(screen.queryByText("In")).not.toBeInTheDocument();
+  });
+
+  it("shows only the clock-in punch when the clock-out has no location", () => {
+    renderItem({
+      entry: makeEntry({
+        id: 7,
+        clock_in_latitude: 45.4215,
+        clock_in_longitude: -75.6972,
+        clock_in_site_name: "Depot",
+      }),
+    });
+    expect(screen.getByText("In")).toBeInTheDocument();
+    expect(screen.queryByText("Out")).not.toBeInTheDocument();
+  });
+});

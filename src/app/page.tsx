@@ -7,8 +7,10 @@ import MainPageHeader from "@/components/headers/main-page-header";
 import McpConnectCard from "@/components/McpConnectCard";
 import {
   getOrgBreakSettings,
+  getOrgLocationSettings,
   getOrgMembers,
   getOrgReportingSettings,
+  getOrgSites,
   getOrgTimeEntries,
   getTimeEntries,
 } from "@/lib/dal";
@@ -40,12 +42,16 @@ export default function Home(props: PageProps<"/">) {
                   timezone: parseParams(p.timezone),
                 }),
               )}
+              hasGeofencingPromise={hasPromise.then((has) =>
+                has({ feature: "geofencing" }),
+              )}
               hasReportingPromise={hasPromise.then((has) =>
                 has({ feature: "reporting" }),
               )}
               isAdminPromise={hasPromise.then((has) =>
                 has({ role: "org:admin" }),
               )}
+              locationSettingsPromise={getOrgLocationSettings()}
               membersPromise={getOrgMembers()}
               orgIdPromise={authPromise.then((auth) => auth.orgId)}
               orgSettingsPromise={getOrgReportingSettings()}
@@ -69,6 +75,7 @@ export default function Home(props: PageProps<"/">) {
               selectedYearPromise={props.searchParams.then((p) =>
                 parseParams(p.year),
               )}
+              sitesPromise={getOrgSites()}
               startDatePromise={props.searchParams.then((p) =>
                 parseParams(p.start),
               )}

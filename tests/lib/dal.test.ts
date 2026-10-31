@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   dbClockIn: vi.fn(),
   dbClockOut: vi.fn(),
   dbDeleteBreak: vi.fn(),
+  dbCreateSite: vi.fn(),
+  dbDeleteSite: vi.fn(),
   dbDeleteTimeEntry: vi.fn(),
   dbEndOpenBreak: vi.fn(),
   dbGetActiveEntry: vi.fn(),
@@ -14,13 +16,18 @@ const mocks = vi.hoisted(() => ({
   dbGetBreaksForEntriesInOrg: vi.fn(),
   dbGetBreakWithEntry: vi.fn(),
   dbGetEntryBreaks: vi.fn(),
+  dbGetLocationSettings: vi.fn(),
   dbGetOrgTimeEntries: vi.fn(),
   dbGetReportingSettings: vi.fn(),
+  dbGetSites: vi.fn(),
+  dbGetSitesForEnforcement: vi.fn(),
   dbGetTimeEntries: vi.fn(),
   dbStartBreak: vi.fn(),
   dbUpdateBreak: vi.fn(),
   dbUpdateBreakSettings: vi.fn(),
+  dbUpdateLocationSettings: vi.fn(),
   dbUpdateReportingSettings: vi.fn(),
+  dbUpdateSite: vi.fn(),
   dbUpdateTimeEntry: vi.fn(),
   getProcessedMembers: vi.fn(),
   isOverMemberShipLimit: vi.fn(),
@@ -40,6 +47,8 @@ vi.mock("@/lib/db", () => ({
   dbClockIn: mocks.dbClockIn,
   dbClockOut: mocks.dbClockOut,
   dbDeleteBreak: mocks.dbDeleteBreak,
+  dbCreateSite: mocks.dbCreateSite,
+  dbDeleteSite: mocks.dbDeleteSite,
   dbDeleteTimeEntry: mocks.dbDeleteTimeEntry,
   dbEndOpenBreak: mocks.dbEndOpenBreak,
   dbGetActiveEntry: mocks.dbGetActiveEntry,
@@ -47,13 +56,18 @@ vi.mock("@/lib/db", () => ({
   dbGetBreaksForEntriesInOrg: mocks.dbGetBreaksForEntriesInOrg,
   dbGetBreakWithEntry: mocks.dbGetBreakWithEntry,
   dbGetEntryBreaks: mocks.dbGetEntryBreaks,
+  dbGetLocationSettings: mocks.dbGetLocationSettings,
   dbGetOrgTimeEntries: mocks.dbGetOrgTimeEntries,
   dbGetReportingSettings: mocks.dbGetReportingSettings,
+  dbGetSites: mocks.dbGetSites,
+  dbGetSitesForEnforcement: mocks.dbGetSitesForEnforcement,
   dbGetTimeEntries: mocks.dbGetTimeEntries,
   dbStartBreak: mocks.dbStartBreak,
   dbUpdateBreak: mocks.dbUpdateBreak,
   dbUpdateBreakSettings: mocks.dbUpdateBreakSettings,
+  dbUpdateLocationSettings: mocks.dbUpdateLocationSettings,
   dbUpdateReportingSettings: mocks.dbUpdateReportingSettings,
+  dbUpdateSite: mocks.dbUpdateSite,
   dbUpdateTimeEntry: mocks.dbUpdateTimeEntry,
 }));
 
@@ -65,27 +79,60 @@ vi.mock("@/lib/utils-clerk", () => ({
 import {
   clockIn,
   clockOut,
+  createSiteDal,
   deleteBreakDal,
+  deleteSiteDal,
   deleteTimeEntry,
   endBreak,
   getActiveEntry,
   getBreaksForEntries,
   getOrgBreakSettings,
+  getOrgLocationSettings,
   getOrgMembers,
   getOrgReportingSettings,
+  getOrgSites,
   getOrgTimeEntries,
   getTimeEntries,
   startBreak,
   updateBreakDal,
   updateBreakSettingsDal,
+  updateLocationSettingsDal,
   updateReportingSettingsDal,
+  updateSiteDal,
   updateTimeEntry,
 } from "@/lib/dal";
 
-const member = { userId: "user_1", orgId: "org_1", orgRole: "org:member" };
-const admin = { userId: "user_1", orgId: "org_1", orgRole: "org:admin" };
-const noUser = { userId: null, orgId: "org_1", orgRole: "org:admin" };
-const noOrg = { userId: "user_1", orgId: null, orgRole: "org:admin" };
+const noFeature = () => false;
+const member = {
+  userId: "user_1",
+  orgId: "org_1",
+  orgRole: "org:member",
+  has: noFeature,
+};
+const admin = {
+  userId: "user_1",
+  orgId: "org_1",
+  orgRole: "org:admin",
+  has: noFeature,
+};
+const noUser = {
+  userId: null,
+  orgId: "org_1",
+  orgRole: "org:admin",
+  has: noFeature,
+};
+const noOrg = {
+  userId: "user_1",
+  orgId: null,
+  orgRole: "org:admin",
+  has: noFeature,
+};
+
+/** A session whose plan includes the given feature slugs. */
+const withFeatures = (session: object, ...slugs: string[]) => ({
+  ...session,
+  has: vi.fn(({ feature }: { feature: string }) => slugs.includes(feature)),
+});
 
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -317,7 +364,7 @@ describe("clockIn", () => {
     mocks.dbClockIn.mockResolvedValue({ id: 10 });
     const result = await clockIn();
     expect(result._unsafeUnwrap()).toEqual({ id: 10 });
-    expect(mocks.dbClockIn).toHaveBeenCalledWith("user_1", "org_1");
+    expect(mocks.dbClockIn).toHaveBeenCalledWith("user_1", "org_1", null);
   });
 
   it("refuses when a concurrent clock-in won the race", async () => {
@@ -349,7 +396,7 @@ describe("clockOut", () => {
     mocks.protect.mockResolvedValue(member);
     mocks.dbClockOut.mockResolvedValue({ id: 11 });
     expect((await clockOut())._unsafeUnwrap()).toEqual({ id: 11 });
-    expect(mocks.dbClockOut).toHaveBeenCalledWith("user_1", "org_1");
+    expect(mocks.dbClockOut).toHaveBeenCalledWith("user_1", "org_1", null);
   });
 
   it("returns an error when the update fails", async () => {
@@ -889,6 +936,261 @@ describe("getBreaksForEntries", () => {
     });
   });
 });
+describe("clockIn location enforcement", () => {
+  const coordinates = { latitude: 45.4215, longitude: -75.6972, accuracy: 8 };
+  const depot = {
+    id: 1,
+    org_id: "org_1",
+    name: "Depot",
+    latitude: 45.4215,
+    longitude: -75.6972,
+    radius_meters: 150,
+  };
+  const restricted = {
+    org_id: "org_1",
+    capture_mode: "required",
+    restrict_clock_in: true,
+  };
+
+  /**
+   * A member who is cleared to clock in and whose org pays for geofencing, so
+   * only the location decision is in play.
+   */
+  function readyToClockIn(...slugs: string[]) {
+    mocks.protect.mockResolvedValue(withFeatures(member, ...slugs));
+    mocks.isOverMemberShipLimit.mockResolvedValue(false);
+    mocks.dbCheckActiveEntry.mockResolvedValue([]);
+    mocks.dbClockIn.mockResolvedValue({ id: 20 });
+  }
+
+  it("stores no coordinates and reads no sites when capture is off", async () => {
+    readyToClockIn("geofencing");
+    mocks.dbGetLocationSettings.mockResolvedValue({
+      org_id: "org_1",
+      capture_mode: "off",
+      restrict_clock_in: false,
+    });
+
+    expect((await clockIn(coordinates))._unsafeUnwrap()).toEqual({ id: 20 });
+    expect(mocks.dbGetSitesForEnforcement).not.toHaveBeenCalled();
+    expect(mocks.dbClockIn).toHaveBeenCalledWith("user_1", "org_1", null);
+  });
+
+  it("stores no coordinates for an org that never configured location", async () => {
+    readyToClockIn("geofencing");
+    mocks.dbGetLocationSettings.mockResolvedValue(undefined);
+
+    expect((await clockIn(coordinates)).isOk()).toBe(true);
+    expect(mocks.dbClockIn).toHaveBeenCalledWith("user_1", "org_1", null);
+  });
+
+  it("ignores a configured geofence for an org without the paid feature", async () => {
+    // The restriction rows are still in the database, but the plan no longer
+    // includes geofencing: clocking in must work exactly as it did before.
+    readyToClockIn();
+    mocks.dbGetLocationSettings.mockResolvedValue(restricted);
+    mocks.dbGetSitesForEnforcement.mockResolvedValue([depot]);
+
+    expect(
+      (await clockIn({ latitude: 43.6532, longitude: -79.3832 })).isOk(),
+    ).toBe(true);
+    expect(mocks.dbGetLocationSettings).not.toHaveBeenCalled();
+    expect(mocks.dbGetSitesForEnforcement).not.toHaveBeenCalled();
+    expect(mocks.dbClockIn).toHaveBeenCalledWith("user_1", "org_1", null);
+  });
+
+  it("lets a member with no coordinates clock in without the paid feature", async () => {
+    readyToClockIn();
+    mocks.dbGetLocationSettings.mockResolvedValue(restricted);
+
+    expect((await clockIn()).isOk()).toBe(true);
+    expect(mocks.dbClockIn).toHaveBeenCalledWith("user_1", "org_1", null);
+  });
+
+  it("stores the coordinates and matched site when capture is optional", async () => {
+    readyToClockIn("geofencing");
+    mocks.dbGetLocationSettings.mockResolvedValue({
+      org_id: "org_1",
+      capture_mode: "optional",
+      restrict_clock_in: false,
+    });
+    mocks.dbGetSitesForEnforcement.mockResolvedValue([depot]);
+
+    expect((await clockIn(coordinates)).isOk()).toBe(true);
+    expect(mocks.dbClockIn).toHaveBeenCalledWith("user_1", "org_1", {
+      latitude: 45.4215,
+      longitude: -75.6972,
+      accuracy: 8,
+      siteName: "Depot",
+    });
+  });
+
+  it("clocks in without coordinates when capture is only optional", async () => {
+    readyToClockIn("geofencing");
+    mocks.dbGetLocationSettings.mockResolvedValue({
+      org_id: "org_1",
+      capture_mode: "optional",
+      restrict_clock_in: false,
+    });
+    mocks.dbGetSitesForEnforcement.mockResolvedValue([depot]);
+
+    expect((await clockIn()).isOk()).toBe(true);
+    expect(mocks.dbClockIn).toHaveBeenCalledWith("user_1", "org_1", null);
+  });
+
+  it("refuses a clock-in with no coordinates when capture is required", async () => {
+    readyToClockIn("geofencing");
+    mocks.dbGetLocationSettings.mockResolvedValue({
+      org_id: "org_1",
+      capture_mode: "required",
+      restrict_clock_in: false,
+    });
+    mocks.dbGetSitesForEnforcement.mockResolvedValue([]);
+
+    const result = await clockIn();
+    expect(result._unsafeUnwrapErr().reason).toContain(
+      "requires your location",
+    );
+    expect(mocks.dbClockIn).not.toHaveBeenCalled();
+  });
+
+  it("refuses a clock-in outside every site when clock-in is restricted", async () => {
+    readyToClockIn("geofencing");
+    mocks.dbGetLocationSettings.mockResolvedValue(restricted);
+    mocks.dbGetSitesForEnforcement.mockResolvedValue([depot]);
+
+    const result = await clockIn({ latitude: 43.6532, longitude: -79.3832 });
+    expect(result._unsafeUnwrapErr().reason).toContain(
+      "not at an approved work site",
+    );
+    expect(mocks.dbClockIn).not.toHaveBeenCalled();
+  });
+
+  it("does not trust a client that sends impossible coordinates", async () => {
+    readyToClockIn("geofencing");
+    mocks.dbGetLocationSettings.mockResolvedValue(restricted);
+    mocks.dbGetSitesForEnforcement.mockResolvedValue([depot]);
+
+    const result = await clockIn({ latitude: 999, longitude: 999 });
+    expect(result.isErr()).toBe(true);
+    expect(mocks.dbClockIn).not.toHaveBeenCalled();
+  });
+
+  it("allows a restricted clock-in inside a site", async () => {
+    readyToClockIn("geofencing");
+    mocks.dbGetLocationSettings.mockResolvedValue(restricted);
+    mocks.dbGetSitesForEnforcement.mockResolvedValue([depot]);
+
+    expect((await clockIn(coordinates)).isOk()).toBe(true);
+    expect(mocks.dbClockIn).toHaveBeenCalledWith(
+      "user_1",
+      "org_1",
+      expect.objectContaining({ siteName: "Depot" }),
+    );
+  });
+
+  it("refuses the punch when the location lookup itself fails", async () => {
+    readyToClockIn("geofencing");
+    mocks.dbGetLocationSettings.mockRejectedValue(new Error("db"));
+
+    expect((await clockIn(coordinates))._unsafeUnwrapErr()).toEqual({
+      reason: "Unable to verify your location.",
+    });
+    expect(mocks.dbClockIn).not.toHaveBeenCalled();
+  });
+});
+
+describe("clockOut location capture", () => {
+  const coordinates = { latitude: 43.6532, longitude: -79.3832, accuracy: 30 };
+  const depot = {
+    id: 1,
+    org_id: "org_1",
+    name: "Depot",
+    latitude: 45.4215,
+    longitude: -75.6972,
+    radius_meters: 150,
+  };
+
+  it("records where a clock-out happened without geofencing it", async () => {
+    mocks.protect.mockResolvedValue(withFeatures(member, "geofencing"));
+    mocks.dbClockOut.mockResolvedValue({ id: 21 });
+    mocks.dbGetLocationSettings.mockResolvedValue({
+      org_id: "org_1",
+      capture_mode: "required",
+      restrict_clock_in: true,
+    });
+    mocks.dbGetSitesForEnforcement.mockResolvedValue([depot]);
+
+    // Miles away from the only site, and it still goes through.
+    expect((await clockOut(coordinates))._unsafeUnwrap()).toEqual({ id: 21 });
+    expect(mocks.dbClockOut).toHaveBeenCalledWith("user_1", "org_1", {
+      latitude: 43.6532,
+      longitude: -79.3832,
+      accuracy: 30,
+      siteName: null,
+    });
+  });
+
+  it("stores nothing for an org without the paid feature", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbClockOut.mockResolvedValue({ id: 23 });
+    mocks.dbGetLocationSettings.mockResolvedValue({
+      org_id: "org_1",
+      capture_mode: "required",
+      restrict_clock_in: true,
+    });
+
+    expect((await clockOut(coordinates)).isOk()).toBe(true);
+    expect(mocks.dbGetLocationSettings).not.toHaveBeenCalled();
+    expect(mocks.dbClockOut).toHaveBeenCalledWith("user_1", "org_1", null);
+  });
+
+  it("clocks out anyway when the location lookup fails", async () => {
+    mocks.protect.mockResolvedValue(withFeatures(member, "geofencing"));
+    mocks.dbClockOut.mockResolvedValue({ id: 22 });
+    mocks.dbGetLocationSettings.mockRejectedValue(new Error("db"));
+
+    expect((await clockOut(coordinates)).isOk()).toBe(true);
+    expect(mocks.dbClockOut).toHaveBeenCalledWith("user_1", "org_1", null);
+  });
+});
+
+describe("getOrgLocationSettings", () => {
+  it("rejects requests without a user or org", async () => {
+    mocks.protect.mockResolvedValue(noOrg);
+    expect((await getOrgLocationSettings()).ok).toBe(false);
+  });
+
+  it("returns the stored location settings", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetLocationSettings.mockResolvedValue({
+      org_id: "org_1",
+      capture_mode: "optional",
+    });
+    await expect(getOrgLocationSettings()).resolves.toEqual({
+      ok: true,
+      value: { org_id: "org_1", capture_mode: "optional" },
+    });
+  });
+
+  it("returns null when nothing is stored", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetLocationSettings.mockResolvedValue(undefined);
+    await expect(getOrgLocationSettings()).resolves.toEqual({
+      ok: true,
+      value: null,
+    });
+  });
+
+  it("returns an error result when the query fails", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetLocationSettings.mockRejectedValue(new Error("db"));
+    await expect(getOrgLocationSettings()).resolves.toEqual({
+      ok: false,
+      error: { reason: "Error fetching location settings." },
+    });
+  });
+});
 
 describe("updateBreakDal", () => {
   const breakStart = new Date("2026-01-05T12:00:00Z");
@@ -1016,6 +1318,184 @@ describe("updateBreakDal", () => {
     });
   });
 });
+describe("updateLocationSettingsDal", () => {
+  it.each([
+    ["no user", withFeatures(noUser, "geofencing")],
+    ["no org", withFeatures(noOrg, "geofencing")],
+    ["a non-admin", withFeatures(member, "geofencing")],
+    ["an org without the geofencing feature", withFeatures(admin)],
+  ])("rejects %s", async (_label, session) => {
+    mocks.protect.mockResolvedValue(session);
+    expect(
+      (await updateLocationSettingsDal("optional", false))._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Unauthorized" });
+    expect(mocks.dbUpdateLocationSettings).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unknown capture mode", async () => {
+    mocks.protect.mockResolvedValue(withFeatures(admin, "geofencing"));
+    expect(
+      (await updateLocationSettingsDal("always", false))._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Invalid location settings" });
+    expect(mocks.dbUpdateLocationSettings).not.toHaveBeenCalled();
+  });
+
+  it.each(["off", "optional", "required"])(
+    "saves the %s mode",
+    async (mode) => {
+      const session = withFeatures(admin, "geofencing");
+      mocks.protect.mockResolvedValue(session);
+      mocks.dbUpdateLocationSettings.mockResolvedValue({ org_id: "org_1" });
+      expect((await updateLocationSettingsDal(mode, true)).isOk()).toBe(true);
+      expect(session.has).toHaveBeenCalledWith({ feature: "geofencing" });
+      expect(mocks.dbUpdateLocationSettings).toHaveBeenCalledWith(
+        "org_1",
+        mode,
+        true,
+      );
+    },
+  );
+
+  it("returns an error when the save fails", async () => {
+    mocks.protect.mockResolvedValue(withFeatures(admin, "geofencing"));
+    mocks.dbUpdateLocationSettings.mockRejectedValue(new Error("db"));
+    expect(
+      (await updateLocationSettingsDal("optional", false))._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Failed to update location settings" });
+  });
+});
+
+describe("getOrgSites", () => {
+  it("rejects requests without a user or org", async () => {
+    mocks.protect.mockResolvedValue(noOrg);
+    expect((await getOrgSites()).ok).toBe(false);
+  });
+
+  it("returns the org's sites to any member", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetSites.mockResolvedValue([{ id: 1, name: "Depot" }]);
+    await expect(getOrgSites()).resolves.toEqual({
+      ok: true,
+      value: [{ id: 1, name: "Depot" }],
+    });
+  });
+
+  it("returns an error result when the query fails", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetSites.mockRejectedValue(new Error("db"));
+    await expect(getOrgSites()).resolves.toEqual({
+      ok: false,
+      error: { reason: "Error fetching sites." },
+    });
+  });
+});
+
+describe.each([
+  ["createSiteDal", false],
+  ["updateSiteDal", true],
+] as const)("%s", (_name, isUpdate) => {
+  const call = (siteName: string, lat: number, lon: number, radius: number) =>
+    isUpdate
+      ? updateSiteDal(7, siteName, lat, lon, radius)
+      : createSiteDal(siteName, lat, lon, radius);
+  const dbFn = () => (isUpdate ? mocks.dbUpdateSite : mocks.dbCreateSite);
+  const failureReason = isUpdate
+    ? "Failed to update site"
+    : "Failed to create site";
+
+  it.each([
+    ["no user", withFeatures(noUser, "geofencing")],
+    ["no org", withFeatures(noOrg, "geofencing")],
+    ["a non-admin", withFeatures(member, "geofencing")],
+    ["an org without the geofencing feature", withFeatures(admin)],
+  ])("rejects %s", async (_label, session) => {
+    mocks.protect.mockResolvedValue(session);
+    expect((await call("Depot", 45, -75, 150))._unsafeUnwrapErr()).toEqual({
+      reason: "Unauthorized",
+    });
+    expect(dbFn()).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a blank name", "   ", 45, -75, 150, "Site name is required"],
+    [
+      "a latitude out of range",
+      "Depot",
+      91,
+      -75,
+      150,
+      "Invalid site coordinates",
+    ],
+    [
+      "a latitude below the south pole",
+      "Depot",
+      -91,
+      -75,
+      150,
+      "Invalid site coordinates",
+    ],
+    [
+      "a longitude out of range",
+      "Depot",
+      45,
+      181,
+      150,
+      "Invalid site coordinates",
+    ],
+    [
+      "a longitude below the antimeridian",
+      "Depot",
+      45,
+      -181,
+      150,
+      "Invalid site coordinates",
+    ],
+    [
+      "a NaN latitude",
+      "Depot",
+      Number.NaN,
+      -75,
+      150,
+      "Invalid site coordinates",
+    ],
+    [
+      "a NaN longitude",
+      "Depot",
+      45,
+      Number.NaN,
+      150,
+      "Invalid site coordinates",
+    ],
+    ["a negative radius", "Depot", 45, -75, -1, "Invalid site radius"],
+    ["an absurd radius", "Depot", 45, -75, 200_000, "Invalid site radius"],
+    ["a NaN radius", "Depot", 45, -75, Number.NaN, "Invalid site radius"],
+  ])("rejects %s", async (_label, siteName, lat, lon, radius, reason) => {
+    mocks.protect.mockResolvedValue(withFeatures(admin, "geofencing"));
+    expect((await call(siteName, lat, lon, radius))._unsafeUnwrapErr()).toEqual(
+      { reason },
+    );
+    expect(dbFn()).not.toHaveBeenCalled();
+  });
+
+  it("trims the name and saves", async () => {
+    mocks.protect.mockResolvedValue(withFeatures(admin, "geofencing"));
+    dbFn().mockResolvedValue({ id: 7, org_id: "org_1", name: "Depot" });
+    expect((await call("  Depot  ", 45, -75, 150)).isOk()).toBe(true);
+    expect(dbFn()).toHaveBeenCalledWith(
+      ...(isUpdate
+        ? [7, "org_1", "Depot", 45, -75, 150]
+        : ["org_1", "Depot", 45, -75, 150]),
+    );
+  });
+
+  it("returns an error when the query fails", async () => {
+    mocks.protect.mockResolvedValue(withFeatures(admin, "geofencing"));
+    dbFn().mockRejectedValue(new Error("db"));
+    expect((await call("Depot", 45, -75, 150))._unsafeUnwrapErr()).toEqual({
+      reason: failureReason,
+    });
+  });
+});
 
 describe("deleteBreakDal", () => {
   const existing = { id: 4, time_entry_id: 1, user_id: "user_2" };
@@ -1069,6 +1549,56 @@ describe("deleteBreakDal", () => {
     const result = await deleteBreakDal(4);
     expect(result._unsafeUnwrapErr()).toEqual({
       reason: "Failed to delete break",
+    });
+  });
+});
+describe("updateSiteDal", () => {
+  it("reports a site that is not in this org", async () => {
+    mocks.protect.mockResolvedValue(withFeatures(admin, "geofencing"));
+    mocks.dbUpdateSite.mockResolvedValue(undefined);
+    expect(
+      (await updateSiteDal(7, "Depot", 45, -75, 150))._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Site not found" });
+  });
+});
+
+describe("deleteSiteDal", () => {
+  it.each([
+    ["no user", withFeatures(noUser, "geofencing")],
+    ["no org", withFeatures(noOrg, "geofencing")],
+    ["a non-admin", withFeatures(member, "geofencing")],
+    ["an org without the geofencing feature", withFeatures(admin)],
+  ])("rejects %s", async (_label, session) => {
+    mocks.protect.mockResolvedValue(session);
+    expect((await deleteSiteDal(7))._unsafeUnwrapErr()).toEqual({
+      reason: "Unauthorized",
+    });
+    expect(mocks.dbDeleteSite).not.toHaveBeenCalled();
+  });
+
+  it("deletes the site within the org", async () => {
+    mocks.protect.mockResolvedValue(withFeatures(admin, "geofencing"));
+    mocks.dbDeleteSite.mockResolvedValue({ id: 7, org_id: "org_1" });
+    expect((await deleteSiteDal(7))._unsafeUnwrap()).toEqual({
+      id: 7,
+      org_id: "org_1",
+    });
+    expect(mocks.dbDeleteSite).toHaveBeenCalledWith(7, "org_1");
+  });
+
+  it("reports a site that is not in this org", async () => {
+    mocks.protect.mockResolvedValue(withFeatures(admin, "geofencing"));
+    mocks.dbDeleteSite.mockResolvedValue(undefined);
+    expect((await deleteSiteDal(7))._unsafeUnwrapErr()).toEqual({
+      reason: "Site not found",
+    });
+  });
+
+  it("returns an error when the delete fails", async () => {
+    mocks.protect.mockResolvedValue(withFeatures(admin, "geofencing"));
+    mocks.dbDeleteSite.mockRejectedValue(new Error("db"));
+    expect((await deleteSiteDal(7))._unsafeUnwrapErr()).toEqual({
+      reason: "Failed to delete site",
     });
   });
 });

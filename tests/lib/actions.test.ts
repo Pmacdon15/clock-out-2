@@ -13,7 +13,11 @@ const mocks = vi.hoisted(() => ({
   updateBreakDal: vi.fn(),
   deleteBreakDal: vi.fn(),
   updateBreakSettingsDal: vi.fn(),
+  updateLocationSettingsDal: vi.fn(),
   updateReportingSettingsDal: vi.fn(),
+  createSiteDal: vi.fn(),
+  updateSiteDal: vi.fn(),
+  deleteSiteDal: vi.fn(),
   sendWeeklyReports: vi.fn(),
 }));
 
@@ -29,7 +33,11 @@ vi.mock("@/lib/dal", () => ({
   updateBreakDal: mocks.updateBreakDal,
   deleteBreakDal: mocks.deleteBreakDal,
   updateBreakSettingsDal: mocks.updateBreakSettingsDal,
+  updateLocationSettingsDal: mocks.updateLocationSettingsDal,
   updateReportingSettingsDal: mocks.updateReportingSettingsDal,
+  createSiteDal: mocks.createSiteDal,
+  updateSiteDal: mocks.updateSiteDal,
+  deleteSiteDal: mocks.deleteSiteDal,
 }));
 vi.mock("@/lib/reports", () => ({
   sendWeeklyReports: mocks.sendWeeklyReports,
@@ -38,14 +46,18 @@ vi.mock("@/lib/reports", () => ({
 import {
   clockInAction,
   clockOutAction,
+  createSiteAction,
   deleteBreakAction,
+  deleteSiteAction,
   deleteTimeEntryAction,
   endBreakAction,
   sendCurrentWeekReportAction,
   startBreakAction,
   updateBreakAction,
   updateBreakSettingAction,
+  updateLocationSettingsAction,
   updateOrgSettingAction,
+  updateSiteAction,
   updateTimeEntryAction,
 } from "@/lib/actions";
 
@@ -390,5 +402,100 @@ describe("deleteBreakAction", () => {
       success: false,
       error: "nope",
     });
+  });
+});
+describe("clock actions forward coordinates to the DAL", () => {
+  const coordinates = { latitude: 45.4215, longitude: -75.6972, accuracy: 5 };
+
+  it("passes the browser's coordinates on clock-in", async () => {
+    mocks.clockIn.mockResolvedValue(ok(entry));
+    await clockInAction(coordinates);
+    expect(mocks.clockIn).toHaveBeenCalledWith(coordinates);
+  });
+
+  it("passes nothing when the client has no coordinates", async () => {
+    mocks.clockIn.mockResolvedValue(ok(entry));
+    await clockInAction();
+    expect(mocks.clockIn).toHaveBeenCalledWith(undefined);
+  });
+
+  it("passes the browser's coordinates on clock-out", async () => {
+    mocks.clockOut.mockResolvedValue(ok(entry));
+    await clockOutAction(coordinates);
+    expect(mocks.clockOut).toHaveBeenCalledWith(coordinates);
+  });
+});
+
+describe("updateLocationSettingsAction", () => {
+  it("revalidates the org's location settings", async () => {
+    mocks.updateLocationSettingsDal.mockResolvedValue(ok({ org_id: "org_1" }));
+    await expect(
+      updateLocationSettingsAction("required", true),
+    ).resolves.toEqual({ success: true, data: { org_id: "org_1" } });
+    expect(mocks.updateLocationSettingsDal).toHaveBeenCalledWith(
+      "required",
+      true,
+    );
+    expect(mocks.updateTag).toHaveBeenCalledWith("location-settings-org_1");
+  });
+
+  it("returns the failure reason", async () => {
+    mocks.updateLocationSettingsDal.mockResolvedValue(failure);
+    await expect(
+      updateLocationSettingsAction("required", true),
+    ).resolves.toEqual({ success: false, error: "nope" });
+    expect(mocks.updateTag).not.toHaveBeenCalled();
+  });
+});
+
+describe("site actions", () => {
+  const site = { id: 3, org_id: "org_1", name: "Depot" };
+
+  it("creates a site and revalidates the site list", async () => {
+    mocks.createSiteDal.mockResolvedValue(ok(site));
+    await expect(createSiteAction("Depot", 45, -75, 150)).resolves.toEqual({
+      success: true,
+      data: site,
+    });
+    expect(mocks.createSiteDal).toHaveBeenCalledWith("Depot", 45, -75, 150);
+    expect(mocks.updateTag).toHaveBeenCalledWith("sites-org_1");
+  });
+
+  it("updates a site and revalidates the site list", async () => {
+    mocks.updateSiteDal.mockResolvedValue(ok(site));
+    await expect(updateSiteAction(3, "Depot", 45, -75, 150)).resolves.toEqual({
+      success: true,
+      data: site,
+    });
+    expect(mocks.updateSiteDal).toHaveBeenCalledWith(3, "Depot", 45, -75, 150);
+    expect(mocks.updateTag).toHaveBeenCalledWith("sites-org_1");
+  });
+
+  it("deletes a site and revalidates the site list", async () => {
+    mocks.deleteSiteDal.mockResolvedValue(ok(site));
+    await expect(deleteSiteAction(3)).resolves.toEqual({
+      success: true,
+      data: site,
+    });
+    expect(mocks.deleteSiteDal).toHaveBeenCalledWith(3);
+    expect(mocks.updateTag).toHaveBeenCalledWith("sites-org_1");
+  });
+
+  it.each([
+    [
+      "createSiteAction",
+      () => createSiteAction("Depot", 45, -75, 150),
+      mocks.createSiteDal,
+    ],
+    [
+      "updateSiteAction",
+      () => updateSiteAction(3, "Depot", 45, -75, 150),
+      mocks.updateSiteDal,
+    ],
+    ["deleteSiteAction", () => deleteSiteAction(3), mocks.deleteSiteDal],
+  ] as const)("%s returns the failure reason", async (_name, action, dalFn) => {
+    dalFn.mockResolvedValue(failure);
+    await expect(action()).resolves.toEqual({ success: false, error: "nope" });
+    expect(mocks.updateTag).not.toHaveBeenCalled();
   });
 });
