@@ -13,7 +13,7 @@ Live app: https://clockout.patmac.ca
 - **Weekly timecards** — per-member totals, days worked, and day-by-day breakdowns, with charts.
 - **Timesheet export** — server-generated PDF and Excel (.xlsx) timesheets for any period, grouped by week or month.
 - **Emailed hours reports** — organizations on a plan with the Reporting feature can schedule automatic report emails (weekly, twice-monthly/pay-period, or a custom weekday every 1–2 weeks) and run ad-hoc reports for any date range.
-- **MCP server** — 16 tools over Streamable HTTP with Clerk OAuth sign-in (see below).
+- **MCP server** — 18 tools over Streamable HTTP with Clerk OAuth sign-in (see below).
 
 ## Tech stack
 
@@ -91,7 +91,7 @@ MCP uses **Clerk as an OAuth 2.0 authorization server**:
 
 An unauthenticated request gets a `401` with a `WWW-Authenticate` header pointing at the protected-resource metadata, per RFC 9728.
 
-### Tools (16)
+### Tools (18)
 
 Read-only tools are marked *(read)*. Most tools accept `org_id` (an organization ID, slug, or name); with a single organization it can be omitted, and members are identified by name, email, or `user_id`. Time inputs take an IANA `timezone` (default `America/Edmonton`).
 
@@ -100,17 +100,19 @@ Read-only tools are marked *(read)*. Most tools accept `org_id` (an organization
 | `list_organizations` *(read)* | Lists the organizations the signed-in user belongs to, with `org_id`, name, slug, and their role. |
 | `list_members` *(read)* | Lists an organization's members (name, email for admins, role, currently clocked in?). |
 | `who_is_working` *(read)* | Who is clocked in right now, since when, and for how long — plus who is clocked out. |
-| `get_clock_status` *(read)* | Whether you (or a member, for admins) are clocked in and how long the shift has run. |
+| `get_clock_status` *(read)* | Whether you (or a member, for admins) are clocked in, whether a break is running, and how long the shift has run. |
 | `clock_in` | Starts a shift for yourself, or for any member if you're an admin. Rejects double clock-ins and overlaps. |
 | `clock_out` | Ends the active shift for yourself or (admin) any member; optional custom clock-out time. |
+| `toggle_break` | Starts, ends, or toggles a live break (`unpaid_meal`, `unpaid_rest`, or `paid_rest`) on an active shift for yourself or (admin) any member. |
+| `manage_breaks` | *(Admin for add/update/delete; anyone for list/start/end/toggle)* Adds, edits, deletes, or lists breaks of the 3 kinds (`unpaid_meal`, `unpaid_rest`, `paid_rest`) on a shift. |
 | `add_time_entry` | Adds one shift or a batch (`entries` array) — the tool to use when importing a photographed paper timecard or schedule. Strictly rejects overlapping shifts. |
 | `list_time_entries` *(read)* | Lists shifts between `start_date` and `end_date` (default last 7 days) with durations; admins can filter by member or use `member: "all"`. |
 | `get_weekly_timecard` *(read)* | Weekly timecard: totals, days worked, and day-by-day breakdowns. Supports `week_of`, explicit dates, or the month-week selector (year, month, week 1–4). |
 | `export_timesheet` *(read)* | Generates PDF **and** Excel timesheets for a period (group by week/month) and returns embedded files plus signed-in download links. |
-| `update_time_entry` | *(Admin)* Changes `clock_in`/`clock_out`/`hours_worked` on an existing entry, by `entry_id` or member + date. Overlap-checked. |
+| `update_time_entry` | *(Admin)* Changes `clock_in`/`clock_out`/`hours_worked`/`skip_lunch` on an existing entry, by `entry_id` or member + date. Overlap-checked. |
 | `delete_time_entry` | *(Admin)* Permanently deletes a time entry by `entry_id`. |
 | `manage_reporting_settings` | Views or updates the emailed-report schedule (`off`, `weekly`, `twice-monthly`, `custom` weekday every 1–2 weeks) or sends a test report. Updating requires `org:admin` and a plan with the Reporting feature. |
-| `manage_break_settings` | Views or updates the lunch/break deduction: `dock_lunch` on/off, `lunch_duration_minutes`, `lunch_min_shift_hours`. Anyone can view; updating is `org:admin`. Available on every plan. |
+| `manage_break_settings` | Views, updates, or toggles the lunch/break deduction: `dock_lunch` on/off, `lunch_duration_minutes`, `lunch_min_shift_hours`. Anyone can view; updating is `org:admin`. Available on every plan. |
 | `run_hours_report` | *(Admin, Reporting feature)* Net hours (after break deductions) for one member or everyone between two dates, with daily breakdowns. `deliver`: return in chat (default), `email_admins`, or `both`. |
 | `invite_member` | *(Admin)* Sends organization invitations by email (`action: "send"`, role `org:member` or `org:admin`), lists pending invitations (`"list"`), or revokes one (`"revoke"`). |
 

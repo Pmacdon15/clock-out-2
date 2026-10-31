@@ -1,29 +1,44 @@
 import { neon } from "@neondatabase/serverless";
 import { revalidateTag } from "next/cache";
 import {
+  attachBreaks,
   dbClockIn,
   dbClockOut,
+  dbDeleteBreak,
   dbDeleteTimeEntry,
+  dbEndOpenBreak,
   dbGetActiveEntry,
   dbGetBreakSettings,
+  dbGetBreakWithEntry,
+  dbGetEntryBreaks,
   dbGetOrgTimeEntries,
   dbGetReportingSettings,
   dbGetTimeEntries,
+  dbStartBreak,
+  dbUpdateBreak,
   dbUpdateBreakSettings,
   dbUpdateReportingSettings,
   dbUpdateTimeEntry,
+  ensureTimeEntryBreaksTable,
 } from "@/lib/db";
-import type { TimeEntry } from "@/lib/types";
+import type { BreakType, TimeEntry, TimeEntryBreak } from "@/lib/types";
 
 export {
+  attachBreaks,
   dbClockIn,
   dbClockOut,
+  dbDeleteBreak,
   dbDeleteTimeEntry,
+  dbEndOpenBreak,
   dbGetActiveEntry,
   dbGetBreakSettings,
+  dbGetBreakWithEntry,
+  dbGetEntryBreaks,
   dbGetOrgTimeEntries,
   dbGetReportingSettings,
   dbGetTimeEntries,
+  dbStartBreak,
+  dbUpdateBreak,
   dbUpdateBreakSettings,
   dbUpdateReportingSettings,
   dbUpdateTimeEntry,
@@ -43,7 +58,7 @@ export async function dbGetOrgActiveEntries(orgId: string) {
     WHERE org_id = ${orgId} AND clock_out IS NULL
     ORDER BY clock_in ASC
   `;
-  return rows as unknown as TimeEntry[];
+  return await attachBreaks(rows as unknown as TimeEntry[]);
 }
 
 export async function dbGetTimeEntryById(id: number, orgId: string) {
@@ -53,7 +68,28 @@ export async function dbGetTimeEntryById(id: number, orgId: string) {
     WHERE id = ${id} AND org_id = ${orgId}
     LIMIT 1
   `;
-  return (row as unknown as TimeEntry) || null;
+  if (!row) return null;
+  const [withBreaks] = await attachBreaks([row as unknown as TimeEntry]);
+  return (withBreaks as TimeEntry) || null;
+}
+
+export async function dbInsertBreak(
+  timeEntryId: number,
+  orgId: string,
+  breakStart: Date,
+  breakEnd: Date | null,
+  breakType: BreakType,
+) {
+  await ensureTimeEntryBreaksTable();
+  const sql = getSql();
+  const [inserted] = await sql`
+    INSERT INTO time_entry_breaks (time_entry_id, break_type, break_start, break_end)
+    SELECT e.id, ${breakType}, ${breakStart}, ${breakEnd}
+    FROM time_entries e
+    WHERE e.id = ${timeEntryId} AND e.org_id = ${orgId}
+    RETURNING *
+  `;
+  return inserted as unknown as TimeEntryBreak | undefined;
 }
 
 export async function dbInsertTimeEntry(
