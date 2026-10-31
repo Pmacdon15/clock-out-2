@@ -544,9 +544,7 @@ export default function TimeClock({
         </div>
         <div className="space-y-3">
           {initialEntries.slice(0, 5).map((entry) => {
-            const dockedMinutes = entry.clock_out
-              ? getDockedMinutes(entry, breakSettings)
-              : 0;
+            const dockedMinutes = getDockedMinutes(entry, breakSettings);
             const unpaidBreakMinutes = Math.round(
               getUnpaidBreakMs(entry) / 60_000,
             );
