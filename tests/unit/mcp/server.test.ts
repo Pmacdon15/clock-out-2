@@ -33,6 +33,7 @@ const mockInvalidateTimeEntryCache = vi.fn();
 const mockInvalidateReportingSettingsCache = vi.fn();
 const mockDbGetBreakSettings = vi.fn(async () => undefined);
 const mockDbGetReportingSettings = vi.fn(async () => undefined);
+const mockDbGetSites = vi.fn(async () => []);
 const mockDbUpdateReportingSettings = vi.fn();
 const mockDbUpdateBreakSettings = vi.fn();
 const mockInvalidateBreakSettingsCache = vi.fn();
@@ -51,6 +52,7 @@ vi.mock("@/mcp/db", () => ({
   dbGetOrgTimeEntries: (...args: unknown[]) => mockDbGetOrgTimeEntries(...args),
   dbGetReportingSettings: (...args: unknown[]) =>
     mockDbGetReportingSettings(...args),
+  dbGetSites: (...args: unknown[]) => mockDbGetSites(...args),
   dbGetTimeEntries: (...args: unknown[]) => mockDbGetTimeEntries(...args),
   dbGetTimeEntryById: (...args: unknown[]) => mockDbGetTimeEntryById(...args),
   dbInsertTimeEntry: (...args: unknown[]) => mockDbInsertTimeEntry(...args),
@@ -77,6 +79,14 @@ vi.mock("@/lib/reports", () => ({
   sendWeeklyReports: (...args: unknown[]) => mockSendWeeklyReports(...args),
 }));
 
+const mockReverseGeocode = vi.fn(async () => null);
+const mockSearchAddress = vi.fn(async () => []);
+
+vi.mock("@/lib/geoapify", () => ({
+  reverseGeocode: (...args: unknown[]) => mockReverseGeocode(...args),
+  searchAddress: (...args: unknown[]) => mockSearchAddress(...args),
+}));
+
 import { MCP_INSTRUCTIONS } from "@/mcp/instructions";
 import {
   callerFrom,
@@ -86,6 +96,8 @@ import {
 } from "@/mcp/server";
 import {
   addTimeEntryTool,
+  clockInTool,
+  clockOutTool,
   exportTimesheetTool,
   inviteMemberTool,
   listOrganizations,
@@ -1038,6 +1050,182 @@ describe("Clerk pagination in MCP tools", () => {
           invitation_id: "orginv_101",
         },
       ],
+    });
+  });
+
+  describe("clockInTool and clockOutTool location resolution", () => {
+    const caller = { userId: "user_admin", client: "Claude" };
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+      mockGetUserOrgMemberships.mockResolvedValue({
+        data: [
+          {
+            role: "org:admin",
+            organization: {
+              id: "org_1",
+              name: "PatMac Org",
+              slug: "patmac-org",
+              membersCount: 2,
+            },
+          },
+        ],
+      });
+      mockGetOrgMemberships.mockResolvedValue({
+        data: [
+          {
+            role: "org:admin",
+            publicUserData: {
+              userId: "user_admin",
+              firstName: "Patrick",
+              lastName: "MacDonald",
+              identifier: "patrick@patmac.ca",
+            },
+          },
+        ],
+      });
+    });
+
+    it("defaults to the organization's primary site on clock-in when sites exist", async () => {
+      mockDbGetSites.mockResolvedValueOnce([
+        {
+          id: 1,
+          org_id: "org_1",
+          name: "Headquarters",
+          latitude: 45.4215,
+          longitude: -75.6972,
+          radius_meters: 100,
+          address: "111 Albert St, Ottawa, ON",
+        },
+      ]);
+      mockDbClockInAt.mockResolvedValueOnce({
+        id: 101,
+        user_id: "user_admin",
+        org_id: "org_1",
+        clock_in: new Date("2026-10-30T14:00:00.000Z"),
+        clock_out: null,
+        clock_in_latitude: 45.4215,
+        clock_in_longitude: -75.6972,
+        clock_in_accuracy_m: 0,
+        clock_in_site_name: "Headquarters",
+        clock_in_address: "111 Albert St, Ottawa, ON",
+        created_at: new Date(),
+        updated_at: new Date(),
+      });
+
+      const res = await clockInTool(caller, { timezone: "America/Edmonton" });
+
+      expect(res.isError).toBeUndefined();
+      expect(res.data.status).toBe("clocked_in");
+      expect(mockDbClockInAt).toHaveBeenCalledWith(
+        "user_admin",
+        "org_1",
+        undefined,
+        expect.objectContaining({
+          siteName: "Headquarters",
+          latitude: 45.4215,
+          longitude: -75.6972,
+          address: "111 Albert St, Ottawa, ON",
+        }),
+      );
+      expect(res.summary).toContain("Headquarters (111 Albert St, Ottawa, ON)");
+    });
+
+    it("allows specifying custom coordinates and reverse geocodes on clock-in", async () => {
+      mockDbGetSites.mockResolvedValueOnce([]);
+      mockReverseGeocode.mockResolvedValueOnce("742 Evergreen Terrace");
+      mockDbClockInAt.mockResolvedValueOnce({
+        id: 102,
+        user_id: "user_admin",
+        org_id: "org_1",
+        clock_in: new Date("2026-10-30T14:00:00.000Z"),
+        clock_out: null,
+        clock_in_latitude: 51.0722,
+        clock_in_longitude: -114.1637,
+        clock_in_accuracy_m: 10,
+        clock_in_site_name: null,
+        clock_in_address: "742 Evergreen Terrace",
+        created_at: new Date(),
+        updated_at: new Date(),
+      });
+
+      const res = await clockInTool(caller, {
+        latitude: 51.0722,
+        longitude: -114.1637,
+        accuracy: 10,
+        timezone: "America/Edmonton",
+      });
+
+      expect(res.isError).toBeUndefined();
+      expect(mockReverseGeocode).toHaveBeenCalledWith({
+        latitude: 51.0722,
+        longitude: -114.1637,
+      });
+      expect(mockDbClockInAt).toHaveBeenCalledWith(
+        "user_admin",
+        "org_1",
+        undefined,
+        expect.objectContaining({
+          latitude: 51.0722,
+          longitude: -114.1637,
+          accuracy: 10,
+          address: "742 Evergreen Terrace",
+        }),
+      );
+      expect(res.summary).toContain("at 742 Evergreen Terrace");
+    });
+
+    it("clocks out and stores location when provided", async () => {
+      mockDbGetActiveEntry.mockResolvedValueOnce({
+        id: 101,
+        user_id: "user_admin",
+        org_id: "org_1",
+        clock_in: new Date("2026-10-30T10:00:00.000Z"),
+      });
+      mockDbGetSites.mockResolvedValueOnce([
+        {
+          id: 2,
+          org_id: "org_1",
+          name: "Remote Office",
+          latitude: 45.4215,
+          longitude: -75.6972,
+          radius_meters: 100,
+          address: "200 Queen St, Ottawa, ON",
+        },
+      ]);
+      mockDbClockOutAt.mockResolvedValueOnce({
+        id: 101,
+        user_id: "user_admin",
+        org_id: "org_1",
+        clock_in: new Date("2026-10-30T10:00:00.000Z"),
+        clock_out: new Date("2026-10-30T18:00:00.000Z"),
+        clock_out_latitude: 45.4215,
+        clock_out_longitude: -75.6972,
+        clock_out_accuracy_m: 0,
+        clock_out_site_name: "Remote Office",
+        clock_out_address: "200 Queen St, Ottawa, ON",
+        created_at: new Date(),
+        updated_at: new Date(),
+      });
+
+      const res = await clockOutTool(caller, {
+        site: "Remote Office",
+        timezone: "America/Edmonton",
+      });
+
+      expect(res.isError).toBeUndefined();
+      expect(mockDbClockOutAt).toHaveBeenCalledWith(
+        "user_admin",
+        "org_1",
+        undefined,
+        expect.objectContaining({
+          siteName: "Remote Office",
+          latitude: 45.4215,
+          longitude: -75.6972,
+          address: "200 Queen St, Ottawa, ON",
+        }),
+      );
+      expect(res.summary).toContain("Remote Office (200 Queen St, Ottawa, ON)");
     });
   });
 });

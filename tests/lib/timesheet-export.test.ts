@@ -734,6 +734,25 @@ describe("captured location in the export", () => {
     expect(formatEntryLocation(located)).toBe("Depot (45.42150, -75.69720)");
   });
 
+  it("formats the address with site name when address is present", () => {
+    expect(
+      formatEntryLocation({
+        ...located,
+        clock_in_address: "111 Albert St, Ottawa, ON",
+      }),
+    ).toBe("Depot (111 Albert St, Ottawa, ON)");
+  });
+
+  it("formats the address alone when no site matched but address is present", () => {
+    expect(
+      formatEntryLocation({
+        ...located,
+        clock_in_site_name: null,
+        clock_in_address: "111 Albert St, Ottawa, ON",
+      }),
+    ).toBe("111 Albert St, Ottawa, ON");
+  });
+
   it("formats the point alone when no site matched", () => {
     expect(formatEntryLocation({ ...located, clock_in_site_name: null })).toBe(
       "45.42150, -75.69720",

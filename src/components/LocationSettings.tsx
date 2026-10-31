@@ -8,6 +8,7 @@ import {
   MapPin,
   MapPinOff,
   Plus,
+  Search,
   ShieldCheck,
   Trash2,
   X,
@@ -18,6 +19,8 @@ import { toast } from "sonner";
 import {
   createSiteAction,
   deleteSiteAction,
+  reverseGeocodeAction,
+  searchAddressAction,
   updateLocationSettingsAction,
   updateSiteAction,
 } from "@/lib/actions";
@@ -63,6 +66,7 @@ type SiteDraft = {
   latitude: string;
   longitude: string;
   radius: string;
+  address: string;
 };
 
 const emptyDraft: SiteDraft = {
@@ -70,6 +74,7 @@ const emptyDraft: SiteDraft = {
   latitude: "",
   longitude: "",
   radius: String(DEFAULT_RADIUS),
+  address: "",
 };
 
 /** An empty field is "not given"; anything else goes to the server to judge. */
@@ -81,6 +86,7 @@ const draftFromSite = (site: SiteData): SiteDraft => ({
   latitude: String(site.latitude),
   longitude: String(site.longitude),
   radius: String(site.radius_meters),
+  address: site.address ?? "",
 });
 
 export default function LocationSettings({
@@ -98,6 +104,16 @@ export default function LocationSettings({
   const [draft, setDraft] = useState<SiteDraft>(emptyDraft);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [isLocating, setIsLocating] = useState(false);
+  const [addressQuery, setAddressQuery] = useState("");
+  const [addressSuggestions, setAddressSuggestions] = useState<
+    Array<{
+      formatted: string;
+      latitude: number;
+      longitude: number;
+      addressLine1?: string;
+    }>
+  >([]);
+  const [isSearchingAddress, setIsSearchingAddress] = useState(false);
 
   const settingsMutation = useMutation({
     mutationFn: ({ mode, restrict }: { mode: string; restrict: boolean }) =>
@@ -118,19 +134,34 @@ export default function LocationSettings({
       latitude,
       longitude,
       radius,
+      address,
     }: {
       id: number | null;
       name: string;
       latitude: number;
       longitude: number;
       radius: number;
+      address?: string | null;
     }) => {
       // Create and update report different error unions; flatten them so the
       // mutation has one result shape.
       const res =
         id === null
-          ? await createSiteAction(name, latitude, longitude, radius)
-          : await updateSiteAction(id, name, latitude, longitude, radius);
+          ? await createSiteAction(
+              name,
+              latitude,
+              longitude,
+              radius,
+              ...(address ? [address] : []),
+            )
+          : await updateSiteAction(
+              id,
+              name,
+              latitude,
+              longitude,
+              radius,
+              ...(address ? [address] : []),
+            );
       return {
         success: res.success,
         error: "error" in res ? res.error : undefined,
@@ -140,6 +171,8 @@ export default function LocationSettings({
       if (res.success) {
         toast.success("Site saved");
         setDraft(emptyDraft);
+        setAddressQuery("");
+        setAddressSuggestions([]);
         setEditingId(null);
       } else {
         toast.error(res.error || "Failed to save site");
@@ -184,16 +217,69 @@ export default function LocationSettings({
   const useMyLocation = async () => {
     setIsLocating(true);
     const capture = await captureCurrentPosition();
-    setIsLocating(false);
     if (!capture.ok) {
+      setIsLocating(false);
       toast.error(capture.failure.message);
       return;
     }
+    const lat = capture.coordinates.latitude;
+    const lon = capture.coordinates.longitude;
+    const geoRes = await reverseGeocodeAction(lat, lon);
+    setIsLocating(false);
+
+    const resolvedAddress =
+      geoRes && "success" in geoRes && geoRes.success && geoRes.data
+        ? geoRes.data
+        : "";
     setDraft((current) => ({
       ...current,
-      latitude: capture.coordinates.latitude.toFixed(6),
-      longitude: capture.coordinates.longitude.toFixed(6),
+      name:
+        current.name.trim() === "" && resolvedAddress
+          ? resolvedAddress
+          : current.name,
+      latitude: lat.toFixed(6),
+      longitude: lon.toFixed(6),
+      address: resolvedAddress || current.address,
     }));
+    if (resolvedAddress) {
+      setAddressQuery(resolvedAddress);
+    }
+  };
+
+  const handleAddressSearch = async (val: string) => {
+    setAddressQuery(val);
+    if (val.trim().length < 3) {
+      setAddressSuggestions([]);
+      return;
+    }
+    setIsSearchingAddress(true);
+    const res = await searchAddressAction(val);
+    setIsSearchingAddress(false);
+    if (res.success && Array.isArray(res.data)) {
+      setAddressSuggestions(res.data);
+    } else {
+      setAddressSuggestions([]);
+    }
+  };
+
+  const handleSelectSuggestion = (suggestion: {
+    formatted: string;
+    latitude: number;
+    longitude: number;
+    addressLine1?: string;
+  }) => {
+    setDraft((curr) => ({
+      ...curr,
+      name:
+        curr.name.trim() === ""
+          ? suggestion.addressLine1 || suggestion.formatted
+          : curr.name,
+      latitude: suggestion.latitude.toFixed(6),
+      longitude: suggestion.longitude.toFixed(6),
+      address: suggestion.formatted,
+    }));
+    setAddressQuery(suggestion.formatted);
+    setAddressSuggestions([]);
   };
 
   const saveSite = () => {
@@ -215,6 +301,7 @@ export default function LocationSettings({
       latitude,
       longitude,
       radius: parseField(draft.radius) ?? DEFAULT_RADIUS,
+      address: draft.address.trim() || undefined,
     });
   };
 
@@ -343,6 +430,11 @@ export default function LocationSettings({
               >
                 <div className="flex flex-col">
                   <span className="font-semibold">{site.name}</span>
+                  {site.address && (
+                    <span className="text-muted-foreground text-xs">
+                      {site.address}
+                    </span>
+                  )}
                   <span className="text-muted-foreground text-xs tabular-nums">
                     {Number(site.latitude).toFixed(5)},{" "}
                     {Number(site.longitude).toFixed(5)} ·{" "}
@@ -354,6 +446,8 @@ export default function LocationSettings({
                     onClick={() => {
                       setEditingId(site.id);
                       setDraft(draftFromSite(site));
+                      setAddressQuery(site.address ?? "");
+                      setAddressSuggestions([]);
                     }}
                     size="sm"
                     variant="outline"
@@ -387,6 +481,8 @@ export default function LocationSettings({
                 onClick={() => {
                   setEditingId(null);
                   setDraft(emptyDraft);
+                  setAddressQuery("");
+                  setAddressSuggestions([]);
                 }}
                 type="button"
               >
@@ -396,6 +492,48 @@ export default function LocationSettings({
           </div>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="space-y-2 md:col-span-2">
+              <label className="font-medium text-sm" htmlFor="addressSearch">
+                Find address
+              </label>
+              <div className="relative">
+                <div className="relative flex items-center">
+                  <Search className="absolute left-3.5 h-4 w-4 text-muted-foreground" />
+                  <input
+                    className="h-12 w-full rounded-xl border-2 border-zinc-200 bg-white pl-10 pr-10 dark:border-zinc-800 dark:bg-zinc-950"
+                    id="addressSearch"
+                    onChange={(e) => handleAddressSearch(e.target.value)}
+                    placeholder="Search street address to auto-fill..."
+                    type="text"
+                    value={addressQuery}
+                  />
+                  {isSearchingAddress && (
+                    <Loader2 className="absolute right-3.5 h-4 w-4 animate-spin text-muted-foreground" />
+                  )}
+                </div>
+                {addressSuggestions.length > 0 && (
+                  <ul className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-zinc-200 bg-white p-1 shadow-lg dark:border-zinc-800 dark:bg-zinc-950">
+                    {addressSuggestions.map((s) => (
+                      <li key={`${s.formatted}-${s.latitude}-${s.longitude}`}>
+                        <button
+                          className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-900"
+                          onClick={() => handleSelectSuggestion(s)}
+                          type="button"
+                        >
+                          <div className="font-medium">
+                            {s.addressLine1 || s.formatted}
+                          </div>
+                          <div className="text-muted-foreground text-xs">
+                            {s.formatted}
+                          </div>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+
             <div className="space-y-2 md:col-span-2">
               <label className="font-medium text-sm" htmlFor="siteName">
                 Site name

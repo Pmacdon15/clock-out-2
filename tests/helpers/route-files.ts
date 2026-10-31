@@ -56,7 +56,7 @@ export type DefaultExportInfo =
   | { found: false }
   | { found: true; isAsync: boolean; name?: string };
 
-const escape = (s: string) => s.replace(/[$]/g, "\\$");
+const escapeRegex = (s: string) => s.replace(/[$]/g, "\\$");
 
 /**
  * Inspects a module's source and reports whether its default export is an
@@ -88,7 +88,7 @@ export function inspectDefaultExport(source: string): DefaultExportInfo {
   }
 
   const name = named[1];
-  const id = escape(name);
+  const id = escapeRegex(name);
   const asyncDecl = new RegExp(`\\basync\\s+function\\s*\\*?\\s*${id}\\b`);
   const asyncExpr = new RegExp(
     `\\b(?:const|let|var)\\s+${id}\\b[^=]*=\\s*async\\b`,

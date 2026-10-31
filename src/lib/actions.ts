@@ -20,6 +20,7 @@ import {
   updateReportingSettingsDal,
 } from "./dal";
 import type { Coordinates } from "./geo";
+import { reverseGeocode, searchAddress } from "./geoapify";
 import { sendWeeklyReports } from "./reports";
 import type { BreakType } from "./types";
 
@@ -247,8 +248,12 @@ export async function createSiteAction(
   latitude: number,
   longitude: number,
   radiusMeters: number,
+  address?: string | null,
 ) {
-  const result = await dalCreateSite(name, latitude, longitude, radiusMeters);
+  const result =
+    address === undefined
+      ? await dalCreateSite(name, latitude, longitude, radiusMeters)
+      : await dalCreateSite(name, latitude, longitude, radiusMeters, address);
 
   return result.match(
     (site) => {
@@ -267,14 +272,19 @@ export async function updateSiteAction(
   latitude: number,
   longitude: number,
   radiusMeters: number,
+  address?: string | null,
 ) {
-  const result = await dalUpdateSite(
-    id,
-    name,
-    latitude,
-    longitude,
-    radiusMeters,
-  );
+  const result =
+    address === undefined
+      ? await dalUpdateSite(id, name, latitude, longitude, radiusMeters)
+      : await dalUpdateSite(
+          id,
+          name,
+          latitude,
+          longitude,
+          radiusMeters,
+          address,
+        );
 
   return result.match(
     (site) => {
@@ -285,6 +295,32 @@ export async function updateSiteAction(
       return { success: false, error: err.reason };
     },
   );
+}
+
+export async function searchAddressAction(query: string) {
+  const authUser = await auth.protect();
+  if (
+    !authUser.userId ||
+    !authUser.orgId ||
+    authUser.orgRole !== "org:admin" ||
+    !authUser.has({ feature: "geofencing" })
+  ) {
+    return { success: false as const, error: "Unauthorized" };
+  }
+  const results = await searchAddress(query);
+  return { success: true as const, data: results };
+}
+
+export async function reverseGeocodeAction(
+  latitude: number,
+  longitude: number,
+) {
+  const authUser = await auth.protect();
+  if (!authUser.userId || !authUser.orgId) {
+    return { success: false as const, error: "Unauthorized" };
+  }
+  const address = await reverseGeocode({ latitude, longitude });
+  return { success: true as const, data: address };
 }
 
 export async function deleteBreakAction(id: number) {

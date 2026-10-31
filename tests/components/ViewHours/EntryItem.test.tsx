@@ -374,4 +374,36 @@ describe("EntryItem captured location", () => {
     expect(screen.getByText("In")).toBeInTheDocument();
     expect(screen.queryByText("Out")).not.toBeInTheDocument();
   });
+
+  it("shows the human-readable address when available with coordinates tooltip", () => {
+    renderItem({
+      entry: makeEntry({
+        id: 8,
+        clock_in_latitude: 45.4215,
+        clock_in_longitude: -75.6972,
+        clock_in_accuracy_m: 8.2,
+        clock_in_site_name: "Depot",
+        clock_in_address: "111 Albert St, Ottawa, ON",
+      }),
+    });
+    expect(screen.getByText("In")).toBeInTheDocument();
+    const addressSpan = screen.getByText("111 Albert St, Ottawa, ON");
+    expect(addressSpan).toBeInTheDocument();
+    expect(addressSpan).toHaveAttribute("title", "45.42150, -75.69720 ±8m");
+    expect(screen.getByText("· Depot")).toBeInTheDocument();
+  });
+
+  it("shows the human-readable address with coordinates tooltip when accuracy is absent", () => {
+    renderItem({
+      entry: makeEntry({
+        id: 9,
+        clock_in_latitude: 45.4215,
+        clock_in_longitude: -75.6972,
+        clock_in_accuracy_m: null,
+        clock_in_address: "111 Albert St, Ottawa, ON",
+      }),
+    });
+    const addressSpan = screen.getByText("111 Albert St, Ottawa, ON");
+    expect(addressSpan).toHaveAttribute("title", "45.42150, -75.69720");
+  });
 });
