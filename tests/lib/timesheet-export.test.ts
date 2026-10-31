@@ -5,6 +5,7 @@ import {
   buildPeriodSections,
   buildSheetXml,
   buildZip,
+  collectBreakRecords,
   crc32,
   downloadFile,
   type ExportRow,
@@ -545,6 +546,175 @@ describe("downloads", () => {
     );
     expect(layoutPdfPages([row()], { ...meta, groupBy: "month" })[0]).toContain(
       "Subtotal",
+    );
+  });
+});
+
+describe("break records in exports", () => {
+  const entryWithBreaks = () =>
+    makeEntry({
+      id: 1,
+      user_id: "u1",
+      clock_in: new Date("2026-03-09T09:00:00Z"),
+      clock_out: new Date("2026-03-09T17:00:00Z"),
+      breaks: [
+        {
+          id: 1,
+          time_entry_id: 1,
+          break_type: "unpaid_meal",
+          break_start: new Date("2026-03-09T12:00:00Z"),
+          break_end: new Date("2026-03-09T12:30:00Z"),
+        },
+        {
+          id: 2,
+          time_entry_id: 1,
+          break_type: "paid_rest",
+          break_start: new Date("2026-03-09T15:00:00Z"),
+          break_end: new Date("2026-03-09T15:15:00Z"),
+        },
+      ],
+    });
+
+  it("nets unpaid break time out of the hours and keeps the records", () => {
+    const rows = buildExportRows([entryWithBreaks()], () => "Ada");
+    expect(rows[0].hours).toBe(7.5);
+    expect(rows[0].unpaidBreakHours).toBe(0.5);
+    expect(rows[0].paidBreakHours).toBe(0.25);
+    expect(rows[0].breaks).toEqual([
+      {
+        type: "Meal period",
+        start: "12:00 PM",
+        end: "12:30 PM",
+        hours: 0.5,
+        paid: false,
+      },
+      {
+        type: "Paid rest break",
+        start: "3:00 PM",
+        end: "3:15 PM",
+        hours: 0.25,
+        paid: true,
+      },
+    ]);
+    expect(totalHours(rows)).toBe(7.5);
+  });
+
+  it("leaves the break fields off shifts with no breaks", () => {
+    const rows = buildExportRows(
+      [
+        makeEntry({
+          id: 2,
+          user_id: "u1",
+          clock_in: new Date("2026-03-09T09:00:00Z"),
+          clock_out: new Date("2026-03-09T17:00:00Z"),
+        }),
+      ],
+      () => "Ada",
+    );
+    expect(rows[0].breaks).toBeUndefined();
+    expect(collectBreakRecords(rows)).toEqual([]);
+  });
+
+  it("marks a running break as in progress and formats it in the given zone", () => {
+    const rows = buildExportRows(
+      [
+        makeEntry({
+          id: 3,
+          user_id: "u1",
+          clock_in: new Date("2026-03-09T09:00:00Z"),
+          clock_out: null,
+          breaks: [
+            {
+              id: 3,
+              time_entry_id: 3,
+              break_type: "unpaid_rest",
+              break_start: new Date("2026-03-09T15:00:00Z"),
+              break_end: null,
+            },
+          ],
+        }),
+      ],
+      () => "Ada",
+      "America/Edmonton",
+    );
+    expect(rows[0].hours).toBeNull();
+    expect(rows[0].breaks?.[0]).toMatchObject({
+      start: "9:00 AM",
+      end: "In progress",
+      paid: false,
+    });
+  });
+
+  it("does not dock lunch on top of a recorded unpaid break", () => {
+    const breakSettings = {
+      org_id: "o1",
+      dock_lunch: true,
+      lunch_duration_minutes: 30,
+      lunch_min_shift_hours: 5,
+    };
+    const [withBreak] = buildExportRows(
+      [entryWithBreaks()],
+      () => "Ada",
+      undefined,
+      breakSettings,
+    );
+    expect(withBreak.hours).toBe(7.5);
+
+    const [withoutBreak] = buildExportRows(
+      [
+        makeEntry({
+          id: 4,
+          user_id: "u1",
+          clock_in: new Date("2026-03-09T09:00:00Z"),
+          clock_out: new Date("2026-03-09T17:00:00Z"),
+        }),
+      ],
+      () => "Ada",
+      undefined,
+      breakSettings,
+    );
+    expect(withoutBreak.hours).toBe(7.5);
+  });
+
+  it("lists the break records in the spreadsheet", () => {
+    const rows = buildExportRows([entryWithBreaks()], () => "Ada");
+    const xml = buildSheetXml(rows, meta);
+    expect(xml).toContain("Break Records");
+    expect(xml).toContain("Meal period");
+    expect(xml).toContain("Unpaid (deducted)");
+    expect(xml).toContain("Paid rest break");
+    expect(xml).toContain("<v>0.5</v>");
+  });
+
+  it("omits the spreadsheet break section when nothing was recorded", () => {
+    expect(buildSheetXml([row()], meta)).not.toContain("Break Records");
+  });
+
+  it("lists the break records in the PDF", () => {
+    const rows = buildExportRows([entryWithBreaks()], () => "Ada");
+    const [page] = layoutPdfPages(rows, meta);
+    expect(page).toContain("(Break Records) Tj");
+    expect(page).toContain("(Meal period) Tj");
+    expect(page).toContain("(12:00 PM) Tj");
+    expect(page).toContain("(Unpaid) Tj");
+    expect(page).toContain("(Paid rest break) Tj");
+    expect(page).toContain("(Paid) Tj");
+    expect(page).toContain("(0.50) Tj");
+  });
+
+  it("breaks the PDF break list onto another page when it does not fit", () => {
+    const rows = [
+      ...Array.from({ length: 30 }, () => row()),
+      ...buildExportRows([entryWithBreaks()], () => "Ada"),
+    ];
+    const pages = layoutPdfPages(rows, meta);
+    expect(pages.length).toBeGreaterThan(1);
+    expect(pages.join("\n")).toContain("(Break Records) Tj");
+  });
+
+  it("omits the PDF break section when nothing was recorded", () => {
+    expect(layoutPdfPages([row()], meta)[0]).not.toContain(
+      "(Break Records) Tj",
     );
   });
 });
