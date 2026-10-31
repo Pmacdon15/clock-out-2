@@ -672,6 +672,16 @@ describe("CSV output", () => {
     );
   });
 
+  it("derives the day of week when a row omits it", () => {
+    const shift = toCsvText([row({ dayOfWeek: undefined })], meta)
+      .split("\r\n")
+      .find((l) => l.startsWith("Shift,"));
+
+    expect(shift).toBe(
+      `Shift,Ada,2026-03-09,Mon,9:00 AM,5:00 PM,8.00,8.00,${PERIOD},,,`,
+    );
+  });
+
   it("totals a day only on its last shift and leaves open shifts blank", () => {
     const rows = [
       row({ clockIn: "9:00 AM", clockOut: "12:00 PM", hours: 3 }),
