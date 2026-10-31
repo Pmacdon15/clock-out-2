@@ -228,14 +228,27 @@ export function EntryItem({
   return (
     <div className="group flex flex-col gap-2 border-zinc-100 border-b pb-5 transition-all last:border-0 dark:border-zinc-800">
       <div className="flex items-center justify-between font-bold text-sm">
-        <span>{format(new Date(entry.clock_in), "eeee, MMM d")}</span>
+        <span suppressHydrationWarning>
+          {format(new Date(entry.clock_in), "eeee, MMM d")}
+        </span>
         <div className="flex items-center gap-3">
           <span className="tabular-nums">{effectiveHours.toFixed(2)}h</span>
           {isAdmin && (
             <div className="flex items-center gap-1 opacity-100 transition-opacity lg:opacity-0 lg:group-hover:opacity-100">
               <button
                 className="p-1 transition-colors hover:text-zinc-900 dark:hover:text-zinc-100"
-                onClick={() => setIsEditing(true)}
+                onClick={() => {
+                  setEditClockIn(
+                    format(new Date(entry.clock_in), "yyyy-MM-dd'T'HH:mm"),
+                  );
+                  setEditClockOut(
+                    entry.clock_out
+                      ? format(new Date(entry.clock_out), "yyyy-MM-dd'T'HH:mm")
+                      : "",
+                  );
+                  setEditSkipLunch(Boolean(entry.skip_lunch));
+                  setIsEditing(true);
+                }}
                 type="button"
               >
                 <Edit3 className="h-3.5 w-3.5" />
@@ -250,7 +263,7 @@ export function EntryItem({
       </div>
       <div className="flex flex-wrap items-center gap-1.5 font-medium text-muted-foreground text-xs">
         <Calendar className="h-3 w-3" />
-        <span>
+        <span suppressHydrationWarning>
           {format(new Date(entry.clock_in), "hh:mm a")} -{" "}
           {entry.clock_out
             ? format(new Date(entry.clock_out), "hh:mm a")
@@ -292,7 +305,7 @@ export function EntryItem({
               <span className="font-medium">
                 {breakTypeLabel(brk.break_type)}
               </span>
-              <span>
+              <span suppressHydrationWarning>
                 {format(new Date(brk.break_start), "hh:mm a")} -{" "}
                 {brk.break_end
                   ? format(new Date(brk.break_end), "hh:mm a")

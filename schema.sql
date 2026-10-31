@@ -61,6 +61,7 @@ ALTER TABLE sites ADD COLUMN IF NOT EXISTS address TEXT;
 -- Where a punch happened, captured only when the org turns location on.
 -- `*_site_name` is a snapshot of the matched site's name at punch time, so
 -- renaming or removing a site never rewrites history.
+ALTER TABLE time_entries ADD COLUMN IF NOT EXISTS skip_lunch BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE time_entries ADD COLUMN IF NOT EXISTS clock_in_latitude DOUBLE PRECISION;
 ALTER TABLE time_entries ADD COLUMN IF NOT EXISTS clock_in_longitude DOUBLE PRECISION;
 ALTER TABLE time_entries ADD COLUMN IF NOT EXISTS clock_in_accuracy_m DOUBLE PRECISION;

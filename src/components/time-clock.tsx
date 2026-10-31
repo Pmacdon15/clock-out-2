@@ -390,7 +390,10 @@ export default function TimeClock({
           <div className="mb-2 font-black font-mono text-6xl tracking-tighter">
             {elapsedTime || "0m"}
           </div>
-          <p className="mb-4 flex items-center gap-2 text-muted-foreground">
+          <p
+            className="mb-4 flex items-center gap-2 text-muted-foreground"
+            suppressHydrationWarning
+          >
             <Clock className="h-4 w-4" />
             Started at {new Date(activeEntry.clock_in).toLocaleTimeString()}
           </p>
@@ -554,10 +557,13 @@ export default function TimeClock({
                 key={entry.id}
               >
                 <div className="flex flex-col">
-                  <span className="font-semibold">
+                  <span className="font-semibold" suppressHydrationWarning>
                     {new Date(entry.clock_in).toLocaleDateString()}
                   </span>
-                  <span className="text-muted-foreground text-xs">
+                  <span
+                    className="text-muted-foreground text-xs"
+                    suppressHydrationWarning
+                  >
                     {new Date(entry.clock_in).toLocaleTimeString()} -{" "}
                     {entry.clock_out
                       ? new Date(entry.clock_out).toLocaleTimeString()
