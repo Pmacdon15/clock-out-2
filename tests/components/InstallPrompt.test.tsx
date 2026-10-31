@@ -4,6 +4,7 @@ import InstallPrompt from "@/components/InstallPrompt";
 
 describe("InstallPrompt", () => {
   const originalMatchMedia = window.matchMedia;
+  const originalNavigator = window.navigator;
   let mockStorage: Record<string, string> = {};
 
   beforeEach(() => {
@@ -41,10 +42,15 @@ describe("InstallPrompt", () => {
 
   afterEach(() => {
     window.matchMedia = originalMatchMedia;
+    Object.defineProperty(window, "navigator", {
+      value: originalNavigator,
+      configurable: true,
+      writable: true,
+    });
     vi.restoreAllMocks();
   });
 
-  it("does not render when running in standalone mode", () => {
+  it("does not render when running in standalone mode via matchMedia", () => {
     window.matchMedia = vi.fn().mockImplementation((query: string) => ({
       matches: query.includes("display-mode: standalone"),
       media: query,
@@ -62,6 +68,22 @@ describe("InstallPrompt", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("does not render when running in iOS standalone mode via navigator.standalone", () => {
+    Object.defineProperty(window, "navigator", {
+      value: {
+        ...originalNavigator,
+        standalone: true,
+      },
+      configurable: true,
+      writable: true,
+    });
+
+    render(<InstallPrompt />);
+    expect(
+      screen.queryByRole("region", { name: /install mobile app/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it("does not render when previously dismissed in localStorage", () => {
     window.localStorage.setItem("clockout_install_dismissed", "true");
 
@@ -71,7 +93,18 @@ describe("InstallPrompt", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("displays prompt when beforeinstallprompt fires and installs on click", async () => {
+  it("handles localStorage.getItem throwing an error", () => {
+    window.localStorage.getItem = vi.fn().mockImplementation(() => {
+      throw new Error("SecurityError: Access is denied");
+    });
+
+    render(<InstallPrompt />);
+    expect(
+      screen.queryByRole("region", { name: /install mobile app/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("displays prompt when beforeinstallprompt fires and installs on accepted", async () => {
     render(<InstallPrompt />);
     expect(
       screen.queryByRole("region", { name: /install mobile app/i }),
@@ -92,6 +125,28 @@ describe("InstallPrompt", () => {
     expect(
       screen.getByText("Install Clock Out on your phone"),
     ).toBeInTheDocument();
+
+    const installButton = screen.getByRole("button", { name: /install app/i });
+    fireEvent.click(installButton);
+
+    expect(promptMock).toHaveBeenCalled();
+  });
+
+  it("handles user cancelling the browser install prompt", async () => {
+    render(<InstallPrompt />);
+
+    const promptMock = vi.fn().mockResolvedValue(undefined);
+    const event = Object.assign(new Event("beforeinstallprompt"), {
+      prompt: promptMock,
+      userChoice: Promise.resolve({ outcome: "dismissed" as const }),
+    });
+
+    window.dispatchEvent(event);
+
+    const banner = await screen.findByRole("region", {
+      name: /install mobile app/i,
+    });
+    expect(banner).toBeInTheDocument();
 
     const installButton = screen.getByRole("button", { name: /install app/i });
     fireEvent.click(installButton);
@@ -126,8 +181,31 @@ describe("InstallPrompt", () => {
     );
   });
 
+  it("handles localStorage.setItem throwing on dismiss", async () => {
+    window.localStorage.setItem = vi.fn().mockImplementation(() => {
+      throw new Error("QuotaExceededError");
+    });
+
+    render(<InstallPrompt />);
+
+    const event = Object.assign(new Event("beforeinstallprompt"), {
+      prompt: vi.fn().mockResolvedValue(undefined),
+      userChoice: Promise.resolve({ outcome: "dismissed" as const }),
+    });
+    window.dispatchEvent(event);
+
+    const banner = await screen.findByRole("region", {
+      name: /install mobile app/i,
+    });
+    expect(banner).toBeInTheDocument();
+
+    const dismissButton = screen.getByRole("button", {
+      name: /dismiss install prompt/i,
+    });
+    expect(() => fireEvent.click(dismissButton)).not.toThrow();
+  });
+
   it("shows iOS specific instructions on iOS devices", () => {
-    const originalNavigator = window.navigator;
     Object.defineProperty(window, "navigator", {
       value: {
         ...originalNavigator,

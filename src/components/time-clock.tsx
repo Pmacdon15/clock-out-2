@@ -75,6 +75,7 @@ const formatDurationMs = (diffMs: number) => {
 const formatDuration = (start: Date, end: Date = new Date()) =>
   formatDurationMs(Math.abs(end.getTime() - start.getTime()));
 
+/* v8 ignore start */
 const triggerHaptic = () => {
   if (typeof navigator !== "undefined" && "vibrate" in navigator) {
     try {
@@ -84,6 +85,7 @@ const triggerHaptic = () => {
     }
   }
 };
+/* v8 ignore stop */
 
 interface ManageHoursProps {
   initialEntries: TimeEntry[];

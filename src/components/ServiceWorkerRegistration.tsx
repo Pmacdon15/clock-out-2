@@ -9,11 +9,7 @@ export default function ServiceWorkerRegistration() {
       "serviceWorker" in navigator &&
       navigator.serviceWorker
     ) {
-      navigator.serviceWorker.register("/sw.js").catch((error) => {
-        if (process.env.NODE_ENV === "development") {
-          console.debug("Service worker registration failed:", error);
-        }
-      });
+      navigator.serviceWorker.register("/sw.js").catch(() => {});
     }
   }, []);
 

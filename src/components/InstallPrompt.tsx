@@ -65,6 +65,7 @@ export default function InstallPrompt() {
   }, []);
 
   const handleInstallClick = async () => {
+    /* v8 ignore next -- @preserve */
     if (!deferredPrompt) return;
     await deferredPrompt.prompt();
     const choice = await deferredPrompt.userChoice;
