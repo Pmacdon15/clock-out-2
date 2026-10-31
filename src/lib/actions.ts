@@ -6,12 +6,17 @@ import { updateTag } from "next/cache";
 import {
   clockIn as dalClockIn,
   clockOut as dalClockOut,
+  deleteBreakDal as dalDeleteBreak,
   deleteTimeEntry as dalDeleteTimeEntry,
+  endBreak as dalEndBreak,
+  startBreak as dalStartBreak,
+  updateBreakDal as dalUpdateBreak,
   updateTimeEntry as dalUpdateTimeEntry,
   updateBreakSettingsDal,
   updateReportingSettingsDal,
 } from "./dal";
 import { sendWeeklyReports } from "./reports";
+import type { BreakType } from "./types";
 
 export async function clockInAction() {
   const result = await dalClockIn();
@@ -139,6 +144,84 @@ export async function updateBreakSettingAction(
     (entry) => {
       updateTag(`break-settings-${entry.org_id}`);
       return { success: true, data: entry };
+    },
+    (err) => {
+      return { success: false, error: err.reason };
+    },
+  );
+}
+
+/**
+ * Break records change the hours a shift is worth, so every break mutation
+ * invalidates the member's entries and the org-wide list the Hours view and
+ * the exports read from.
+ */
+function updateBreakTags(entry: { user_id: string; org_id: string }) {
+  if (entry.user_id) {
+    updateTag(`time-entries-${entry.user_id}-${entry.org_id}`);
+  }
+  updateTag(`org-time-entries-${entry.org_id}`);
+}
+
+export async function startBreakAction(breakType: BreakType = "unpaid_meal") {
+  const result = await dalStartBreak(breakType);
+
+  return result.match(
+    (brk) => {
+      updateBreakTags(brk);
+      return { success: true, data: brk };
+    },
+    (err) => {
+      return { success: false, error: err.reason };
+    },
+  );
+}
+
+export async function endBreakAction() {
+  const result = await dalEndBreak();
+
+  return result.match(
+    (brk) => {
+      updateBreakTags(brk);
+      return { success: true, data: brk };
+    },
+    (err) => {
+      return { success: false, error: err.reason };
+    },
+  );
+}
+
+export async function updateBreakAction(
+  id: number,
+  break_start: string,
+  break_end: string | null,
+  break_type: BreakType,
+) {
+  const result = await dalUpdateBreak(
+    id,
+    new Date(break_start),
+    break_end ? new Date(break_end) : null,
+    break_type,
+  );
+
+  return result.match(
+    (brk) => {
+      updateBreakTags(brk);
+      return { success: true, data: brk };
+    },
+    (err) => {
+      return { success: false, error: err.reason };
+    },
+  );
+}
+
+export async function deleteBreakAction(id: number) {
+  const result = await dalDeleteBreak(id);
+
+  return result.match(
+    (brk) => {
+      updateBreakTags(brk);
+      return { success: true };
     },
     (err) => {
       return { success: false, error: err.reason };

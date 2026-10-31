@@ -1,30 +1,40 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { fromZonedTime } from "date-fns-tz";
 import { errAsync, okAsync, type ResultAsync } from "neverthrow";
+import { isBreakType, validateBreak } from "./break-utils";
 import { fetchAllPages } from "./clerk-pagination";
 import {
   dbCheckActiveEntry,
   dbClockIn,
   dbClockOut,
+  dbDeleteBreak,
   dbDeleteTimeEntry,
+  dbEndOpenBreak,
   dbGetActiveEntry,
   dbGetBreakSettings,
+  dbGetBreaksForEntriesInOrg,
+  dbGetBreakWithEntry,
+  dbGetEntryBreaks,
   dbGetOrgTimeEntries,
   dbGetReportingSettings,
   dbGetTimeEntries,
+  dbStartBreak,
+  dbUpdateBreak,
   dbUpdateBreakSettings,
   dbUpdateReportingSettings,
   dbUpdateTimeEntry,
 } from "./db";
 import type {
   BreakSettingsData,
+  BreakType,
   ReportingSettingsData,
   SerializableResult,
   TimeEntry,
+  TimeEntryBreak,
 } from "./types";
 import { getProcessedMembers, isOverMemberShipLimit } from "./utils-clerk";
 
-export type { SerializableResult, TimeEntry };
+export type { SerializableResult, TimeEntry, TimeEntryBreak };
 
 function parseFilterDate(
   dateStr: string | undefined,
@@ -429,5 +439,233 @@ export async function getOrgBreakSettings(): Promise<
     .catch((e) => {
       console.error("Error fetching break settings.: ", e);
       return { error: { reason: "Error fetching break settings." }, ok: false };
+    });
+}
+
+/* -------------------------------------------------------------- breaks -- */
+
+/** A break plus the ids the server actions need for cache invalidation. */
+export type BreakWithOwner = TimeEntryBreak & {
+  user_id: string;
+  org_id: string;
+};
+
+/**
+ * Starts a break on the caller's running shift. Breaks only exist inside a
+ * shift, so this fails when the member is not clocked in, and refuses a
+ * second break while one is still running.
+ */
+export async function startBreak(breakType: BreakType = "unpaid_meal") {
+  const { userId, orgId } = await auth.protect();
+  if (!userId || !orgId) {
+    return errAsync({
+      reason: "Unauthorized or no organization selected",
+    } as const);
+  }
+
+  if (!isBreakType(breakType)) {
+    return errAsync({ reason: "Unknown break type" } as const);
+  }
+
+  const activeEntry = await dbGetActiveEntry(userId, orgId).catch((e) => {
+    console.error("Error checking active clock-in entry: ", e);
+    return undefined;
+  });
+
+  if (activeEntry === undefined) {
+    return errAsync({
+      reason: "Error checking active clock-in entry",
+    } as const);
+  }
+  if (activeEntry === null) {
+    return errAsync({ reason: "Not clocked in" } as const);
+  }
+  if ((activeEntry.breaks ?? []).some((brk) => !brk.break_end)) {
+    return errAsync({ reason: "A break is already running" } as const);
+  }
+
+  return await dbStartBreak(userId, orgId, breakType)
+    .then(
+      (
+        started,
+      ): ResultAsync<
+        BreakWithOwner,
+        { readonly reason: "A break is already running" }
+      > => {
+        // A concurrent request may have opened a break between check and insert.
+        if (!started) {
+          return errAsync({ reason: "A break is already running" } as const);
+        }
+        return okAsync({ ...started, user_id: userId, org_id: orgId });
+      },
+    )
+    .catch((e) => {
+      console.error("Error starting break: ", e);
+      return errAsync({ reason: "Error starting break." } as const);
+    });
+}
+
+/** Ends the break running on the caller's open shift. */
+export async function endBreak() {
+  const { userId, orgId } = await auth.protect();
+  if (!userId || !orgId) {
+    return errAsync({
+      reason: "Unauthorized or no organization selected",
+    } as const);
+  }
+
+  return await dbEndOpenBreak(userId, orgId)
+    .then(
+      (
+        ended,
+      ): ResultAsync<
+        BreakWithOwner,
+        { readonly reason: "No break is running" }
+      > => {
+        if (!ended) {
+          return errAsync({ reason: "No break is running" } as const);
+        }
+        return okAsync({ ...ended, user_id: userId, org_id: orgId });
+      },
+    )
+    .catch((e) => {
+      console.error("Error ending break: ", e);
+      return errAsync({ reason: "Error ending break." } as const);
+    });
+}
+
+/**
+ * Lists the breaks recorded against the given entries. Members see their own
+ * entries' breaks; admins see every member's.
+ */
+export async function getBreaksForEntries(
+  entryIds: number[],
+): Promise<SerializableResult<TimeEntryBreak[], { reason: string }>> {
+  const { userId, orgId, orgRole } = await auth.protect();
+  if (!userId || !orgId) {
+    return {
+      error: { reason: "Unauthorized or no organization selected" },
+      ok: false,
+    };
+  }
+
+  const ids = entryIds.filter((id) => Number.isFinite(id));
+
+  return await dbGetBreaksForEntriesInOrg(
+    ids,
+    orgId,
+    userId,
+    orgRole === "org:admin",
+  )
+    .then((breaks) => ({ value: breaks, ok: true as const }))
+    .catch((e) => {
+      console.error("Error fetching breaks: ", e);
+      return { error: { reason: "Error fetching breaks" }, ok: false };
+    });
+}
+
+/**
+ * Edits a recorded break. Admin-only, like editing the shift itself, and
+ * checked against the shift window and the entry's other breaks.
+ */
+export async function updateBreakDal(
+  id: number,
+  breakStart: Date,
+  breakEnd: Date | null,
+  breakType: BreakType,
+) {
+  const { userId, orgId, orgRole } = await auth.protect();
+  if (!userId || !orgId || orgRole !== "org:admin") {
+    return errAsync({ reason: "Unauthorized" } as const);
+  }
+
+  const existing = await dbGetBreakWithEntry(id, orgId).catch((e) => {
+    console.error("Error fetching break: ", e);
+    return undefined;
+  });
+  if (!existing) {
+    return errAsync({ reason: "Break not found" } as const);
+  }
+
+  const siblings = await dbGetEntryBreaks(existing.time_entry_id).catch((e) => {
+    console.error("Error fetching breaks: ", e);
+    return undefined;
+  });
+  if (!siblings) {
+    return errAsync({ reason: "Error fetching breaks" } as const);
+  }
+
+  const invalid = validateBreak({
+    entry: { clock_in: existing.clock_in, clock_out: existing.clock_out },
+    breaks: siblings,
+    break_start: breakStart,
+    break_end: breakEnd,
+    break_type: breakType,
+    excludeBreakId: id,
+  });
+  if (invalid) {
+    return errAsync({ reason: invalid } as const);
+  }
+
+  return await dbUpdateBreak(id, orgId, breakStart, breakEnd, breakType)
+    .then(
+      (
+        updated,
+      ): ResultAsync<
+        BreakWithOwner,
+        { readonly reason: "Break not found" }
+      > => {
+        if (!updated) {
+          return errAsync({ reason: "Break not found" } as const);
+        }
+        return okAsync({
+          ...updated,
+          user_id: existing.user_id,
+          org_id: orgId,
+        });
+      },
+    )
+    .catch((e) => {
+      console.error("Error updating break: ", e);
+      return errAsync({ reason: "Failed to update break" } as const);
+    });
+}
+
+/** Deletes a recorded break. Admin-only, like deleting the shift itself. */
+export async function deleteBreakDal(id: number) {
+  const { userId, orgId, orgRole } = await auth.protect();
+  if (!userId || !orgId || orgRole !== "org:admin") {
+    return errAsync({ reason: "Unauthorized" } as const);
+  }
+
+  const existing = await dbGetBreakWithEntry(id, orgId).catch((e) => {
+    console.error("Error fetching break: ", e);
+    return undefined;
+  });
+  if (!existing) {
+    return errAsync({ reason: "Break not found" } as const);
+  }
+
+  return await dbDeleteBreak(id, orgId)
+    .then(
+      (
+        deleted,
+      ): ResultAsync<
+        BreakWithOwner,
+        { readonly reason: "Break not found" }
+      > => {
+        if (!deleted) {
+          return errAsync({ reason: "Break not found" } as const);
+        }
+        return okAsync({
+          ...deleted,
+          user_id: existing.user_id,
+          org_id: orgId,
+        });
+      },
+    )
+    .catch((e) => {
+      console.error("Error deleting break: ", e);
+      return errAsync({ reason: "Failed to delete break" } as const);
     });
 }

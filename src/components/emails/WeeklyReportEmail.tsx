@@ -31,7 +31,13 @@ interface WeeklyReportEmailProps {
   customEnd?: string;
   breakdown: {
     date: string;
-    shifts: { start: string; end: string; duration: string }[];
+    shifts: {
+      start: string;
+      end: string;
+      duration: string;
+      /** Break records for the shift, already formatted for display. */
+      breaks?: string;
+    }[];
   }[];
 }
 
@@ -118,27 +124,36 @@ export const WeeklyReportEmail = ({
                       {day.date}
                     </Text>
                     {day.shifts.map((shift) => (
-                      <div
-                        key={shift.start}
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          padding: "4px 0",
-                        }}
-                      >
-                        <Text
-                          className="m-0 text-[13px] text-gray-600"
-                          style={{ margin: 0 }}
+                      <div key={shift.start}>
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            padding: "4px 0",
+                          }}
                         >
-                          {shift.start} - {shift.end}
-                        </Text>
-                        <Text
-                          className="m-0 font-medium text-[13px] text-black"
-                          style={{ margin: 0 }}
-                        >
-                          {shift.duration}
-                        </Text>
+                          <Text
+                            className="m-0 text-[13px] text-gray-600"
+                            style={{ margin: 0 }}
+                          >
+                            {shift.start} - {shift.end}
+                          </Text>
+                          <Text
+                            className="m-0 font-medium text-[13px] text-black"
+                            style={{ margin: 0 }}
+                          >
+                            {shift.duration}
+                          </Text>
+                        </div>
+                        {shift.breaks && (
+                          <Text
+                            className="m-0 text-[12px] text-gray-500"
+                            style={{ margin: 0, paddingBottom: "4px" }}
+                          >
+                            Breaks: {shift.breaks}
+                          </Text>
+                        )}
                       </div>
                     ))}
                   </div>

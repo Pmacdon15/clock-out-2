@@ -32,3 +32,27 @@ CREATE TABLE IF NOT EXISTS break_settings (
 );
 
 CREATE INDEX idx_time_entries_user_org ON time_entries (user_id, org_id);
+
+-- Break / meal-period records for a single shift. `break_type` distinguishes
+-- paid breaks (recorded only) from unpaid ones (subtracted from worked hours);
+-- 'unpaid_meal' is the jurisdictional meal period.
+CREATE TABLE IF NOT EXISTS time_entry_breaks (
+    id SERIAL PRIMARY KEY,
+    time_entry_id INTEGER NOT NULL REFERENCES time_entries(id) ON DELETE CASCADE,
+    break_type TEXT NOT NULL DEFAULT 'unpaid_meal'
+        CHECK (break_type IN ('unpaid_meal', 'unpaid_rest', 'paid_rest')),
+    break_start TIMESTAMP WITH TIME ZONE NOT NULL,
+    -- NULL while the break is still running.
+    break_end TIMESTAMP WITH TIME ZONE,
+    CHECK (break_end IS NULL OR break_end > break_start),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_time_entry_breaks_entry
+    ON time_entry_breaks (time_entry_id, break_start);
+
+-- At most one running break per entry.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_time_entry_breaks_one_open
+    ON time_entry_breaks (time_entry_id)
+    WHERE break_end IS NULL;

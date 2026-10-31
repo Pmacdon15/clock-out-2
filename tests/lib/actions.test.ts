@@ -8,6 +8,10 @@ const mocks = vi.hoisted(() => ({
   clockOut: vi.fn(),
   deleteTimeEntry: vi.fn(),
   updateTimeEntry: vi.fn(),
+  startBreak: vi.fn(),
+  endBreak: vi.fn(),
+  updateBreakDal: vi.fn(),
+  deleteBreakDal: vi.fn(),
   updateBreakSettingsDal: vi.fn(),
   updateReportingSettingsDal: vi.fn(),
   sendWeeklyReports: vi.fn(),
@@ -20,6 +24,10 @@ vi.mock("@/lib/dal", () => ({
   clockOut: mocks.clockOut,
   deleteTimeEntry: mocks.deleteTimeEntry,
   updateTimeEntry: mocks.updateTimeEntry,
+  startBreak: mocks.startBreak,
+  endBreak: mocks.endBreak,
+  updateBreakDal: mocks.updateBreakDal,
+  deleteBreakDal: mocks.deleteBreakDal,
   updateBreakSettingsDal: mocks.updateBreakSettingsDal,
   updateReportingSettingsDal: mocks.updateReportingSettingsDal,
 }));
@@ -30,8 +38,12 @@ vi.mock("@/lib/reports", () => ({
 import {
   clockInAction,
   clockOutAction,
+  deleteBreakAction,
   deleteTimeEntryAction,
+  endBreakAction,
   sendCurrentWeekReportAction,
+  startBreakAction,
+  updateBreakAction,
   updateBreakSettingAction,
   updateOrgSettingAction,
   updateTimeEntryAction,
@@ -255,6 +267,126 @@ describe("updateBreakSettingAction", () => {
   it("returns the failure reason", async () => {
     mocks.updateBreakSettingsDal.mockResolvedValue(failure);
     await expect(updateBreakSettingAction(false)).resolves.toEqual({
+      success: false,
+      error: "nope",
+    });
+  });
+});
+
+const brk = {
+  id: 7,
+  time_entry_id: 1,
+  break_type: "unpaid_meal",
+  user_id: "user_1",
+  org_id: "org_1",
+};
+
+describe("startBreakAction", () => {
+  it("revalidates the member's and the org's entries on success", async () => {
+    mocks.startBreak.mockResolvedValue(ok(brk));
+    await expect(startBreakAction("unpaid_meal")).resolves.toEqual({
+      success: true,
+      data: brk,
+    });
+    expect(mocks.startBreak).toHaveBeenCalledWith("unpaid_meal");
+    expect(mocks.updateTag).toHaveBeenCalledWith("time-entries-user_1-org_1");
+    expect(mocks.updateTag).toHaveBeenCalledWith("org-time-entries-org_1");
+  });
+
+  it("defaults to the meal period", async () => {
+    mocks.startBreak.mockResolvedValue(ok(brk));
+    await startBreakAction();
+    expect(mocks.startBreak).toHaveBeenCalledWith("unpaid_meal");
+  });
+
+  it("returns the failure reason", async () => {
+    mocks.startBreak.mockResolvedValue(failure);
+    await expect(startBreakAction()).resolves.toEqual({
+      success: false,
+      error: "nope",
+    });
+    expect(mocks.updateTag).not.toHaveBeenCalled();
+  });
+});
+
+describe("endBreakAction", () => {
+  it("revalidates both entry lists on success", async () => {
+    mocks.endBreak.mockResolvedValue(ok(brk));
+    await expect(endBreakAction()).resolves.toEqual({
+      success: true,
+      data: brk,
+    });
+    expect(mocks.updateTag).toHaveBeenCalledWith("time-entries-user_1-org_1");
+    expect(mocks.updateTag).toHaveBeenCalledWith("org-time-entries-org_1");
+  });
+
+  it("returns the failure reason", async () => {
+    mocks.endBreak.mockResolvedValue(failure);
+    await expect(endBreakAction()).resolves.toEqual({
+      success: false,
+      error: "nope",
+    });
+  });
+});
+
+describe("updateBreakAction", () => {
+  it("parses the dates and revalidates on success", async () => {
+    mocks.updateBreakDal.mockResolvedValue(ok(brk));
+    await expect(
+      updateBreakAction(
+        7,
+        "2026-01-05T12:00:00.000Z",
+        "2026-01-05T12:30:00.000Z",
+        "unpaid_rest",
+      ),
+    ).resolves.toEqual({ success: true, data: brk });
+    expect(mocks.updateBreakDal).toHaveBeenCalledWith(
+      7,
+      new Date("2026-01-05T12:00:00.000Z"),
+      new Date("2026-01-05T12:30:00.000Z"),
+      "unpaid_rest",
+    );
+    expect(mocks.updateTag).toHaveBeenCalledWith("org-time-entries-org_1");
+  });
+
+  it("passes a null end through for a running break", async () => {
+    mocks.updateBreakDal.mockResolvedValue(ok(brk));
+    await updateBreakAction(7, "2026-01-05T12:00:00.000Z", null, "paid_rest");
+    expect(mocks.updateBreakDal).toHaveBeenCalledWith(
+      7,
+      new Date("2026-01-05T12:00:00.000Z"),
+      null,
+      "paid_rest",
+    );
+  });
+
+  it("returns the failure reason", async () => {
+    mocks.updateBreakDal.mockResolvedValue(failure);
+    await expect(
+      updateBreakAction(7, "2026-01-05T12:00:00.000Z", null, "unpaid_meal"),
+    ).resolves.toEqual({ success: false, error: "nope" });
+  });
+});
+
+describe("deleteBreakAction", () => {
+  it("revalidates both entry lists on success", async () => {
+    mocks.deleteBreakDal.mockResolvedValue(ok(brk));
+    await expect(deleteBreakAction(7)).resolves.toEqual({ success: true });
+    expect(mocks.deleteBreakDal).toHaveBeenCalledWith(7);
+    expect(mocks.updateTag).toHaveBeenCalledWith("time-entries-user_1-org_1");
+    expect(mocks.updateTag).toHaveBeenCalledWith("org-time-entries-org_1");
+  });
+
+  it("only revalidates the org list when the owner is unknown", async () => {
+    mocks.deleteBreakDal.mockResolvedValue(ok({ ...brk, user_id: "" }));
+    await expect(deleteBreakAction(7)).resolves.toEqual({ success: true });
+    expect(mocks.updateTag).toHaveBeenCalledTimes(1);
+    expect(mocks.updateTag).toHaveBeenCalledWith("org-time-entries-org_1");
+  });
+
+  it("returns the failure reason", async () => {
+    mocks.deleteBreakDal.mockResolvedValue(failure);
+    await expect(deleteBreakAction(7)).resolves.toEqual({
       success: false,
       error: "nope",
     });

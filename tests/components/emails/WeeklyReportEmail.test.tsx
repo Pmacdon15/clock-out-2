@@ -95,6 +95,29 @@ describe("WeeklyReportEmail", () => {
     );
   });
 
+  it("lists the break records of a shift that has them", async () => {
+    const doc = await renderEmail({
+      ...base,
+      breakdown: [
+        {
+          date: "Jan 2, 2026",
+          shifts: [
+            {
+              start: "9:00 AM",
+              end: "5:00 PM",
+              duration: "7h 30m",
+              breaks: "Meal period 12:00 PM - 12:30 PM (30m, unpaid)",
+            },
+          ],
+        },
+      ],
+    });
+    const text = doc.body.textContent ?? "";
+    expect(text).toContain(
+      "Breaks: Meal period 12:00 PM - 12:30 PM (30m, unpaid)",
+    );
+  });
+
   it("falls back to defaults and an empty state", async () => {
     const doc = await renderEmail({} as Props);
     const text = doc.body.textContent ?? "";
