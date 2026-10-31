@@ -22,7 +22,7 @@ import {
 import type { Coordinates } from "./geo";
 import { reverseGeocode, searchAddress } from "./geoapify";
 import { sendWeeklyReports } from "./reports";
-import type { BreakType } from "./types";
+import type { BreakLimits, BreakType } from "./types";
 
 /**
  * `coordinates` is whatever the browser's Geolocation API gave the client, or
@@ -144,11 +144,13 @@ export async function updateBreakSettingAction(
   dockLunch: boolean,
   durationMinutes: number = 30,
   minShiftHours: number = 5,
+  limits?: BreakLimits,
 ) {
   const result = await updateBreakSettingsDal(
     dockLunch,
     durationMinutes,
     minShiftHours,
+    limits,
   );
 
   return result.match(

@@ -30,6 +30,12 @@ CREATE TABLE IF NOT EXISTS break_settings (
     lunch_min_shift_hours DOUBLE PRECISION NOT NULL DEFAULT 5,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+-- Longest each kind of break may run, in minutes. NULL = no limit. A break
+-- that reaches its limit is closed at break_start + limit (the member is put
+-- back on the clock automatically).
+ALTER TABLE break_settings ADD COLUMN IF NOT EXISTS max_meal_break_minutes INTEGER;
+ALTER TABLE break_settings ADD COLUMN IF NOT EXISTS max_unpaid_rest_break_minutes INTEGER;
+ALTER TABLE break_settings ADD COLUMN IF NOT EXISTS max_paid_break_minutes INTEGER;
 
 CREATE TABLE IF NOT EXISTS location_settings (
     org_id TEXT PRIMARY KEY REFERENCES settings(org_id) ON DELETE CASCADE,

@@ -274,14 +274,24 @@ describe("updateBreakSettingAction", () => {
       success: true,
       data: { org_id: "org_1" },
     });
-    expect(mocks.updateBreakSettingsDal).toHaveBeenCalledWith(true, 30, 5);
+    expect(mocks.updateBreakSettingsDal).toHaveBeenCalledWith(
+      true,
+      30,
+      5,
+      undefined,
+    );
     expect(mocks.updateTag).toHaveBeenCalledWith("break-settings-org_1");
   });
 
   it("forwards custom duration and min shift hours", async () => {
     mocks.updateBreakSettingsDal.mockResolvedValue(ok({ org_id: "org_1" }));
     await updateBreakSettingAction(true, 45, 6);
-    expect(mocks.updateBreakSettingsDal).toHaveBeenCalledWith(true, 45, 6);
+    expect(mocks.updateBreakSettingsDal).toHaveBeenCalledWith(
+      true,
+      45,
+      6,
+      undefined,
+    );
   });
 
   it("returns the failure reason", async () => {

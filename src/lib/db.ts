@@ -2,6 +2,7 @@ import { neon } from "@neondatabase/serverless";
 import { cacheLife, cacheTag } from "next/cache";
 import type { StoredLocation } from "./geo";
 import type {
+  BreakLimits,
   BreakSettingsData,
   BreakType,
   LocationSettingsData,
@@ -279,6 +280,12 @@ export function ensureBreakSettingsTable(): Promise<void> {
 			updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 		)
 	`;
+    await sql`
+		ALTER TABLE break_settings
+			ADD COLUMN IF NOT EXISTS max_meal_break_minutes INTEGER,
+			ADD COLUMN IF NOT EXISTS max_unpaid_rest_break_minutes INTEGER,
+			ADD COLUMN IF NOT EXISTS max_paid_break_minutes INTEGER
+	`;
   })().catch((error) => {
     breakSettingsTableReady = null;
     throw error;
@@ -307,6 +314,12 @@ export async function dbUpdateBreakSettings(
   dockLunch: boolean,
   durationMinutes: number,
   minShiftHours: number,
+  /**
+   * Per-break-type limits in minutes (null clears one). Omit (undefined) to
+   * keep the stored limits, so callers that don't know about them (e.g. the
+   * MCP tool) can't wipe them.
+   */
+  limits?: BreakLimits,
 ) {
   await ensureBreakSettingsTable();
   await sql`
@@ -315,14 +328,35 @@ export async function dbUpdateBreakSettings(
 		ON CONFLICT (org_id) DO UPDATE SET updated_at = NOW()
 	`;
 
+  const keepLimits = limits === undefined;
+  const meal = limits?.unpaid_meal ?? null;
+  const unpaidRest = limits?.unpaid_rest ?? null;
+  const paidRest = limits?.paid_rest ?? null;
   const [updated] = await sql`
-		INSERT INTO break_settings (org_id, dock_lunch, lunch_duration_minutes, lunch_min_shift_hours, updated_at)
-		VALUES (${orgId}, ${dockLunch}, ${durationMinutes}, ${minShiftHours}, NOW())
+		INSERT INTO break_settings (
+			org_id, dock_lunch, lunch_duration_minutes, lunch_min_shift_hours,
+			max_meal_break_minutes, max_unpaid_rest_break_minutes, max_paid_break_minutes,
+			updated_at
+		)
+		VALUES (
+			${orgId}, ${dockLunch}, ${durationMinutes}, ${minShiftHours},
+			${meal}, ${unpaidRest}, ${paidRest},
+			NOW()
+		)
 		ON CONFLICT (org_id)
 		DO UPDATE SET
             dock_lunch = ${dockLunch},
             lunch_duration_minutes = ${durationMinutes},
             lunch_min_shift_hours = ${minShiftHours},
+            max_meal_break_minutes = CASE WHEN ${keepLimits}
+                THEN break_settings.max_meal_break_minutes
+                ELSE ${meal}::INTEGER END,
+            max_unpaid_rest_break_minutes = CASE WHEN ${keepLimits}
+                THEN break_settings.max_unpaid_rest_break_minutes
+                ELSE ${unpaidRest}::INTEGER END,
+            max_paid_break_minutes = CASE WHEN ${keepLimits}
+                THEN break_settings.max_paid_break_minutes
+                ELSE ${paidRest}::INTEGER END,
             updated_at = NOW()
 		RETURNING *
 	`;
@@ -492,12 +526,32 @@ export async function dbStartBreak(
 /**
  * Closes the break running on the user's open shift. Returns undefined when
  * no break is open.
+ *
+ * With `limits`, a break is never recorded as longer than its type's limit:
+ * it ends at the earlier of now and `break_start + limit`, so a member who
+ * comes back late (or whose tab was closed) is put back on the clock at the
+ * moment the limit ran out.
  */
-export async function dbEndOpenBreak(userId: string, orgId: string) {
+export async function dbEndOpenBreak(
+  userId: string,
+  orgId: string,
+  limits?: BreakLimits | null,
+) {
   await ensureTimeEntryBreaksTable();
+  const meal = limits?.unpaid_meal ?? null;
+  const unpaidRest = limits?.unpaid_rest ?? null;
+  const paidRest = limits?.paid_rest ?? null;
   const [updated] = await sql`
 		UPDATE time_entry_breaks
-		SET break_end = NOW(), updated_at = NOW()
+		SET break_end = LEAST(
+				NOW(),
+				break_start + make_interval(mins => (CASE break_type
+					WHEN 'unpaid_meal' THEN ${meal}::INTEGER
+					WHEN 'unpaid_rest' THEN ${unpaidRest}::INTEGER
+					WHEN 'paid_rest' THEN ${paidRest}::INTEGER
+				END))
+			),
+			updated_at = NOW()
 		WHERE break_end IS NULL
 		AND time_entry_id IN (
 			SELECT id FROM time_entries
