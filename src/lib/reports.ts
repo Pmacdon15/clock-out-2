@@ -3,7 +3,12 @@ import { clerkClient } from "@clerk/nextjs/server";
 import { render } from "@react-email/render";
 import { format, subDays } from "date-fns";
 import { WeeklyReportEmail } from "@/components/emails/WeeklyReportEmail";
-import { getEffectiveDurationMs } from "./break-utils";
+import {
+  breakTypeLabel,
+  getBreakDurationMs,
+  getEffectiveDurationMs,
+  isPaidBreakType,
+} from "./break-utils";
 import { fetchAllPages } from "./clerk-pagination";
 import { dbGetBreakSettings, dbGetTimeEntriesForPeriod } from "./db";
 
@@ -155,7 +160,12 @@ export async function sendWeeklyReports(
         {
           date: string;
           rawMs: number;
-          shifts: { start: string; end: string; duration: string }[];
+          shifts: {
+            start: string;
+            end: string;
+            duration: string;
+            breaks?: string;
+          }[];
         }
       >();
 
@@ -175,11 +185,25 @@ export async function sendWeeklyReports(
           dailyBreakdownMap.set(dateKey, dayData);
         }
 
+        // Breaks are listed per shift: the meal-period record regulators ask
+        // for, and the reason the unpaid ones are missing from the duration.
+        const breakLines = (entry.breaks ?? []).map((brk) => {
+          const minutes = Math.round(getBreakDurationMs(brk) / 60_000);
+          const paid = isPaidBreakType(brk.break_type) ? "paid" : "unpaid";
+          return `${breakTypeLabel(brk.break_type)} ${format(
+            new Date(brk.break_start),
+            "h:mm a",
+          )} - ${
+            brk.break_end ? format(new Date(brk.break_end), "h:mm a") : "..."
+          } (${minutes}m, ${paid})`;
+        });
+
         dayData.rawMs += durationMs;
         dayData.shifts.push({
           start: format(inDate, "h:mm a"),
           end: format(outDate, "h:mm a"),
           duration: formatDuration(durationMs),
+          ...(breakLines.length > 0 ? { breaks: breakLines.join("; ") } : {}),
         });
       }
 

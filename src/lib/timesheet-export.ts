@@ -1,5 +1,13 @@
 import { formatInTimeZone } from "date-fns-tz";
-import { getEffectiveHours } from "./break-utils";
+import {
+  type BreakLike,
+  breakTypeLabel,
+  getBreakDurationMs,
+  getEffectiveHours,
+  getPaidBreakMs,
+  getUnpaidBreakMs,
+  isPaidBreakType,
+} from "./break-utils";
 import { formatCoordinates } from "./geo";
 import type { PdfImage } from "./pdf-image";
 import type { BreakSettingsData } from "./types";
@@ -17,6 +25,7 @@ type ExportableEntry = {
   clock_in: Date | string;
   clock_out: Date | string | null;
   skip_lunch?: boolean;
+  breaks?: BreakLike[] | null;
   /** Present only for orgs that capture location. */
   clock_in_latitude?: number | null;
   clock_in_longitude?: number | null;
@@ -27,14 +36,28 @@ export type ExportFormat = "pdf" | "xlsx";
 
 export type ExportGrouping = "auto" | "week" | "month" | "none";
 
+/** One break record, as it appears in the exported compliance listing. */
+export type ExportBreak = {
+  /** Human label for the break type, e.g. "Meal period". */
+  type: string;
+  start: string;
+  end: string;
+  hours: number;
+  paid: boolean;
+};
+
 export type ExportRow = {
   employee: string;
   date: string;
   dayOfWeek?: string;
   clockIn: string;
   clockOut: string;
-  /** Null while the shift is still open. */
+  /** Null while the shift is still open. Net of unpaid breaks. */
   hours: number | null;
+  /** Only present when the shift has break records. */
+  breaks?: ExportBreak[];
+  unpaidBreakHours?: number;
+  paidBreakHours?: number;
   /**
    * Where the clock-in happened, as "<site> (lat, lon)" — empty for orgs that
    * do not capture location. Only the XLSX export has a column for it; the
@@ -175,6 +198,15 @@ export function buildExportRows(
     )
     .map(({ entry, clockIn, clockOut }) => {
       const date = formatDate(clockIn, timezone);
+      const breaks = (entry.breaks ?? []).map((brk) => ({
+        type: breakTypeLabel(brk.break_type),
+        start: formatTime(new Date(brk.break_start), timezone),
+        end: brk.break_end
+          ? formatTime(new Date(brk.break_end), timezone)
+          : "In progress",
+        hours: getBreakDurationMs(brk) / 3_600_000,
+        paid: isPaidBreakType(brk.break_type),
+      }));
       const location = formatEntryLocation(entry);
       return {
         employee: getEmployeeName(entry.user_id),
@@ -183,10 +215,25 @@ export function buildExportRows(
         clockIn: formatTime(clockIn, timezone),
         clockOut: clockOut ? formatTime(clockOut, timezone) : "In progress",
         hours: clockOut ? getEffectiveHours(entry, breakSettings) : null,
+        // Only shifts with recorded breaks carry the break columns.
+        ...(breaks.length > 0
+          ? {
+              breaks,
+              unpaidBreakHours: getUnpaidBreakMs(entry) / 3_600_000,
+              paidBreakHours: getPaidBreakMs(entry) / 3_600_000,
+            }
+          : {}),
         // Absent, not empty, for orgs that capture no location at all.
         ...(location ? { location } : {}),
       };
     });
+}
+
+/** Every break record in the report, flattened for the listing sections. */
+export function collectBreakRecords(
+  rows: ExportRow[],
+): { row: ExportRow; brk: ExportBreak }[] {
+  return rows.flatMap((row) => (row.breaks ?? []).map((brk) => ({ row, brk })));
 }
 
 /** "Main warehouse (45.42100, -75.69000)", or "" when nothing was captured. */
@@ -604,6 +651,31 @@ export function buildSheetXml(rows: ExportRow[], meta: ExportMeta): string {
       ]);
     }
 
+    const breakRecords = collectBreakRecords(rows);
+    if (breakRecords.length > 0) {
+      grid.push([]);
+      grid.push([
+        { text: "Break Records", style: STYLE.header },
+        { text: "Date", style: STYLE.header },
+        { text: "Break", style: STYLE.header },
+        { text: "Start", style: STYLE.header },
+        { text: "End", style: STYLE.header },
+        { text: "Hours", style: STYLE.header },
+        { text: "Paid", style: STYLE.header },
+      ]);
+      for (const { row, brk } of breakRecords) {
+        grid.push([
+          { text: row.employee },
+          { text: row.date },
+          { text: brk.type },
+          { text: brk.start },
+          { text: brk.end },
+          { number: brk.hours, style: STYLE.hours },
+          { text: brk.paid ? "Paid" : "Unpaid (deducted)" },
+        ]);
+      }
+    }
+
     if (sections.length > 1) {
       grid.push([]);
       grid.push([
@@ -686,6 +758,20 @@ const COLUMNS = [
   { title: "Clock Out", x: 363, width: 72 },
   { title: "Hours", x: 498, width: 0, alignRight: true },
   { title: "Day Total", x: PAGE_WIDTH - MARGIN, width: 0, alignRight: true },
+];
+
+/**
+ * The break-records table at the end of the report: its own columns, so a
+ * break type and window never get squeezed into the shift columns.
+ */
+const BREAK_COLUMNS = [
+  { title: "Employee", x: MARGIN, width: 108 },
+  { title: "Date", x: 160, width: 68 },
+  { title: "Break", x: 232, width: 118 },
+  { title: "Start", x: 354, width: 60 },
+  { title: "End", x: 418, width: 60 },
+  { title: "Paid", x: 482, width: 44 },
+  { title: "Hours", x: PAGE_WIDTH - MARGIN, width: 0, alignRight: true },
 ];
 
 /** Escape PDF string delimiters and keep to the WinAnsi (Latin-1) range. */
@@ -911,6 +997,37 @@ export function layoutPdfPages(rows: ExportRow[], meta: ExportMeta): string[] {
       writeCell(pen, COLUMNS[1], `${emp.daysWorked} days`, y);
       writeCell(pen, COLUMNS[3], `${emp.shiftsCount} shifts`, y);
       writeCell(pen, COLUMNS[5], formatHours(emp.totalHours), y, true);
+      line(pen, y - 6);
+      y -= ROW_HEIGHT;
+    }
+  }
+
+  // Break / meal-period records: the compliance log behind the net hours.
+  const breakRecords = collectBreakRecords(rows);
+  if (breakRecords.length > 0) {
+    ensureSpace(4);
+    write(pen, "Break Records", MARGIN, y, 10, true);
+    line(pen, y - 5, 0.3);
+    y -= ROW_HEIGHT;
+    for (const column of BREAK_COLUMNS) {
+      writeCell(pen, column, column.title, y, true);
+    }
+    line(pen, y - 6, 0.2);
+    y -= ROW_HEIGHT;
+    for (const { row, brk } of breakRecords) {
+      ensureSpace(2);
+      const cells = [
+        row.employee,
+        row.date,
+        brk.type,
+        brk.start,
+        brk.end,
+        brk.paid ? "Paid" : "Unpaid",
+        formatHours(brk.hours),
+      ];
+      for (const [i, text] of cells.entries()) {
+        writeCell(pen, BREAK_COLUMNS[i], text, y);
+      }
       line(pen, y - 6);
       y -= ROW_HEIGHT;
     }

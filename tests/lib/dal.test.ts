@@ -6,17 +6,24 @@ const mocks = vi.hoisted(() => ({
   dbCheckActiveEntry: vi.fn(),
   dbClockIn: vi.fn(),
   dbClockOut: vi.fn(),
+  dbDeleteBreak: vi.fn(),
   dbCreateSite: vi.fn(),
   dbDeleteSite: vi.fn(),
   dbDeleteTimeEntry: vi.fn(),
+  dbEndOpenBreak: vi.fn(),
   dbGetActiveEntry: vi.fn(),
   dbGetBreakSettings: vi.fn(),
+  dbGetBreaksForEntriesInOrg: vi.fn(),
+  dbGetBreakWithEntry: vi.fn(),
+  dbGetEntryBreaks: vi.fn(),
   dbGetLocationSettings: vi.fn(),
   dbGetOrgTimeEntries: vi.fn(),
   dbGetReportingSettings: vi.fn(),
   dbGetSites: vi.fn(),
   dbGetSitesForEnforcement: vi.fn(),
   dbGetTimeEntries: vi.fn(),
+  dbStartBreak: vi.fn(),
+  dbUpdateBreak: vi.fn(),
   dbUpdateBreakSettings: vi.fn(),
   dbUpdateLocationSettings: vi.fn(),
   dbUpdateReportingSettings: vi.fn(),
@@ -39,17 +46,24 @@ vi.mock("@/lib/db", () => ({
   dbCheckActiveEntry: mocks.dbCheckActiveEntry,
   dbClockIn: mocks.dbClockIn,
   dbClockOut: mocks.dbClockOut,
+  dbDeleteBreak: mocks.dbDeleteBreak,
   dbCreateSite: mocks.dbCreateSite,
   dbDeleteSite: mocks.dbDeleteSite,
   dbDeleteTimeEntry: mocks.dbDeleteTimeEntry,
+  dbEndOpenBreak: mocks.dbEndOpenBreak,
   dbGetActiveEntry: mocks.dbGetActiveEntry,
   dbGetBreakSettings: mocks.dbGetBreakSettings,
+  dbGetBreaksForEntriesInOrg: mocks.dbGetBreaksForEntriesInOrg,
+  dbGetBreakWithEntry: mocks.dbGetBreakWithEntry,
+  dbGetEntryBreaks: mocks.dbGetEntryBreaks,
   dbGetLocationSettings: mocks.dbGetLocationSettings,
   dbGetOrgTimeEntries: mocks.dbGetOrgTimeEntries,
   dbGetReportingSettings: mocks.dbGetReportingSettings,
   dbGetSites: mocks.dbGetSites,
   dbGetSitesForEnforcement: mocks.dbGetSitesForEnforcement,
   dbGetTimeEntries: mocks.dbGetTimeEntries,
+  dbStartBreak: mocks.dbStartBreak,
+  dbUpdateBreak: mocks.dbUpdateBreak,
   dbUpdateBreakSettings: mocks.dbUpdateBreakSettings,
   dbUpdateLocationSettings: mocks.dbUpdateLocationSettings,
   dbUpdateReportingSettings: mocks.dbUpdateReportingSettings,
@@ -66,9 +80,12 @@ import {
   clockIn,
   clockOut,
   createSiteDal,
+  deleteBreakDal,
   deleteSiteDal,
   deleteTimeEntry,
+  endBreak,
   getActiveEntry,
+  getBreaksForEntries,
   getOrgBreakSettings,
   getOrgLocationSettings,
   getOrgMembers,
@@ -76,6 +93,8 @@ import {
   getOrgSites,
   getOrgTimeEntries,
   getTimeEntries,
+  startBreak,
+  updateBreakDal,
   updateBreakSettingsDal,
   updateLocationSettingsDal,
   updateReportingSettingsDal,
@@ -747,6 +766,176 @@ describe("getOrgBreakSettings", () => {
   });
 });
 
+describe("startBreak", () => {
+  it("rejects requests without a user or org", async () => {
+    mocks.protect.mockResolvedValue(noOrg);
+    const result = await startBreak();
+    expect(result._unsafeUnwrapErr()).toEqual({
+      reason: "Unauthorized or no organization selected",
+    });
+  });
+
+  it("rejects an unknown break type", async () => {
+    mocks.protect.mockResolvedValue(member);
+    const result = await startBreak("siesta" as never);
+    expect(result._unsafeUnwrapErr()).toEqual({ reason: "Unknown break type" });
+    expect(mocks.dbStartBreak).not.toHaveBeenCalled();
+  });
+
+  it("refuses when the active-entry lookup fails", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetActiveEntry.mockRejectedValue(new Error("db"));
+    const result = await startBreak();
+    expect(result._unsafeUnwrapErr()).toEqual({
+      reason: "Error checking active clock-in entry",
+    });
+  });
+
+  it("refuses when the member is not clocked in", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetActiveEntry.mockResolvedValue(null);
+    const result = await startBreak();
+    expect(result._unsafeUnwrapErr()).toEqual({ reason: "Not clocked in" });
+    expect(mocks.dbStartBreak).not.toHaveBeenCalled();
+  });
+
+  it("refuses a second break while one is running", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetActiveEntry.mockResolvedValue({
+      id: 1,
+      breaks: [{ id: 2, break_end: null }],
+    });
+    const result = await startBreak("unpaid_rest");
+    expect(result._unsafeUnwrapErr()).toEqual({
+      reason: "A break is already running",
+    });
+    expect(mocks.dbStartBreak).not.toHaveBeenCalled();
+  });
+
+  it("starts the break and returns it with its owner", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetActiveEntry.mockResolvedValue({ id: 1, breaks: [] });
+    mocks.dbStartBreak.mockResolvedValue({ id: 9, time_entry_id: 1 });
+    const result = await startBreak("paid_rest");
+    expect(result._unsafeUnwrap()).toEqual({
+      id: 9,
+      time_entry_id: 1,
+      user_id: "user_1",
+      org_id: "org_1",
+    });
+    expect(mocks.dbStartBreak).toHaveBeenCalledWith(
+      "user_1",
+      "org_1",
+      "paid_rest",
+    );
+  });
+
+  it("refuses when a concurrent request opened a break first", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetActiveEntry.mockResolvedValue({ id: 1 });
+    mocks.dbStartBreak.mockResolvedValue(undefined);
+    const result = await startBreak();
+    expect(result._unsafeUnwrapErr()).toEqual({
+      reason: "A break is already running",
+    });
+  });
+
+  it("reports a failed insert", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetActiveEntry.mockResolvedValue({ id: 1, breaks: [] });
+    mocks.dbStartBreak.mockRejectedValue(new Error("db"));
+    const result = await startBreak();
+    expect(result._unsafeUnwrapErr()).toEqual({
+      reason: "Error starting break.",
+    });
+  });
+});
+
+describe("endBreak", () => {
+  it("rejects requests without a user or org", async () => {
+    mocks.protect.mockResolvedValue(noUser);
+    const result = await endBreak();
+    expect(result._unsafeUnwrapErr()).toEqual({
+      reason: "Unauthorized or no organization selected",
+    });
+  });
+
+  it("closes the running break", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbEndOpenBreak.mockResolvedValue({ id: 9 });
+    const result = await endBreak();
+    expect(result._unsafeUnwrap()).toEqual({
+      id: 9,
+      user_id: "user_1",
+      org_id: "org_1",
+    });
+    expect(mocks.dbEndOpenBreak).toHaveBeenCalledWith("user_1", "org_1");
+  });
+
+  it("refuses when no break is running", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbEndOpenBreak.mockResolvedValue(undefined);
+    const result = await endBreak();
+    expect(result._unsafeUnwrapErr()).toEqual({
+      reason: "No break is running",
+    });
+  });
+
+  it("reports a failed update", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbEndOpenBreak.mockRejectedValue(new Error("db"));
+    const result = await endBreak();
+    expect(result._unsafeUnwrapErr()).toEqual({
+      reason: "Error ending break.",
+    });
+  });
+});
+
+describe("getBreaksForEntries", () => {
+  it("rejects requests without a user or org", async () => {
+    mocks.protect.mockResolvedValue(noOrg);
+    await expect(getBreaksForEntries([1])).resolves.toEqual({
+      ok: false,
+      error: { reason: "Unauthorized or no organization selected" },
+    });
+  });
+
+  it("lists the breaks for the caller's own entries", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetBreaksForEntriesInOrg.mockResolvedValue([{ id: 1 }]);
+    await expect(getBreaksForEntries([1, Number.NaN, 2])).resolves.toEqual({
+      ok: true,
+      value: [{ id: 1 }],
+    });
+    expect(mocks.dbGetBreaksForEntriesInOrg).toHaveBeenCalledWith(
+      [1, 2],
+      "org_1",
+      "user_1",
+      false,
+    );
+  });
+
+  it("lets admins list every member's breaks", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbGetBreaksForEntriesInOrg.mockResolvedValue([]);
+    await getBreaksForEntries([3]);
+    expect(mocks.dbGetBreaksForEntriesInOrg).toHaveBeenCalledWith(
+      [3],
+      "org_1",
+      "user_1",
+      true,
+    );
+  });
+
+  it("reports a failed query", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetBreaksForEntriesInOrg.mockRejectedValue(new Error("db"));
+    await expect(getBreaksForEntries([1])).resolves.toEqual({
+      ok: false,
+      error: { reason: "Error fetching breaks" },
+    });
+  });
+});
 describe("clockIn location enforcement", () => {
   const coordinates = { latitude: 45.4215, longitude: -75.6972, accuracy: 8 };
   const depot = {
@@ -1003,6 +1192,132 @@ describe("getOrgLocationSettings", () => {
   });
 });
 
+describe("updateBreakDal", () => {
+  const breakStart = new Date("2026-01-05T12:00:00Z");
+  const breakEnd = new Date("2026-01-05T12:30:00Z");
+  const existing = {
+    id: 4,
+    time_entry_id: 1,
+    break_type: "unpaid_meal",
+    break_start: breakStart,
+    break_end: breakEnd,
+    user_id: "user_2",
+    org_id: "org_1",
+    clock_in: new Date("2026-01-05T09:00:00Z"),
+    clock_out: new Date("2026-01-05T17:00:00Z"),
+  };
+
+  it("is admin-only", async () => {
+    mocks.protect.mockResolvedValue(member);
+    const result = await updateBreakDal(4, breakStart, breakEnd, "unpaid_meal");
+    expect(result._unsafeUnwrapErr()).toEqual({ reason: "Unauthorized" });
+    expect(mocks.dbUpdateBreak).not.toHaveBeenCalled();
+  });
+
+  it("fails when the break does not exist in the org", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbGetBreakWithEntry.mockResolvedValue(undefined);
+    const result = await updateBreakDal(4, breakStart, breakEnd, "unpaid_meal");
+    expect(result._unsafeUnwrapErr()).toEqual({ reason: "Break not found" });
+  });
+
+  it("fails when the break lookup errors", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbGetBreakWithEntry.mockRejectedValue(new Error("db"));
+    const result = await updateBreakDal(4, breakStart, breakEnd, "unpaid_meal");
+    expect(result._unsafeUnwrapErr()).toEqual({ reason: "Break not found" });
+  });
+
+  it("fails when the entry's other breaks cannot be read", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbGetBreakWithEntry.mockResolvedValue(existing);
+    mocks.dbGetEntryBreaks.mockRejectedValue(new Error("db"));
+    const result = await updateBreakDal(4, breakStart, breakEnd, "unpaid_meal");
+    expect(result._unsafeUnwrapErr()).toEqual({
+      reason: "Error fetching breaks",
+    });
+  });
+
+  it("rejects a window outside the shift", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbGetBreakWithEntry.mockResolvedValue(existing);
+    mocks.dbGetEntryBreaks.mockResolvedValue([existing]);
+    const result = await updateBreakDal(
+      4,
+      new Date("2026-01-05T08:00:00Z"),
+      new Date("2026-01-05T08:30:00Z"),
+      "unpaid_meal",
+    );
+    expect(result._unsafeUnwrapErr()).toEqual({
+      reason: "Break cannot start before the shift's clock-in",
+    });
+    expect(mocks.dbUpdateBreak).not.toHaveBeenCalled();
+  });
+
+  it("rejects an overlap with another break on the entry", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbGetBreakWithEntry.mockResolvedValue(existing);
+    mocks.dbGetEntryBreaks.mockResolvedValue([
+      existing,
+      {
+        id: 5,
+        break_type: "unpaid_rest",
+        break_start: new Date("2026-01-05T14:00:00Z"),
+        break_end: new Date("2026-01-05T14:30:00Z"),
+      },
+    ]);
+    const result = await updateBreakDal(
+      4,
+      new Date("2026-01-05T14:15:00Z"),
+      new Date("2026-01-05T14:45:00Z"),
+      "unpaid_meal",
+    );
+    expect(result._unsafeUnwrapErr()).toEqual({
+      reason: "Break overlaps another break on this entry",
+    });
+  });
+
+  it("updates the break and keeps the shift's owner", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbGetBreakWithEntry.mockResolvedValue(existing);
+    mocks.dbGetEntryBreaks.mockResolvedValue([existing]);
+    mocks.dbUpdateBreak.mockResolvedValue({ id: 4, break_type: "paid_rest" });
+    const result = await updateBreakDal(4, breakStart, breakEnd, "paid_rest");
+    expect(result._unsafeUnwrap()).toEqual({
+      id: 4,
+      break_type: "paid_rest",
+      user_id: "user_2",
+      org_id: "org_1",
+    });
+    expect(mocks.dbUpdateBreak).toHaveBeenCalledWith(
+      4,
+      "org_1",
+      breakStart,
+      breakEnd,
+      "paid_rest",
+    );
+  });
+
+  it("fails when no row was updated", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbGetBreakWithEntry.mockResolvedValue(existing);
+    mocks.dbGetEntryBreaks.mockResolvedValue([existing]);
+    mocks.dbUpdateBreak.mockResolvedValue(undefined);
+    const result = await updateBreakDal(4, breakStart, breakEnd, "unpaid_meal");
+    expect(result._unsafeUnwrapErr()).toEqual({ reason: "Break not found" });
+  });
+
+  it("reports a failed update", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbGetBreakWithEntry.mockResolvedValue(existing);
+    mocks.dbGetEntryBreaks.mockResolvedValue([existing]);
+    mocks.dbUpdateBreak.mockRejectedValue(new Error("db"));
+    const result = await updateBreakDal(4, breakStart, breakEnd, "unpaid_meal");
+    expect(result._unsafeUnwrapErr()).toEqual({
+      reason: "Failed to update break",
+    });
+  });
+});
 describe("updateLocationSettingsDal", () => {
   it.each([
     ["no user", withFeatures(noUser, "geofencing")],
@@ -1182,6 +1497,61 @@ describe.each([
   });
 });
 
+describe("deleteBreakDal", () => {
+  const existing = { id: 4, time_entry_id: 1, user_id: "user_2" };
+
+  it("is admin-only", async () => {
+    mocks.protect.mockResolvedValue(member);
+    const result = await deleteBreakDal(4);
+    expect(result._unsafeUnwrapErr()).toEqual({ reason: "Unauthorized" });
+    expect(mocks.dbDeleteBreak).not.toHaveBeenCalled();
+  });
+
+  it("fails when the break does not exist in the org", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbGetBreakWithEntry.mockResolvedValue(undefined);
+    const result = await deleteBreakDal(4);
+    expect(result._unsafeUnwrapErr()).toEqual({ reason: "Break not found" });
+  });
+
+  it("fails when the break lookup errors", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbGetBreakWithEntry.mockRejectedValue(new Error("db"));
+    const result = await deleteBreakDal(4);
+    expect(result._unsafeUnwrapErr()).toEqual({ reason: "Break not found" });
+  });
+
+  it("deletes the break", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbGetBreakWithEntry.mockResolvedValue(existing);
+    mocks.dbDeleteBreak.mockResolvedValue({ id: 4 });
+    const result = await deleteBreakDal(4);
+    expect(result._unsafeUnwrap()).toEqual({
+      id: 4,
+      user_id: "user_2",
+      org_id: "org_1",
+    });
+    expect(mocks.dbDeleteBreak).toHaveBeenCalledWith(4, "org_1");
+  });
+
+  it("fails when no row was deleted", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbGetBreakWithEntry.mockResolvedValue(existing);
+    mocks.dbDeleteBreak.mockResolvedValue(undefined);
+    const result = await deleteBreakDal(4);
+    expect(result._unsafeUnwrapErr()).toEqual({ reason: "Break not found" });
+  });
+
+  it("reports a failed delete", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbGetBreakWithEntry.mockResolvedValue(existing);
+    mocks.dbDeleteBreak.mockRejectedValue(new Error("db"));
+    const result = await deleteBreakDal(4);
+    expect(result._unsafeUnwrapErr()).toEqual({
+      reason: "Failed to delete break",
+    });
+  });
+});
 describe("updateSiteDal", () => {
   it("reports a site that is not in this org", async () => {
     mocks.protect.mockResolvedValue(withFeatures(admin, "geofencing"));

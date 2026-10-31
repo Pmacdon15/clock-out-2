@@ -2,14 +2,29 @@
 
 import { useMutation } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { Calendar, Check, Edit3, Loader2, MapPin, X } from "lucide-react";
+import {
+  Calendar,
+  Check,
+  Coffee,
+  Edit3,
+  Loader2,
+  MapPin,
+  X,
+} from "lucide-react";
 import { startTransition, useState } from "react";
 import { toast } from "sonner";
-import { updateTimeEntryAction } from "@/lib/actions";
-import { getDockedMinutes, getEffectiveHours } from "@/lib/break-utils";
+import { deleteBreakAction, updateTimeEntryAction } from "@/lib/actions";
+import {
+  breakTypeLabel,
+  getBreakDurationMs,
+  getDockedMinutes,
+  getEffectiveHours,
+  getUnpaidBreakMs,
+  isPaidBreakType,
+} from "@/lib/break-utils";
 import { formatCoordinates } from "@/lib/geo";
 import type { EntryAction } from "@/lib/reducers/time-entries";
-import type { BreakSettingsData, TimeEntry } from "@/lib/types";
+import type { BreakSettingsData, TimeEntry, TimeEntryBreak } from "@/lib/types";
 import { DeleteConfirmDialog } from "../DeleteConfirmDialog";
 
 interface EntryItemProps {
@@ -37,6 +52,32 @@ export function EntryItem({
       : "",
   );
   const [editSkipLunch, setEditSkipLunch] = useState(Boolean(entry.skip_lunch));
+
+  const deleteBreakMutation = useMutation({
+    mutationFn: (breakId: number) => deleteBreakAction(breakId),
+    onSuccess: (res) => {
+      if (res.success) toast.success("Break removed");
+      else if ("error" in res)
+        toast.error(res.error || "Failed to remove break");
+    },
+  });
+
+  const handleDeleteBreak = (breakId: number) => {
+    // The remove button only renders for a break of this entry's own list.
+    const recorded = entry.breaks as TimeEntryBreak[];
+    startTransition(() => {
+      setOptimisticEntries({
+        type: "UPDATE",
+        payload: {
+          id: entry.id,
+          breaks: recorded.filter((brk) => brk.id !== breakId),
+          updated_at: new Date(),
+        },
+      });
+
+      deleteBreakMutation.mutate(breakId);
+    });
+  };
 
   const updateMutation = useMutation({
     mutationFn: ({
@@ -156,6 +197,8 @@ export function EntryItem({
 
   const dockedMinutes = getDockedMinutes(entry, breakSettings);
   const effectiveHours = getEffectiveHours(entry, breakSettings);
+  const breaks = entry.breaks ?? [];
+  const unpaidBreakMinutes = Math.round(getUnpaidBreakMs(entry) / 60_000);
   // Only admins see where a punch happened, and only when the org captured it.
   const punches = isAdmin
     ? [
@@ -211,6 +254,11 @@ export function EntryItem({
             ? format(new Date(entry.clock_out), "hh:mm a")
             : "..."}
         </span>
+        {unpaidBreakMinutes > 0 && (
+          <span className="ml-1.5 rounded-full bg-amber-100 px-2 py-0.5 font-bold text-[10px] text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+            -{unpaidBreakMinutes}m unpaid break
+          </span>
+        )}
         {entry.skip_lunch ? (
           <span className="ml-1.5 rounded-full bg-amber-100 px-2 py-0.5 font-bold text-[10px] text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
             Not docked
@@ -228,6 +276,53 @@ export function EntryItem({
           </span>
         )}
       </div>
+      {breaks.length > 0 && (
+        <ul
+          className="space-y-1 border-zinc-100 border-l pl-3 dark:border-zinc-800"
+          data-testid={`breaks-${entry.id}`}
+        >
+          {breaks.map((brk) => (
+            <li
+              className="flex items-center gap-1.5 text-muted-foreground text-xs"
+              key={brk.id}
+            >
+              <Coffee className="h-3 w-3" />
+              <span className="font-medium">
+                {breakTypeLabel(brk.break_type)}
+              </span>
+              <span>
+                {format(new Date(brk.break_start), "hh:mm a")} -{" "}
+                {brk.break_end
+                  ? format(new Date(brk.break_end), "hh:mm a")
+                  : "..."}
+              </span>
+              <span className="tabular-nums">
+                {Math.round(getBreakDurationMs(brk) / 60_000)}m
+              </span>
+              <span
+                className={
+                  isPaidBreakType(brk.break_type)
+                    ? "rounded-full bg-emerald-100 px-2 py-0.5 font-bold text-[10px] text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
+                    : "rounded-full bg-amber-100 px-2 py-0.5 font-bold text-[10px] text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                }
+              >
+                {isPaidBreakType(brk.break_type) ? "Paid" : "Unpaid"}
+              </span>
+              {isAdmin && (
+                <button
+                  aria-label="Remove break"
+                  className="p-1 transition-colors hover:text-red-500"
+                  disabled={deleteBreakMutation.isPending}
+                  onClick={() => handleDeleteBreak(brk.id)}
+                  type="button"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
       {punches.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 font-medium text-[10px] text-muted-foreground">
           {punches.map((punch) => (

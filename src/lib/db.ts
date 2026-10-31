@@ -3,10 +3,12 @@ import { cacheLife, cacheTag } from "next/cache";
 import type { StoredLocation } from "./geo";
 import type {
   BreakSettingsData,
+  BreakType,
   LocationSettingsData,
   ReportingSettingsData,
   SiteData,
   TimeEntry,
+  TimeEntryBreak,
 } from "./types";
 
 if (!process.env.DATABASE_URL) {
@@ -35,7 +37,7 @@ export async function dbGetTimeEntries(
             AND clock_in >= ${startDate} AND clock_in < ${endDate}
             ORDER BY clock_in DESC
         `;
-    return rows as unknown as TimeEntry[];
+    return await attachBreaks(rows as unknown as TimeEntry[]);
   }
 
   const rows = await sql`
@@ -43,7 +45,7 @@ export async function dbGetTimeEntries(
         WHERE user_id = ${userId} AND org_id = ${orgId}
         ORDER BY clock_in DESC
     `;
-  return rows as unknown as TimeEntry[];
+  return await attachBreaks(rows as unknown as TimeEntry[]);
 }
 
 export async function dbGetOrgTimeEntries(
@@ -67,7 +69,7 @@ export async function dbGetOrgTimeEntries(
             AND clock_in >= ${startDate} AND clock_in < ${endDate}
             ORDER BY clock_in DESC
         `;
-    return rows as unknown as TimeEntry[];
+    return await attachBreaks(rows as unknown as TimeEntry[]);
   }
 
   const rows = await sql`
@@ -75,7 +77,7 @@ export async function dbGetOrgTimeEntries(
         WHERE org_id = ${orgId}
         ORDER BY clock_in DESC
     `;
-  return rows as unknown as TimeEntry[];
+  return await attachBreaks(rows as unknown as TimeEntry[]);
 }
 
 export async function dbCheckActiveEntry(userId: string, orgId: string) {
@@ -93,7 +95,11 @@ export async function dbGetActiveEntry(userId: string, orgId: string) {
         WHERE user_id = ${userId} AND org_id = ${orgId} AND clock_out IS NULL
         LIMIT 1
     `;
-  return (activeEntry as unknown as TimeEntry) || null;
+  if (!activeEntry) return null;
+  const [withBreaks] = await attachBreaks([
+    activeEntry as unknown as TimeEntry,
+  ]);
+  return withBreaks as TimeEntry;
 }
 
 /**
@@ -205,7 +211,7 @@ export async function dbGetTimeEntriesForPeriod(
         AND clock_in >= ${startDate} AND clock_in < ${endDate}
         ORDER BY clock_in ASC
     `;
-  return rows as unknown as TimeEntry[];
+  return await attachBreaks(rows as unknown as TimeEntry[]);
 }
 
 export async function dbGetReportingSettings(orgId: string) {
@@ -318,6 +324,223 @@ export async function dbUpdateBreakSettings(
 		RETURNING *
 	`;
   return updated as BreakSettingsData;
+}
+
+/* ----------------------------------------------------------- breaks -- */
+
+let timeEntryBreaksTableReady: Promise<void> | null = null;
+
+/**
+ * Break records live in their own table. Production databases that predate
+ * `time_entry_breaks` in schema.sql don't have it, so create it on first use
+ * (same approach as `ensureBreakSettingsTable`). Runs once per server
+ * instance; a failure is not cached, so the next call retries.
+ */
+export function ensureTimeEntryBreaksTable(): Promise<void> {
+  timeEntryBreaksTableReady ??= (async () => {
+    await sql`
+		CREATE TABLE IF NOT EXISTS time_entry_breaks (
+			id SERIAL PRIMARY KEY,
+			time_entry_id INTEGER NOT NULL REFERENCES time_entries(id) ON DELETE CASCADE,
+			break_type TEXT NOT NULL DEFAULT 'unpaid_meal'
+				CHECK (break_type IN ('unpaid_meal', 'unpaid_rest', 'paid_rest')),
+			break_start TIMESTAMP WITH TIME ZONE NOT NULL,
+			break_end TIMESTAMP WITH TIME ZONE,
+			CHECK (break_end IS NULL OR break_end > break_start),
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+		)
+	`;
+    await sql`
+		CREATE INDEX IF NOT EXISTS idx_time_entry_breaks_entry
+			ON time_entry_breaks (time_entry_id, break_start)
+	`;
+    await sql`
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_time_entry_breaks_one_open
+			ON time_entry_breaks (time_entry_id)
+			WHERE break_end IS NULL
+	`;
+  })().catch((error) => {
+    timeEntryBreaksTableReady = null;
+    throw error;
+  });
+  return timeEntryBreaksTableReady;
+}
+
+/** Test-only: forget that the table check ran. */
+export function resetTimeEntryBreaksTableCheck() {
+  timeEntryBreaksTableReady = null;
+}
+
+export async function dbGetBreaksForEntries(entryIds: number[]) {
+  if (entryIds.length === 0) return [] as TimeEntryBreak[];
+  await ensureTimeEntryBreaksTable();
+  const rows = await sql`
+		SELECT * FROM time_entry_breaks
+		WHERE time_entry_id = ANY(${entryIds})
+		ORDER BY break_start ASC, id ASC
+	`;
+  return rows as unknown as TimeEntryBreak[];
+}
+
+/**
+ * Loads the breaks of the given entries and hangs them off each one, so an
+ * entry always arrives with its (possibly empty) compliance record.
+ */
+export async function attachBreaks<T extends TimeEntry>(
+  entries: T[],
+): Promise<T[]> {
+  const breaks = await dbGetBreaksForEntries(entries.map((entry) => entry.id));
+  const byEntry = new Map<number, TimeEntryBreak[]>();
+  for (const brk of breaks) {
+    const existing = byEntry.get(brk.time_entry_id);
+    if (existing) existing.push(brk);
+    else byEntry.set(brk.time_entry_id, [brk]);
+  }
+  return entries.map((entry) => ({
+    ...entry,
+    breaks: byEntry.get(entry.id) ?? [],
+  }));
+}
+
+/**
+ * Breaks for a set of entries, restricted to one organization and — unless
+ * the caller is an admin — to the entries of one member.
+ */
+export async function dbGetBreaksForEntriesInOrg(
+  entryIds: number[],
+  orgId: string,
+  userId: string,
+  isAdmin: boolean,
+) {
+  if (entryIds.length === 0) return [] as TimeEntryBreak[];
+  await ensureTimeEntryBreaksTable();
+  const rows = await sql`
+		SELECT b.* FROM time_entry_breaks b
+		JOIN time_entries e ON e.id = b.time_entry_id
+		WHERE b.time_entry_id = ANY(${entryIds})
+		AND e.org_id = ${orgId}
+		AND (${isAdmin} OR e.user_id = ${userId})
+		ORDER BY b.break_start ASC, b.id ASC
+	`;
+  return rows as unknown as TimeEntryBreak[];
+}
+
+/** A break joined to the shift it belongs to, for validation and tagging. */
+export type BreakWithEntry = TimeEntryBreak & {
+  user_id: string;
+  org_id: string;
+  clock_in: Date;
+  clock_out: Date | null;
+};
+
+export async function dbGetBreakWithEntry(id: number, orgId: string) {
+  await ensureTimeEntryBreaksTable();
+  const [row] = await sql`
+		SELECT b.*, e.user_id, e.org_id, e.clock_in, e.clock_out
+		FROM time_entry_breaks b
+		JOIN time_entries e ON e.id = b.time_entry_id
+		WHERE b.id = ${id} AND e.org_id = ${orgId}
+	`;
+  return row as unknown as BreakWithEntry | undefined;
+}
+
+export async function dbGetEntryBreaks(entryId: number) {
+  await ensureTimeEntryBreaksTable();
+  const rows = await sql`
+		SELECT * FROM time_entry_breaks
+		WHERE time_entry_id = ${entryId}
+		ORDER BY break_start ASC, id ASC
+	`;
+  return rows as unknown as TimeEntryBreak[];
+}
+
+/**
+ * Opens a break on the user's running shift, but only when that shift has no
+ * break open already. The advisory lock serialises concurrent requests for
+ * the same user/org the way `dbClockIn` does, so two taps cannot both insert.
+ * Returns undefined when there is no open shift, or a break is already running.
+ */
+export async function dbStartBreak(
+  userId: string,
+  orgId: string,
+  breakType: BreakType,
+) {
+  await ensureTimeEntryBreaksTable();
+  const [, inserted] = await sql.transaction([
+    sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${userId}:${orgId}:break`}::text, 0))`,
+    sql`
+		INSERT INTO time_entry_breaks (time_entry_id, break_type, break_start)
+		SELECT e.id, ${breakType}, NOW()
+		FROM time_entries e
+		WHERE e.user_id = ${userId} AND e.org_id = ${orgId} AND e.clock_out IS NULL
+		AND NOT EXISTS (
+			SELECT 1 FROM time_entry_breaks b
+			WHERE b.time_entry_id = e.id AND b.break_end IS NULL
+		)
+		ORDER BY e.clock_in DESC
+		LIMIT 1
+		RETURNING *
+	`,
+  ]);
+  return inserted[0] as unknown as TimeEntryBreak | undefined;
+}
+
+/**
+ * Closes the break running on the user's open shift. Returns undefined when
+ * no break is open.
+ */
+export async function dbEndOpenBreak(userId: string, orgId: string) {
+  await ensureTimeEntryBreaksTable();
+  const [updated] = await sql`
+		UPDATE time_entry_breaks
+		SET break_end = NOW(), updated_at = NOW()
+		WHERE break_end IS NULL
+		AND time_entry_id IN (
+			SELECT id FROM time_entries
+			WHERE user_id = ${userId} AND org_id = ${orgId} AND clock_out IS NULL
+		)
+		RETURNING *
+	`;
+  return updated as unknown as TimeEntryBreak | undefined;
+}
+
+export async function dbUpdateBreak(
+  id: number,
+  orgId: string,
+  breakStart: Date,
+  breakEnd: Date | null,
+  breakType: BreakType,
+) {
+  await ensureTimeEntryBreaksTable();
+  const [updated] = await sql`
+		UPDATE time_entry_breaks b
+		SET break_start = ${breakStart},
+			break_end = ${breakEnd},
+			break_type = ${breakType},
+			updated_at = NOW()
+		WHERE b.id = ${id}
+		AND EXISTS (
+			SELECT 1 FROM time_entries e
+			WHERE e.id = b.time_entry_id AND e.org_id = ${orgId}
+		)
+		RETURNING *
+	`;
+  return updated as unknown as TimeEntryBreak | undefined;
+}
+
+export async function dbDeleteBreak(id: number, orgId: string) {
+  await ensureTimeEntryBreaksTable();
+  const [deleted] = await sql`
+		DELETE FROM time_entry_breaks b
+		WHERE b.id = ${id}
+		AND EXISTS (
+			SELECT 1 FROM time_entries e
+			WHERE e.id = b.time_entry_id AND e.org_id = ${orgId}
+		)
+		RETURNING *
+	`;
+  return deleted as unknown as TimeEntryBreak | undefined;
 }
 
 let locationTablesReady: Promise<void> | null = null;

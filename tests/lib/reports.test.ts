@@ -462,3 +462,88 @@ describe("orgHasReportingFeature", () => {
     await expect(orgHasReportingFeature("org_1")).resolves.toBe(false);
   });
 });
+
+describe("sendWeeklyReports break records", () => {
+  const shiftWithBreaks = {
+    clock_in: "2026-01-05T09:00:00Z",
+    clock_out: "2026-01-05T17:00:00Z",
+    breaks: [
+      {
+        id: 1,
+        time_entry_id: 1,
+        break_type: "unpaid_meal",
+        break_start: "2026-01-05T12:00:00Z",
+        break_end: "2026-01-05T12:30:00Z",
+      },
+      {
+        id: 2,
+        time_entry_id: 1,
+        break_type: "paid_rest",
+        break_start: "2026-01-05T15:00:00Z",
+        break_end: "2026-01-05T15:15:00Z",
+      },
+    ],
+  };
+
+  it("deducts unpaid breaks only and lists every break per shift", async () => {
+    mocks.dbGetTimeEntriesForPeriod.mockResolvedValue([shiftWithBreaks]);
+    await sendWeeklyReports(start, end, "org_1");
+    const props = emailProps();
+    expect(props.totalHours).toBe("7h 30m");
+    const breakdown = props.breakdown as {
+      shifts: { duration: string; breaks?: string }[];
+    }[];
+    expect(breakdown[0].shifts[0].duration).toBe("7h 30m");
+    expect(breakdown[0].shifts[0].breaks).toBe(
+      "Meal period 12:00 PM - 12:30 PM (30m, unpaid); " +
+        "Paid rest break 3:00 PM - 3:15 PM (15m, paid)",
+    );
+  });
+
+  it("leaves the break line off a shift with no breaks", async () => {
+    mocks.dbGetTimeEntriesForPeriod.mockResolvedValue([
+      { clock_in: "2026-01-05T09:00:00Z", clock_out: "2026-01-05T17:00:00Z" },
+    ]);
+    await sendWeeklyReports(start, end, "org_1");
+    const breakdown = emailProps().breakdown as {
+      shifts: { breaks?: string }[];
+    }[];
+    expect(breakdown[0].shifts[0].breaks).toBeUndefined();
+  });
+
+  it("marks a still-running break with an open end time", async () => {
+    mocks.dbGetTimeEntriesForPeriod.mockResolvedValue([
+      {
+        clock_in: "2026-01-05T09:00:00Z",
+        clock_out: "2026-01-05T17:00:00Z",
+        breaks: [
+          {
+            id: 3,
+            time_entry_id: 1,
+            break_type: "unpaid_rest",
+            break_start: "2026-01-05T12:00:00Z",
+            break_end: null,
+          },
+        ],
+      },
+    ]);
+    await sendWeeklyReports(start, end, "org_1");
+    const breakdown = emailProps().breakdown as {
+      shifts: { breaks?: string }[];
+    }[];
+    expect(breakdown[0].shifts[0].breaks).toContain("12:00 PM - ...");
+  });
+
+  it("does not dock lunch on top of a recorded unpaid break", async () => {
+    mocks.dbGetBreakSettings.mockResolvedValue({
+      org_id: "org_1",
+      dock_lunch: true,
+      lunch_duration_minutes: 30,
+      lunch_min_shift_hours: 5,
+    });
+    mocks.dbGetTimeEntriesForPeriod.mockResolvedValue([shiftWithBreaks]);
+    await sendWeeklyReports(start, end, "org_1");
+    // 8h shift, 30m unpaid break recorded: the automatic 30m dock stands down.
+    expect(emailProps().totalHours).toBe("7h 30m");
+  });
+});

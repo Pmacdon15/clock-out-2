@@ -1,3 +1,22 @@
+/**
+ * Break kinds recorded against a time entry. `paid_rest` is a paid rest
+ * break (recorded, never deducted); the two `unpaid_*` kinds are unpaid and
+ * are subtracted from worked hours. `unpaid_meal` is the jurisdictional meal
+ * period many labour codes require a record of.
+ */
+export type BreakType = "unpaid_meal" | "unpaid_rest" | "paid_rest";
+
+export type TimeEntryBreak = {
+  id: number;
+  time_entry_id: number;
+  break_type: BreakType;
+  break_start: Date;
+  /** Null while the break is still running. */
+  break_end: Date | null;
+  created_at?: Date;
+  updated_at?: Date;
+};
+
 export type TimeEntry = {
   id: number;
   user_id: string;
@@ -5,6 +24,8 @@ export type TimeEntry = {
   clock_in: Date;
   clock_out: Date | null;
   skip_lunch?: boolean;
+  /** Break records for this entry, oldest first (loaded alongside entries). */
+  breaks?: TimeEntryBreak[];
   created_at: Date;
   updated_at: Date;
   /** Captured only while the org has location capture switched on. */
