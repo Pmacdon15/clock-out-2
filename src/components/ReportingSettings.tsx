@@ -39,6 +39,12 @@ const options = [
     icon: Calendar,
   },
   {
+    id: "bi-weekly",
+    label: "Bi-weekly",
+    description: "Every 2 weeks on your chosen day (e.g. every second Friday)",
+    icon: Calendar,
+  },
+  {
     id: "twice-monthly",
     label: "Twice Monthly (Pay Period)",
     description: "Sent on the 1st and 16th",
@@ -57,15 +63,19 @@ export default function ReportingSettings({
   hasReporting,
   onUpdateOptimistic,
 }: ReportingSettingsProps) {
+  const normalizedInitialFreq =
+    initialData?.report_frequency === "biweekly"
+      ? "bi-weekly"
+      : initialData?.report_frequency;
+
+  const initialDay = initialData?.report_day || "Monday";
+  const initialInterval = initialData?.report_interval || 1;
+
   const [frequency, setFrequency] = useState<string>(
-    initialData?.report_frequency || "weekly",
+    normalizedInitialFreq || "weekly",
   );
-  const [reportDay, setReportDay] = useState<string>(
-    initialData?.report_day || "Monday",
-  );
-  const [reportInterval, setReportInterval] = useState<number>(
-    initialData?.report_interval || 1,
-  );
+  const [reportDay, setReportDay] = useState<string>(initialDay);
+  const [reportInterval, setReportInterval] = useState<number>(initialInterval);
 
   const { mutate, isPending } = useMutation({
     mutationFn: ({
@@ -107,10 +117,10 @@ export default function ReportingSettings({
   }
 
   const hasChanged =
-    frequency !== initialData?.report_frequency ||
+    frequency !== normalizedInitialFreq ||
     (frequency === "custom" &&
-      (reportDay !== initialData?.report_day ||
-        reportInterval !== initialData?.report_interval));
+      (reportDay !== initialDay || reportInterval !== initialInterval)) ||
+    (frequency === "bi-weekly" && reportDay !== initialDay);
 
   return (
     <Card className="p-8">
@@ -152,13 +162,41 @@ export default function ReportingSettings({
                     <Check className="h-4 w-4" />
                   </div>
                 )}
-                {initialData?.report_frequency === option.id && (
+                {normalizedInitialFreq === option.id && (
                   <span className="rounded-full bg-zinc-100 px-2 py-0.5 font-medium text-[10px] text-zinc-500 uppercase dark:bg-zinc-800">
                     Current
                   </span>
                 )}
               </div>
             </button>
+
+            {frequency === "bi-weekly" && option.id === "bi-weekly" && (
+              <div className="fade-in slide-in-from-top-2 grid animate-in grid-cols-1 gap-4 p-6 pt-0 md:grid-cols-2">
+                <div className="space-y-2">
+                  <label className="font-medium text-sm" htmlFor="reportDay">
+                    Reporting Day
+                  </label>
+                  <select
+                    className="h-12 w-full rounded-xl border-2 border-zinc-200 bg-white px-4 dark:border-zinc-800 dark:bg-zinc-950"
+                    id="reportDay"
+                    onChange={(e) => setReportDay(e.target.value)}
+                    value={reportDay}
+                  >
+                    {DAYS.map((day) => (
+                      <option key={day} value={day}>
+                        {day}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <span className="font-medium text-sm">Interval</span>
+                  <div className="flex h-12 w-full items-center rounded-xl border-2 border-zinc-200 bg-zinc-50 px-4 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
+                    Every 2 weeks (bi-weekly)
+                  </div>
+                </div>
+              </div>
+            )}
 
             {frequency === "custom" && option.id === "custom" && (
               <div className="fade-in slide-in-from-top-2 grid animate-in grid-cols-1 gap-4 p-6 pt-0 md:grid-cols-2">
@@ -208,8 +246,16 @@ export default function ReportingSettings({
           disabled={isPending || !hasChanged}
           onClick={() => {
             const freq = frequency;
-            const day = frequency === "custom" ? reportDay : null;
-            const interval = frequency === "custom" ? reportInterval : 1;
+            const day =
+              frequency === "custom" || frequency === "bi-weekly"
+                ? reportDay
+                : null;
+            const interval =
+              frequency === "bi-weekly"
+                ? 2
+                : frequency === "custom"
+                  ? reportInterval
+                  : 1;
 
             startTransition(async () => {
               if (initialData) {

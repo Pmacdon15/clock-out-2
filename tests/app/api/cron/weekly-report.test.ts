@@ -211,6 +211,34 @@ describe("GET /api/cron/weekly-report", () => {
     });
   });
 
+  describe("bi-weekly frequency", () => {
+    it("bi-weekly sends the last 14 days on the chosen day in even weeks", async () => {
+      await runOn("2026-01-06T06:00:00Z", {
+        report_frequency: "bi-weekly",
+        report_day: "Tuesday",
+      });
+      expect(sentWith()[0]).toBe("2025-12-23T00:00:00.000Z");
+      expect(sentWith()[1]).toBe("2026-01-06T00:00:00.000Z");
+      expect(sentWith()[3]).toBe("custom");
+    });
+
+    it("bi-weekly sends nothing in odd weeks", async () => {
+      await runOn("2026-01-13T06:00:00Z", {
+        report_frequency: "bi-weekly",
+        report_day: "Tuesday",
+      });
+      expect(mocks.sendWeeklyReports).not.toHaveBeenCalled();
+    });
+
+    it("bi-weekly sends nothing on other weekdays", async () => {
+      await runOn("2026-01-06T06:00:00Z", {
+        report_frequency: "bi-weekly",
+        report_day: "Friday",
+      });
+      expect(mocks.sendWeeklyReports).not.toHaveBeenCalled();
+    });
+  });
+
   it("sends nothing when reports are turned off", async () => {
     await runOn("2026-03-01T06:00:00Z", { report_frequency: "off" });
     expect(mocks.sendWeeklyReports).not.toHaveBeenCalled();

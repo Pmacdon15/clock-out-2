@@ -173,4 +173,65 @@ describe("ReportingSettings", () => {
     fireEvent.click(save());
     await waitFor(() => expect(save()).toBeDisabled());
   });
+
+  it("allows selecting bi-weekly and choosing a day", async () => {
+    mocks.updateOrgSettingAction.mockResolvedValue({ success: true });
+    const onUpdateOptimistic = renderSettings(saved);
+
+    fireEvent.click(option(/Bi-weekly/));
+    expect(screen.getByLabelText("Reporting Day")).toHaveValue("Wednesday");
+    expect(screen.getByText("Every 2 weeks (bi-weekly)")).toBeInTheDocument();
+    expect(save()).toBeEnabled();
+
+    fireEvent.change(screen.getByLabelText("Reporting Day"), {
+      target: { value: "Friday" },
+    });
+    fireEvent.click(save());
+
+    await waitFor(() =>
+      expect(mocks.toast.success).toHaveBeenCalledWith("Settings updated"),
+    );
+    expect(mocks.updateOrgSettingAction).toHaveBeenCalledWith(
+      "bi-weekly",
+      "Friday",
+      2,
+    );
+    expect(onUpdateOptimistic).toHaveBeenCalledWith({
+      ...saved,
+      report_frequency: "bi-weekly",
+      report_day: "Friday",
+      report_interval: 2,
+    });
+  });
+
+  it("marks stored bi-weekly settings as Current and disables saving until changed", () => {
+    const biweeklySaved: ReportingSettingsData = {
+      org_id: "org_1",
+      report_frequency: "bi-weekly",
+      report_day: "Friday",
+      report_interval: 2,
+    };
+    renderSettings(biweeklySaved);
+    expect(option(/Bi-weekly/)).toHaveTextContent("Current");
+    expect(screen.getByLabelText("Reporting Day")).toHaveValue("Friday");
+    expect(screen.getByText("Every 2 weeks (bi-weekly)")).toBeInTheDocument();
+    expect(save()).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("Reporting Day"), {
+      target: { value: "Tuesday" },
+    });
+    expect(save()).toBeEnabled();
+  });
+
+  it("normalizes stored 'biweekly' frequency to 'bi-weekly'", () => {
+    const biweeklySaved: ReportingSettingsData = {
+      org_id: "org_1",
+      report_frequency: "biweekly",
+      report_day: "Friday",
+      report_interval: 2,
+    };
+    renderSettings(biweeklySaved);
+    expect(option(/Bi-weekly/)).toHaveTextContent("Current");
+    expect(screen.getByLabelText("Reporting Day")).toHaveValue("Friday");
+  });
 });

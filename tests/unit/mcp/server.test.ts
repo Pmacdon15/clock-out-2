@@ -933,6 +933,50 @@ describe("manage_reporting_settings", () => {
       2,
     );
   });
+
+  it("allows setting bi-weekly reporting schedule with a chosen day", async () => {
+    const res = await manageReportingSettingsTool(caller, {
+      action: "update",
+      report_frequency: "bi-weekly",
+      report_day: "Friday",
+    });
+    expect(res.data.status).toBe("updated");
+    expect(mockDbUpdateReportingSettings).toHaveBeenCalledWith(
+      "org_1",
+      "bi-weekly",
+      "Friday",
+      2,
+    );
+  });
+
+  it("normalizes 'biweekly' and infers action update when schedule fields are given", async () => {
+    const res = await manageReportingSettingsTool(caller, {
+      report_frequency: "biweekly",
+      report_day: "Tuesday",
+    });
+    expect(res.data.status).toBe("updated");
+    expect(mockDbUpdateReportingSettings).toHaveBeenCalledWith(
+      "org_1",
+      "bi-weekly",
+      "Tuesday",
+      2,
+    );
+  });
+
+  it("defaults day to Friday when switching to bi-weekly without a stored day", async () => {
+    mockDbGetReportingSettings.mockResolvedValue(null);
+    const res = await manageReportingSettingsTool(caller, {
+      action: "update",
+      report_frequency: "bi-weekly",
+    });
+    expect(res.data.status).toBe("updated");
+    expect(mockDbUpdateReportingSettings).toHaveBeenCalledWith(
+      "org_1",
+      "bi-weekly",
+      "Friday",
+      2,
+    );
+  });
 });
 
 describe("manage_break_settings", () => {

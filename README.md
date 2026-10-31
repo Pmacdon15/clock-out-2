@@ -12,7 +12,7 @@ Live app: https://clockout.patmac.ca
 - **Geolocation & geofenced clock-in** — each organization can set location capture to off, optional, or required, define named job **sites** (latitude/longitude with a radius, 150 m by default), and optionally restrict clock-in to punches inside a site. Every punch stores its coordinates, accuracy, and the matched site's name, and the allow/deny decision is made server-side.
 - **Weekly timecards** — per-member totals, days worked, and day-by-day breakdowns, with charts.
 - **Timesheet export** — server-generated PDF and Excel (.xlsx) timesheets for any period, grouped by week or month.
-- **Emailed hours reports** — organizations on a plan with the Reporting feature can schedule automatic report emails (weekly, twice-monthly/pay-period, or a custom weekday every 1–2 weeks) and run ad-hoc reports for any date range.
+- **Emailed hours reports** — organizations on a plan with the Reporting feature can schedule automatic report emails (weekly, bi-weekly, twice-monthly/pay-period, or a custom weekday every 1–2 weeks) and run ad-hoc reports for any date range.
 - **MCP server** — 18 tools over Streamable HTTP with Clerk OAuth sign-in (see below).
 
 ## Tech stack
@@ -111,7 +111,7 @@ Read-only tools are marked *(read)*. Most tools accept `org_id` (an organization
 | `export_timesheet` *(read)* | Generates PDF **and** Excel timesheets for a period (group by week/month) and returns embedded files plus signed-in download links. |
 | `update_time_entry` | *(Admin)* Changes `clock_in`/`clock_out`/`hours_worked`/`skip_lunch` on an existing entry, by `entry_id` or member + date. Overlap-checked. |
 | `delete_time_entry` | *(Admin)* Permanently deletes a time entry by `entry_id`. |
-| `manage_reporting_settings` | Views or updates the emailed-report schedule (`off`, `weekly`, `twice-monthly`, `custom` weekday every 1–2 weeks) or sends a test report. Updating requires `org:admin` and a plan with the Reporting feature. |
+| `manage_reporting_settings` | Views or updates the emailed-report schedule (`off`, `weekly`, `bi-weekly`, `twice-monthly`, `custom` weekday every 1–2 weeks) or sends a test report. Updating requires `org:admin` and a plan with the Reporting feature. |
 | `manage_break_settings` | Views, updates, or toggles the lunch/break deduction: `dock_lunch` on/off, `lunch_duration_minutes`, `lunch_min_shift_hours`. Anyone can view; updating is `org:admin`. Available on every plan. |
 | `run_hours_report` | *(Admin, Reporting feature)* Net hours (after break deductions) for one member or everyone between two dates, with daily breakdowns. `deliver`: return in chat (default), `email_admins`, or `both`. |
 | `invite_member` | *(Admin)* Sends organization invitations by email (`action: "send"`, role `org:member` or `org:admin`), lists pending invitations (`"list"`), or revokes one (`"revoke"`). |
