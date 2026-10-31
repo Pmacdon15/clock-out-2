@@ -508,6 +508,11 @@ describe("LocationSettings address search", () => {
           longitude: -75.6972,
           addressLine1: "111 Albert St",
         },
+        {
+          formatted: "200 Queen St, Ottawa, ON",
+          latitude: 45.42,
+          longitude: -75.7,
+        },
       ],
     });
     mocks.createSiteAction.mockResolvedValue({ success: true });
@@ -539,6 +544,34 @@ describe("LocationSettings address search", () => {
     );
   });
 
+  it("preserves an existing custom site name when selecting an address suggestion", async () => {
+    mocks.searchAddressAction.mockResolvedValue({
+      success: true,
+      data: [
+        {
+          formatted: "200 Queen St, Ottawa, ON",
+          latitude: 45.42,
+          longitude: -75.7,
+        },
+      ],
+    });
+    renderPanel();
+    fireEvent.change(screen.getByLabelText("Site name"), {
+      target: { value: "Custom Site Name" },
+    });
+    fireEvent.change(screen.getByLabelText("Find address"), {
+      target: { value: "200 Queen" },
+    });
+    await waitFor(() =>
+      expect(
+        screen.getAllByText("200 Queen St, Ottawa, ON")[0],
+      ).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getAllByText("200 Queen St, Ottawa, ON")[0]);
+    expect(screen.getByLabelText("Site name")).toHaveValue("Custom Site Name");
+    expect(screen.getByLabelText("Latitude")).toHaveValue(45.42);
+  });
+
   it("displays site address in the sites list", () => {
     const siteWithAddress = {
       ...depot,
@@ -546,5 +579,79 @@ describe("LocationSettings address search", () => {
     };
     renderPanel({ sites: [siteWithAddress] });
     expect(screen.getByText("100 Main St, Ottawa, ON")).toBeInTheDocument();
+  });
+
+  it("clears suggestions when address query is shorter than 3 characters", async () => {
+    renderPanel();
+    const searchInput = screen.getByLabelText("Find address");
+    fireEvent.change(searchInput, { target: { value: "ab" } });
+    expect(mocks.searchAddressAction).not.toHaveBeenCalled();
+  });
+
+  it("clears suggestions when address search action fails", async () => {
+    mocks.searchAddressAction.mockResolvedValue({
+      success: false,
+      error: "Failed",
+    });
+    renderPanel();
+    const searchInput = screen.getByLabelText("Find address");
+    fireEvent.change(searchInput, { target: { value: "111 Albert" } });
+    await waitFor(() => expect(mocks.searchAddressAction).toHaveBeenCalled());
+  });
+
+  it("edits an existing site with address and saves it", async () => {
+    mocks.updateSiteAction.mockResolvedValue({ success: true });
+    const siteWithAddress = {
+      ...depot,
+      id: 5,
+      name: "Site B",
+      address: "200 Bank St, Ottawa, ON",
+    };
+    renderPanel({ sites: [siteWithAddress] });
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.getByLabelText("Site name")).toHaveValue("Site B");
+    expect(screen.getByLabelText("Find address")).toHaveValue(
+      "200 Bank St, Ottawa, ON",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Save Site/ }));
+
+    await waitFor(() =>
+      expect(mocks.updateSiteAction).toHaveBeenCalledWith(
+        5,
+        "Site B",
+        45.4215,
+        -75.6972,
+        150,
+        "200 Bank St, Ottawa, ON",
+      ),
+    );
+  });
+
+  it("uses formatted address when addressLine1 is missing and site name is empty", async () => {
+    mocks.searchAddressAction.mockResolvedValue({
+      success: true,
+      data: [
+        {
+          formatted: "200 Queen St, Ottawa, ON",
+          latitude: 45.42,
+          longitude: -75.7,
+        },
+      ],
+    });
+    renderPanel();
+    fireEvent.change(screen.getByLabelText("Find address"), {
+      target: { value: "200 Queen" },
+    });
+    await waitFor(() =>
+      expect(
+        screen.getAllByText("200 Queen St, Ottawa, ON")[0],
+      ).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getAllByText("200 Queen St, Ottawa, ON")[0]);
+    expect(screen.getByLabelText("Site name")).toHaveValue(
+      "200 Queen St, Ottawa, ON",
+    );
   });
 });

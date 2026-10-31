@@ -147,12 +147,21 @@ export default function LocationSettings({
       // mutation has one result shape.
       const res =
         id === null
-          ? await (address
-              ? createSiteAction(name, latitude, longitude, radius, address)
-              : createSiteAction(name, latitude, longitude, radius))
-          : await (address
-              ? updateSiteAction(id, name, latitude, longitude, radius, address)
-              : updateSiteAction(id, name, latitude, longitude, radius));
+          ? await createSiteAction(
+              name,
+              latitude,
+              longitude,
+              radius,
+              ...(address ? [address] : []),
+            )
+          : await updateSiteAction(
+              id,
+              name,
+              latitude,
+              longitude,
+              radius,
+              ...(address ? [address] : []),
+            );
       return {
         success: res.success,
         error: "error" in res ? res.error : undefined,

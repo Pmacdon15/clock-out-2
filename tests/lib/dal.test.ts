@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => ({
   dbUpdateTimeEntry: vi.fn(),
   getProcessedMembers: vi.fn(),
   isOverMemberShipLimit: vi.fn(),
+  reverseGeocode: vi.fn(),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({
@@ -74,6 +75,10 @@ vi.mock("@/lib/db", () => ({
 vi.mock("@/lib/utils-clerk", () => ({
   getProcessedMembers: mocks.getProcessedMembers,
   isOverMemberShipLimit: mocks.isOverMemberShipLimit,
+}));
+
+vi.mock("@/lib/geoapify", () => ({
+  reverseGeocode: mocks.reverseGeocode,
 }));
 
 import {
@@ -136,6 +141,7 @@ const withFeatures = (session: object, ...slugs: string[]) => ({
 
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
+  mocks.reverseGeocode.mockResolvedValue(null);
 });
 
 describe("getOrgMembers", () => {
@@ -1023,6 +1029,68 @@ describe("clockIn location enforcement", () => {
       accuracy: 8,
       siteName: "Depot",
       address: null,
+    });
+  });
+
+  it("falls back to the matched site's configured address when reverse geocode is null", async () => {
+    readyToClockIn("geofencing");
+    mocks.dbGetLocationSettings.mockResolvedValue({
+      org_id: "org_1",
+      capture_mode: "optional",
+      restrict_clock_in: false,
+    });
+    mocks.reverseGeocode.mockResolvedValueOnce(null);
+    mocks.dbGetSitesForEnforcement.mockResolvedValue([
+      { ...depot, address: "111 Albert St, Ottawa, ON" },
+    ]);
+
+    expect((await clockIn(coordinates)).isOk()).toBe(true);
+    expect(mocks.dbClockIn).toHaveBeenCalledWith("user_1", "org_1", {
+      latitude: 45.4215,
+      longitude: -75.6972,
+      accuracy: 8,
+      siteName: "Depot",
+      address: "111 Albert St, Ottawa, ON",
+    });
+  });
+
+  it("handles reverseGeocode throwing gracefully", async () => {
+    readyToClockIn("geofencing");
+    mocks.dbGetLocationSettings.mockResolvedValue({
+      org_id: "org_1",
+      capture_mode: "optional",
+      restrict_clock_in: false,
+    });
+    mocks.reverseGeocode.mockRejectedValueOnce(new Error("Network failed"));
+    mocks.dbGetSitesForEnforcement.mockResolvedValue([depot]);
+
+    expect((await clockIn(coordinates)).isOk()).toBe(true);
+    expect(mocks.dbClockIn).toHaveBeenCalledWith("user_1", "org_1", {
+      latitude: 45.4215,
+      longitude: -75.6972,
+      accuracy: 8,
+      siteName: "Depot",
+      address: null,
+    });
+  });
+
+  it("uses the reverse-geocoded address when available", async () => {
+    readyToClockIn("geofencing");
+    mocks.dbGetLocationSettings.mockResolvedValue({
+      org_id: "org_1",
+      capture_mode: "optional",
+      restrict_clock_in: false,
+    });
+    mocks.reverseGeocode.mockResolvedValueOnce("742 Evergreen Terrace");
+    mocks.dbGetSitesForEnforcement.mockResolvedValue([depot]);
+
+    expect((await clockIn(coordinates)).isOk()).toBe(true);
+    expect(mocks.dbClockIn).toHaveBeenCalledWith("user_1", "org_1", {
+      latitude: 45.4215,
+      longitude: -75.6972,
+      accuracy: 8,
+      siteName: "Depot",
+      address: "742 Evergreen Terrace",
     });
   });
 

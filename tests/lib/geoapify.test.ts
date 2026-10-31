@@ -170,5 +170,15 @@ describe("geoapify utilities", () => {
       const res = await searchAddress("111 Albert");
       expect(res).toEqual([]);
     });
+
+    it("returns empty array when data.features is not an array", async () => {
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ features: null }),
+      } as unknown as Response);
+
+      const res = await searchAddress("111 Albert");
+      expect(res).toEqual([]);
+    });
   });
 });
