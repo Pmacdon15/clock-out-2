@@ -29,10 +29,18 @@ const mockDbGetOrgTimeEntries = vi.fn(async () => []);
 const mockDbGetTimeEntries = vi.fn(async () => []);
 const mockDbClockInAt = vi.fn();
 const mockDbClockOutAt = vi.fn();
+const mockDbStartBreak = vi.fn();
+const mockDbEndOpenBreak = vi.fn();
+const mockDbInsertBreak = vi.fn();
+const mockDbUpdateBreak = vi.fn();
+const mockDbDeleteBreak = vi.fn();
+const mockDbGetBreakWithEntry = vi.fn();
+const mockDbGetEntryBreaks = vi.fn(async () => []);
 const mockInvalidateTimeEntryCache = vi.fn();
 const mockInvalidateReportingSettingsCache = vi.fn();
 const mockDbGetBreakSettings = vi.fn(async () => undefined);
 const mockDbGetReportingSettings = vi.fn(async () => undefined);
+const mockDbGetSites = vi.fn(async () => []);
 const mockDbUpdateReportingSettings = vi.fn();
 const mockDbUpdateBreakSettings = vi.fn();
 const mockInvalidateBreakSettingsCache = vi.fn();
@@ -42,18 +50,26 @@ const mockSendWeeklyReports = vi.fn(async () => true);
 vi.mock("@/mcp/db", () => ({
   dbClockInAt: (...args: unknown[]) => mockDbClockInAt(...args),
   dbClockOutAt: (...args: unknown[]) => mockDbClockOutAt(...args),
+  dbDeleteBreak: (...args: unknown[]) => mockDbDeleteBreak(...args),
   dbDeleteTimeEntry: vi.fn(),
+  dbEndOpenBreak: (...args: unknown[]) => mockDbEndOpenBreak(...args),
   dbFindOverlappingTimeEntries: (...args: unknown[]) =>
     mockDbFindOverlapping(...args),
   dbGetActiveEntry: (...args: unknown[]) => mockDbGetActiveEntry(...args),
   dbGetBreakSettings: (...args: unknown[]) => mockDbGetBreakSettings(...args),
+  dbGetBreakWithEntry: (...args: unknown[]) => mockDbGetBreakWithEntry(...args),
+  dbGetEntryBreaks: (...args: unknown[]) => mockDbGetEntryBreaks(...args),
   dbGetOrgActiveEntries: vi.fn(async () => []),
   dbGetOrgTimeEntries: (...args: unknown[]) => mockDbGetOrgTimeEntries(...args),
   dbGetReportingSettings: (...args: unknown[]) =>
     mockDbGetReportingSettings(...args),
+  dbGetSites: (...args: unknown[]) => mockDbGetSites(...args),
   dbGetTimeEntries: (...args: unknown[]) => mockDbGetTimeEntries(...args),
   dbGetTimeEntryById: (...args: unknown[]) => mockDbGetTimeEntryById(...args),
+  dbInsertBreak: (...args: unknown[]) => mockDbInsertBreak(...args),
   dbInsertTimeEntry: (...args: unknown[]) => mockDbInsertTimeEntry(...args),
+  dbStartBreak: (...args: unknown[]) => mockDbStartBreak(...args),
+  dbUpdateBreak: (...args: unknown[]) => mockDbUpdateBreak(...args),
   dbUpdateBreakSettings: (...args: unknown[]) =>
     mockDbUpdateBreakSettings(...args),
   dbUpdateReportingSettings: (...args: unknown[]) =>
@@ -77,6 +93,14 @@ vi.mock("@/lib/reports", () => ({
   sendWeeklyReports: (...args: unknown[]) => mockSendWeeklyReports(...args),
 }));
 
+const mockReverseGeocode = vi.fn(async () => null);
+const mockSearchAddress = vi.fn(async () => []);
+
+vi.mock("@/lib/geoapify", () => ({
+  reverseGeocode: (...args: unknown[]) => mockReverseGeocode(...args),
+  searchAddress: (...args: unknown[]) => mockSearchAddress(...args),
+}));
+
 import { MCP_INSTRUCTIONS } from "@/mcp/instructions";
 import {
   callerFrom,
@@ -86,11 +110,16 @@ import {
 } from "@/mcp/server";
 import {
   addTimeEntryTool,
+  clockInTool,
+  clockOutTool,
   exportTimesheetTool,
   inviteMemberTool,
+  listOrganizations,
   manageBreakSettingsTool,
+  manageBreaksTool,
   manageReportingSettingsTool,
   runHoursReportTool,
+  toggleBreakTool,
   updateTimeEntryTool,
 } from "@/mcp/tools";
 
@@ -132,8 +161,10 @@ describe("Clock Out MCP server", () => {
       "list_organizations",
       "list_time_entries",
       "manage_break_settings",
+      "manage_breaks",
       "manage_reporting_settings",
       "run_hours_report",
+      "toggle_break",
       "update_time_entry",
       "who_is_working",
     ]);
@@ -997,5 +1028,779 @@ describe("manage_break_settings", () => {
       60,
       6,
     );
+  });
+
+  it("toggles dock_lunch on and off with action=toggle", async () => {
+    mockDbGetBreakSettings.mockResolvedValueOnce({
+      org_id: "org_1",
+      dock_lunch: false,
+      lunch_duration_minutes: 30,
+      lunch_min_shift_hours: 5,
+    } as never);
+    const onRes = await manageBreakSettingsTool(caller, { action: "toggle" });
+    expect(onRes.data.status).toBe("updated");
+    expect(mockDbUpdateBreakSettings).toHaveBeenCalledWith(
+      "org_1",
+      true,
+      30,
+      5,
+    );
+
+    mockDbGetBreakSettings.mockResolvedValueOnce({
+      org_id: "org_1",
+      dock_lunch: true,
+      lunch_duration_minutes: 30,
+      lunch_min_shift_hours: 5,
+    } as never);
+    const offRes = await manageBreakSettingsTool(caller, { action: "toggle" });
+    expect(offRes.data.status).toBe("updated");
+    expect(mockDbUpdateBreakSettings).toHaveBeenLastCalledWith(
+      "org_1",
+      false,
+      30,
+      5,
+    );
+  });
+});
+
+describe("toggle_break and manage_breaks", () => {
+  const adminMembership = {
+    role: "org:admin",
+    organization: { id: "org_1", name: "PatMac Org", slug: "patmac-org" },
+  };
+  const adminCaller = { userId: "user_admin", client: "Claude" };
+  const memberCaller = { userId: "user_adam", client: "Claude" };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetUserOrgMemberships.mockResolvedValue({ data: [adminMembership] });
+    mockGetOrgMemberships.mockResolvedValue({
+      data: [
+        {
+          role: "org:admin",
+          publicUserData: {
+            userId: "user_admin",
+            firstName: "Patrick",
+            lastName: "MacDonald",
+            identifier: "patrick@patmac.ca",
+          },
+        },
+        {
+          role: "org:member",
+          publicUserData: {
+            userId: "user_adam",
+            firstName: "Adam",
+            lastName: "Jones",
+            identifier: "adam@patmac.ca",
+          },
+        },
+      ],
+    });
+  });
+
+  it("toggles a live break on when clocked in and no break is open, defaulting to unpaid_meal", async () => {
+    mockDbGetActiveEntry.mockResolvedValue({
+      id: 42,
+      user_id: "user_admin",
+      org_id: "org_1",
+      clock_in: new Date("2026-10-06T14:00:00.000Z"),
+      clock_out: null,
+      breaks: [],
+    });
+    mockDbStartBreak.mockResolvedValue({
+      id: 101,
+      time_entry_id: 42,
+      org_id: "org_1",
+      break_start: new Date("2026-10-06T18:00:00.000Z"),
+      break_end: null,
+      break_type: "unpaid_meal",
+    });
+
+    const res = await toggleBreakTool(adminCaller, {});
+    expect(res.isError).toBeUndefined();
+    expect(res.data.status).toBe("break_started");
+    expect(mockDbStartBreak).toHaveBeenCalledWith(
+      "user_admin",
+      "org_1",
+      "unpaid_meal",
+    );
+    expect(mockInvalidateTimeEntryCache).toHaveBeenCalledWith(
+      "user_admin",
+      "org_1",
+    );
+  });
+
+  it("starts a live paid_rest or unpaid_rest break when specified", async () => {
+    mockDbGetActiveEntry.mockResolvedValue({
+      id: 42,
+      user_id: "user_admin",
+      org_id: "org_1",
+      clock_in: new Date("2026-10-06T14:00:00.000Z"),
+      clock_out: null,
+      breaks: [],
+    });
+    mockDbStartBreak.mockImplementation(
+      async (_userId: string, orgId: string, breakType: string) => ({
+        id: 102,
+        time_entry_id: 42,
+        org_id: orgId,
+        break_start: new Date("2026-10-06T16:00:00.000Z"),
+        break_end: null,
+        break_type: breakType,
+      }),
+    );
+
+    const paidRes = await toggleBreakTool(adminCaller, {
+      action: "start",
+      break_type: "paid_rest",
+    });
+    expect(paidRes.data.status).toBe("break_started");
+    expect(mockDbStartBreak).toHaveBeenCalledWith(
+      "user_admin",
+      "org_1",
+      "paid_rest",
+    );
+
+    const unpaidRestRes = await toggleBreakTool(adminCaller, {
+      action: "start",
+      break_type: "unpaid_rest",
+    });
+    expect(unpaidRestRes.data.status).toBe("break_started");
+    expect(mockDbStartBreak).toHaveBeenCalledWith(
+      "user_admin",
+      "org_1",
+      "unpaid_rest",
+    );
+  });
+
+  it("toggles a running break off when one is already open", async () => {
+    mockDbGetActiveEntry.mockResolvedValue({
+      id: 42,
+      user_id: "user_admin",
+      org_id: "org_1",
+      clock_in: new Date("2026-10-06T14:00:00.000Z"),
+      clock_out: null,
+      breaks: [
+        {
+          id: 101,
+          time_entry_id: 42,
+          org_id: "org_1",
+          break_start: new Date("2026-10-06T18:00:00.000Z"),
+          break_end: null,
+          break_type: "unpaid_meal",
+        },
+      ],
+    });
+    mockDbEndOpenBreak.mockResolvedValue({
+      id: 101,
+      time_entry_id: 42,
+      org_id: "org_1",
+      break_start: new Date("2026-10-06T18:00:00.000Z"),
+      break_end: new Date("2026-10-06T18:30:00.000Z"),
+      break_type: "unpaid_meal",
+    });
+
+    const res = await toggleBreakTool(adminCaller, {});
+    expect(res.isError).toBeUndefined();
+    expect(res.data.status).toBe("break_ended");
+    expect(mockDbEndOpenBreak).toHaveBeenCalledWith("user_admin", "org_1");
+    expect(mockInvalidateTimeEntryCache).toHaveBeenCalledWith(
+      "user_admin",
+      "org_1",
+    );
+  });
+
+  it("returns an error when toggling a break while not clocked in", async () => {
+    mockDbGetActiveEntry.mockResolvedValue(undefined);
+    const res = await toggleBreakTool(adminCaller, {});
+    expect(res.isError).toBe(true);
+    expect(res.data.status).toBe("not_clocked_in");
+  });
+
+  it("allows an admin to toggle a break for another member, and forbids non-admins", async () => {
+    mockDbGetActiveEntry.mockResolvedValue({
+      id: 55,
+      user_id: "user_adam",
+      org_id: "org_1",
+      clock_in: new Date("2026-10-06T14:00:00.000Z"),
+      clock_out: null,
+      breaks: [],
+    });
+    mockDbStartBreak.mockResolvedValue({
+      id: 105,
+      time_entry_id: 55,
+      org_id: "org_1",
+      break_start: new Date("2026-10-06T18:00:00.000Z"),
+      break_end: null,
+      break_type: "paid_rest",
+    });
+
+    const adminRes = await toggleBreakTool(adminCaller, {
+      member: "Adam",
+      break_type: "paid_rest",
+    });
+    expect(adminRes.data.status).toBe("break_started");
+    expect(mockDbStartBreak).toHaveBeenCalledWith(
+      "user_adam",
+      "org_1",
+      "paid_rest",
+    );
+
+    mockGetUserOrgMemberships.mockResolvedValueOnce({
+      data: [{ ...adminMembership, role: "org:member" }],
+    });
+    const memberRes = await toggleBreakTool(memberCaller, {
+      member: "Patrick",
+    });
+    expect(memberRes.isError).toBe(true);
+    expect(memberRes.data.status).toBe("forbidden");
+  });
+
+  it("allows an admin to add breaks of all 3 kinds (unpaid_meal, unpaid_rest, paid_rest) to a shift", async () => {
+    const shift = {
+      id: 77,
+      user_id: "user_adam",
+      org_id: "org_1",
+      clock_in: new Date("2026-10-06T14:00:00.000Z"), // 08:00 America/Edmonton
+      clock_out: new Date("2026-10-06T22:00:00.000Z"), // 16:00 America/Edmonton
+      breaks: [],
+    };
+    mockDbGetTimeEntryById.mockResolvedValue(shift);
+    mockDbGetEntryBreaks.mockResolvedValue([]);
+    let nextBreakId = 200;
+    mockDbInsertBreak.mockImplementation(
+      async (
+        timeEntryId: number,
+        orgId: string,
+        breakStart: Date,
+        breakEnd: Date,
+        breakType: string,
+      ) => ({
+        id: ++nextBreakId,
+        time_entry_id: timeEntryId,
+        org_id: orgId,
+        break_start: breakStart,
+        break_end: breakEnd,
+        break_type: breakType,
+      }),
+    );
+
+    for (const breakType of [
+      "unpaid_meal",
+      "unpaid_rest",
+      "paid_rest",
+    ] as const) {
+      const res = await manageBreaksTool(adminCaller, {
+        action: "add",
+        entry_id: 77,
+        break_type: breakType,
+        break_start: "12:00",
+        break_end: "12:30",
+        timezone: "America/Edmonton",
+      });
+      expect(res.isError).toBeUndefined();
+      expect(res.data.status).toBe("break_added");
+      expect(res.data.break).toMatchObject({
+        entry_id: 77,
+        break_type: breakType,
+        duration_minutes: 30,
+        paid: breakType === "paid_rest",
+      });
+    }
+
+    expect(mockDbInsertBreak).toHaveBeenCalledTimes(3);
+    expect(mockInvalidateTimeEntryCache).toHaveBeenCalledWith(
+      "user_adam",
+      "org_1",
+    );
+  });
+
+  it("allows an admin to add a break using duration_minutes without explicit start/end times", async () => {
+    const shift = {
+      id: 77,
+      user_id: "user_adam",
+      org_id: "org_1",
+      clock_in: new Date("2026-10-06T14:00:00.000Z"), // 8h shift
+      clock_out: new Date("2026-10-06T22:00:00.000Z"),
+      breaks: [],
+    };
+    mockDbGetTimeEntryById.mockResolvedValue(shift);
+    mockDbGetEntryBreaks.mockResolvedValue([]);
+    mockDbInsertBreak.mockImplementation(
+      async (
+        timeEntryId: number,
+        orgId: string,
+        breakStart: Date,
+        breakEnd: Date,
+        breakType: string,
+      ) => ({
+        id: 210,
+        time_entry_id: timeEntryId,
+        org_id: orgId,
+        break_start: breakStart,
+        break_end: breakEnd,
+        break_type: breakType,
+      }),
+    );
+
+    const res = await manageBreaksTool(adminCaller, {
+      action: "add",
+      entry_id: 77,
+      break_type: "paid_rest",
+      duration_minutes: 15,
+    });
+    expect(res.isError).toBeUndefined();
+    expect(res.data.status).toBe("break_added");
+    expect(res.data.break).toMatchObject({
+      break_type: "paid_rest",
+      duration_minutes: 15,
+      paid: true,
+    });
+  });
+
+  it("rejects break additions that fall outside the shift window or overlap existing breaks", async () => {
+    const shift = {
+      id: 77,
+      user_id: "user_adam",
+      org_id: "org_1",
+      clock_in: new Date("2026-10-06T14:00:00.000Z"), // 08:00 America/Edmonton
+      clock_out: new Date("2026-10-06T22:00:00.000Z"), // 16:00 America/Edmonton
+      breaks: [],
+    };
+    mockDbGetTimeEntryById.mockResolvedValue(shift);
+    mockDbGetEntryBreaks.mockResolvedValue([
+      {
+        id: 300,
+        time_entry_id: 77,
+        org_id: "org_1",
+        break_start: new Date("2026-10-06T18:00:00.000Z"), // 12:00
+        break_end: new Date("2026-10-06T18:30:00.000Z"), // 12:30
+        break_type: "unpaid_meal",
+      },
+    ] as never);
+
+    const overlapRes = await manageBreaksTool(adminCaller, {
+      action: "add",
+      entry_id: 77,
+      break_type: "unpaid_rest",
+      break_start: "12:15",
+      break_end: "12:45",
+      timezone: "America/Edmonton",
+    });
+    expect(overlapRes.isError).toBe(true);
+    expect(overlapRes.data.status).toBe("invalid_break");
+    expect(mockDbInsertBreak).not.toHaveBeenCalled();
+  });
+
+  it("allows an admin to edit/update a break's type and times", async () => {
+    const existingBreak = {
+      id: 301,
+      time_entry_id: 77,
+      org_id: "org_1",
+      break_start: new Date("2026-10-06T18:00:00.000Z"), // 12:00 America/Edmonton
+      break_end: new Date("2026-10-06T18:30:00.000Z"), // 12:30 America/Edmonton
+      break_type: "unpaid_meal" as const,
+      user_id: "user_adam",
+      clock_in: new Date("2026-10-06T14:00:00.000Z"),
+      clock_out: new Date("2026-10-06T22:00:00.000Z"),
+    };
+    mockDbGetBreakWithEntry.mockResolvedValue(existingBreak);
+    mockDbGetEntryBreaks.mockResolvedValue([existingBreak] as never);
+    mockDbUpdateBreak.mockImplementation(
+      async (
+        breakId: number,
+        orgId: string,
+        breakStart: Date,
+        breakEnd: Date | null,
+        breakType: string,
+      ) => ({
+        id: breakId,
+        time_entry_id: 77,
+        org_id: orgId,
+        break_start: breakStart,
+        break_end: breakEnd,
+        break_type: breakType,
+      }),
+    );
+
+    const res = await manageBreaksTool(adminCaller, {
+      action: "update",
+      break_id: 301,
+      break_type: "paid_rest",
+      duration_minutes: 20,
+      timezone: "America/Edmonton",
+    });
+
+    expect(res.isError).toBeUndefined();
+    expect(res.data.status).toBe("break_updated");
+    expect(res.data.break).toMatchObject({
+      break_id: 301,
+      break_type: "paid_rest",
+      duration_minutes: 20,
+      paid: true,
+    });
+    expect(mockDbUpdateBreak).toHaveBeenCalledWith(
+      301,
+      "org_1",
+      new Date("2026-10-06T18:00:00.000Z"),
+      new Date("2026-10-06T18:20:00.000Z"),
+      "paid_rest",
+    );
+    expect(mockInvalidateTimeEntryCache).toHaveBeenCalledWith(
+      "user_adam",
+      "org_1",
+    );
+  });
+
+  it("allows an admin to delete a break by break_id or from a single-break shift", async () => {
+    const existingBreak = {
+      id: 302,
+      time_entry_id: 77,
+      org_id: "org_1",
+      break_start: new Date("2026-10-06T18:00:00.000Z"),
+      break_end: new Date("2026-10-06T18:30:00.000Z"),
+      break_type: "unpaid_rest" as const,
+      user_id: "user_adam",
+      clock_in: new Date("2026-10-06T14:00:00.000Z"),
+      clock_out: new Date("2026-10-06T22:00:00.000Z"),
+    };
+    mockDbGetBreakWithEntry.mockResolvedValue(existingBreak);
+    mockDbDeleteBreak.mockResolvedValue({
+      id: 302,
+      time_entry_id: 77,
+    });
+
+    const res = await manageBreaksTool(adminCaller, {
+      action: "delete",
+      break_id: 302,
+    });
+
+    expect(res.isError).toBeUndefined();
+    expect(res.data.status).toBe("break_deleted");
+    expect(mockDbDeleteBreak).toHaveBeenCalledWith(302, "org_1");
+    expect(mockInvalidateTimeEntryCache).toHaveBeenCalledWith(
+      "user_adam",
+      "org_1",
+    );
+  });
+
+  it("forbids non-admins from adding, updating, or deleting breaks", async () => {
+    mockGetUserOrgMemberships.mockResolvedValue({
+      data: [{ ...adminMembership, role: "org:member" }],
+    });
+
+    for (const action of ["add", "update", "delete"] as const) {
+      const res = await manageBreaksTool(memberCaller, {
+        action,
+        entry_id: 77,
+        break_id: 301,
+      });
+      expect(res.isError).toBe(true);
+      expect(res.data.status).toBe("forbidden");
+    }
+    expect(mockDbInsertBreak).not.toHaveBeenCalled();
+    expect(mockDbUpdateBreak).not.toHaveBeenCalled();
+    expect(mockDbDeleteBreak).not.toHaveBeenCalled();
+  });
+
+  it("allows updating skip_lunch on update_time_entry to waive automatic lunch deduction", async () => {
+    const existingEntry = {
+      id: 77,
+      user_id: "user_adam",
+      org_id: "org_1",
+      clock_in: new Date("2026-10-06T14:00:00.000Z"),
+      clock_out: new Date("2026-10-06T22:00:00.000Z"),
+      skip_lunch: false,
+      breaks: [],
+    };
+    mockDbGetTimeEntryById.mockResolvedValue(existingEntry);
+    mockDbFindOverlapping.mockResolvedValue([]);
+    mockDbUpdateTimeEntry.mockResolvedValue({
+      ...existingEntry,
+      skip_lunch: true,
+    });
+
+    const res = await updateTimeEntryTool(adminCaller, {
+      entry_id: 77,
+      skip_lunch: true,
+    });
+
+    expect(res.isError).toBeUndefined();
+    expect(res.data.status).toBe("updated");
+    expect(mockDbUpdateTimeEntry).toHaveBeenCalledWith(
+      77,
+      existingEntry.clock_in,
+      existingEntry.clock_out,
+      "org_1",
+      true,
+      true,
+    );
+    expect(mockInvalidateTimeEntryCache).toHaveBeenCalledWith(
+      "user_adam",
+      "org_1",
+    );
+  });
+});
+
+describe("Clerk pagination in MCP tools", () => {
+  const caller = { userId: "user_admin", client: null };
+
+  /** Serves `items` the way Clerk does: one `limit`-sized slice per call. */
+  const servePages =
+    <T>(items: T[]) =>
+    async ({ limit, offset }: { limit: number; offset: number }) => ({
+      data: items.slice(offset, offset + limit),
+      totalCount: items.length,
+    });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  it("lists every organization the caller belongs to, past the first page", async () => {
+    const memberships = Array.from({ length: 101 }, (_, i) => ({
+      role: "org:member",
+      organization: { id: `org_${i + 1}`, name: `Org ${i + 1}`, slug: null },
+    }));
+    mockGetUserOrgMemberships.mockImplementation(servePages(memberships));
+
+    const result = await listOrganizations(caller);
+
+    expect(mockGetUserOrgMemberships.mock.calls).toEqual([
+      [{ userId: "user_admin", limit: 100, offset: 0 }],
+      [{ userId: "user_admin", limit: 100, offset: 100 }],
+    ]);
+    const data = result.data as { organizations: { org_id: string }[] };
+    expect(data.organizations).toHaveLength(101);
+    expect(data.organizations.at(-1)?.org_id).toBe("org_101");
+  });
+
+  it("sees members and pending invitations past the first page", async () => {
+    mockGetUserOrgMemberships.mockResolvedValue({
+      data: [
+        {
+          role: "org:admin",
+          organization: { id: "org_1", name: "PatMac Org", slug: null },
+        },
+      ],
+    });
+    const members = Array.from({ length: 101 }, (_, i) => ({
+      role: "org:member",
+      publicUserData: {
+        userId: `user_${i + 1}`,
+        firstName: `Member${i + 1}`,
+        lastName: null,
+        identifier: `member${i + 1}@patmac.ca`,
+      },
+    }));
+    mockGetOrgMemberships.mockImplementation(servePages(members));
+    const invitations = Array.from({ length: 101 }, (_, i) => ({
+      id: `orginv_${i + 1}`,
+      emailAddress: `invited${i + 1}@patmac.ca`,
+      role: "org:member",
+      status: "pending",
+      createdAt: 0,
+      updatedAt: 0,
+    }));
+    mockGetOrganizationInvitationList.mockImplementation(
+      servePages(invitations),
+    );
+
+    // An invite for someone already invited on the second page is caught.
+    const result = await inviteMemberTool(caller, {
+      email: "invited101@patmac.ca",
+    });
+
+    expect(mockGetOrgMemberships).toHaveBeenCalledTimes(2);
+    expect(mockGetOrganizationInvitationList).toHaveBeenCalledTimes(2);
+    expect(mockCreateOrganizationInvitation).not.toHaveBeenCalled();
+    expect(result.data).toMatchObject({
+      status: "skipped",
+      skipped: [
+        {
+          email_address: "invited101@patmac.ca",
+          reason: "already_invited",
+          invitation_id: "orginv_101",
+        },
+      ],
+    });
+  });
+
+  describe("clockInTool and clockOutTool location resolution", () => {
+    const caller = { userId: "user_admin", client: "Claude" };
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+      mockDbGetActiveEntry.mockResolvedValue(undefined);
+      mockGetUserOrgMemberships.mockResolvedValue({
+        data: [
+          {
+            role: "org:admin",
+            organization: {
+              id: "org_1",
+              name: "PatMac Org",
+              slug: "patmac-org",
+              membersCount: 2,
+            },
+          },
+        ],
+      });
+      mockGetOrgMemberships.mockResolvedValue({
+        data: [
+          {
+            role: "org:admin",
+            publicUserData: {
+              userId: "user_admin",
+              firstName: "Patrick",
+              lastName: "MacDonald",
+              identifier: "patrick@patmac.ca",
+            },
+          },
+        ],
+      });
+    });
+
+    it("defaults to the organization's primary site on clock-in when sites exist", async () => {
+      mockDbGetSites.mockResolvedValueOnce([
+        {
+          id: 1,
+          org_id: "org_1",
+          name: "Headquarters",
+          latitude: 45.4215,
+          longitude: -75.6972,
+          radius_meters: 100,
+          address: "111 Albert St, Ottawa, ON",
+        },
+      ]);
+      mockDbClockInAt.mockResolvedValueOnce({
+        id: 101,
+        user_id: "user_admin",
+        org_id: "org_1",
+        clock_in: new Date("2026-10-30T14:00:00.000Z"),
+        clock_out: null,
+        clock_in_latitude: 45.4215,
+        clock_in_longitude: -75.6972,
+        clock_in_accuracy_m: 0,
+        clock_in_site_name: "Headquarters",
+        clock_in_address: "111 Albert St, Ottawa, ON",
+        created_at: new Date(),
+        updated_at: new Date(),
+      });
+
+      const res = await clockInTool(caller, { timezone: "America/Edmonton" });
+
+      expect(res.isError).toBeUndefined();
+      expect(res.data.status).toBe("clocked_in");
+      expect(mockDbClockInAt).toHaveBeenCalledWith(
+        "user_admin",
+        "org_1",
+        undefined,
+        expect.objectContaining({
+          siteName: "Headquarters",
+          latitude: 45.4215,
+          longitude: -75.6972,
+          address: "111 Albert St, Ottawa, ON",
+        }),
+      );
+      expect(res.summary).toContain("Headquarters (111 Albert St, Ottawa, ON)");
+    });
+
+    it("allows specifying custom coordinates and reverse geocodes on clock-in", async () => {
+      mockDbGetSites.mockResolvedValueOnce([]);
+      mockReverseGeocode.mockResolvedValueOnce("742 Evergreen Terrace");
+      mockDbClockInAt.mockResolvedValueOnce({
+        id: 102,
+        user_id: "user_admin",
+        org_id: "org_1",
+        clock_in: new Date("2026-10-30T14:00:00.000Z"),
+        clock_out: null,
+        clock_in_latitude: 51.0722,
+        clock_in_longitude: -114.1637,
+        clock_in_accuracy_m: 10,
+        clock_in_site_name: null,
+        clock_in_address: "742 Evergreen Terrace",
+        created_at: new Date(),
+        updated_at: new Date(),
+      });
+
+      const res = await clockInTool(caller, {
+        latitude: 51.0722,
+        longitude: -114.1637,
+        accuracy: 10,
+        timezone: "America/Edmonton",
+      });
+
+      expect(res.isError).toBeUndefined();
+      expect(mockReverseGeocode).toHaveBeenCalledWith({
+        latitude: 51.0722,
+        longitude: -114.1637,
+      });
+      expect(mockDbClockInAt).toHaveBeenCalledWith(
+        "user_admin",
+        "org_1",
+        undefined,
+        expect.objectContaining({
+          latitude: 51.0722,
+          longitude: -114.1637,
+          accuracy: 10,
+          address: "742 Evergreen Terrace",
+        }),
+      );
+      expect(res.summary).toContain("at 742 Evergreen Terrace");
+    });
+
+    it("clocks out and stores location when provided", async () => {
+      mockDbGetActiveEntry.mockResolvedValueOnce({
+        id: 101,
+        user_id: "user_admin",
+        org_id: "org_1",
+        clock_in: new Date("2026-10-30T10:00:00.000Z"),
+      });
+      mockDbGetSites.mockResolvedValueOnce([
+        {
+          id: 2,
+          org_id: "org_1",
+          name: "Remote Office",
+          latitude: 45.4215,
+          longitude: -75.6972,
+          radius_meters: 100,
+          address: "200 Queen St, Ottawa, ON",
+        },
+      ]);
+      mockDbClockOutAt.mockResolvedValueOnce({
+        id: 101,
+        user_id: "user_admin",
+        org_id: "org_1",
+        clock_in: new Date("2026-10-30T10:00:00.000Z"),
+        clock_out: new Date("2026-10-30T18:00:00.000Z"),
+        clock_out_latitude: 45.4215,
+        clock_out_longitude: -75.6972,
+        clock_out_accuracy_m: 0,
+        clock_out_site_name: "Remote Office",
+        clock_out_address: "200 Queen St, Ottawa, ON",
+        created_at: new Date(),
+        updated_at: new Date(),
+      });
+
+      const res = await clockOutTool(caller, {
+        site: "Remote Office",
+        timezone: "America/Edmonton",
+      });
+
+      expect(res.isError).toBeUndefined();
+      expect(mockDbClockOutAt).toHaveBeenCalledWith(
+        "user_admin",
+        "org_1",
+        undefined,
+        expect.objectContaining({
+          siteName: "Remote Office",
+          latitude: 45.4215,
+          longitude: -75.6972,
+          address: "200 Queen St, Ottawa, ON",
+        }),
+      );
+      expect(res.summary).toContain("Remote Office (200 Queen St, Ottawa, ON)");
+    });
   });
 });

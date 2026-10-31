@@ -106,7 +106,10 @@ describe("GET /api/cron/weekly-report", () => {
     const body = await runOn("2026-01-08T06:00:00Z");
 
     expect(body).toMatchObject({ success: true, processedCount: 0 });
-    expect(mocks.getOrganizationList).toHaveBeenCalledWith({ limit: 100 });
+    expect(mocks.getOrganizationList).toHaveBeenCalledWith({
+      limit: 100,
+      offset: 0,
+    });
     expect(mocks.dbGetReportingSettings).not.toHaveBeenCalled();
   });
 
@@ -220,5 +223,80 @@ describe("GET /api/cron/weekly-report", () => {
       { org: "Acme", status: "error", frequency: "weekly" },
     ]);
     expect(console.error).toHaveBeenCalled();
+  });
+
+  describe("organization pagination", () => {
+    const manyOrgs = Array.from({ length: 101 }, (_, i) => ({
+      id: `org_${i + 1}`,
+      name: `Org ${i + 1}`,
+    }));
+
+    it("reports for every org past the first page", async () => {
+      mocks.getOrganizationList.mockImplementation(
+        async ({ limit, offset }: { limit: number; offset: number }) => ({
+          data: manyOrgs.slice(offset, offset + limit),
+          totalCount: manyOrgs.length,
+        }),
+      );
+
+      const body = await runOn("2026-03-08T06:00:00Z");
+
+      expect(mocks.getOrganizationList.mock.calls).toEqual([
+        [{ limit: 100, offset: 0 }],
+        [{ limit: 100, offset: 100 }],
+      ]);
+      expect(body.processedCount).toBe(101);
+      expect(mocks.sendWeeklyReports).toHaveBeenCalledTimes(101);
+      // The org that used to be dropped off the end of the first page.
+      expect(mocks.sendWeeklyReports).toHaveBeenCalledWith(
+        expect.any(Date),
+        expect.any(Date),
+        "org_101",
+        "week",
+      );
+    });
+
+    it("stops when a page comes back empty despite a larger totalCount", async () => {
+      mocks.getOrganizationList.mockImplementation(
+        async ({ offset }: { offset: number }) => ({
+          data: offset === 0 ? manyOrgs.slice(0, 100) : [],
+          totalCount: 10_000,
+        }),
+      );
+
+      const body = await runOn("2026-03-08T06:00:00Z");
+
+      expect(mocks.getOrganizationList).toHaveBeenCalledTimes(2);
+      expect(body.processedCount).toBe(100);
+    });
+
+    it("processes nothing when the instance has no orgs", async () => {
+      mocks.getOrganizationList.mockResolvedValue({ data: [], totalCount: 0 });
+
+      const body = await runOn("2026-03-08T06:00:00Z");
+
+      expect(mocks.getOrganizationList).toHaveBeenCalledTimes(1);
+      expect(body).toMatchObject({ success: true, processedCount: 0 });
+      expect(mocks.sendWeeklyReports).not.toHaveBeenCalled();
+    });
+
+    it("fails the run when listing organizations errors", async () => {
+      mocks.getOrganizationList
+        .mockResolvedValueOnce({
+          data: manyOrgs.slice(0, 100),
+          totalCount: 101,
+        })
+        .mockRejectedValueOnce(new Error("clerk down"));
+
+      vi.setSystemTime(new Date("2026-03-08T06:00:00Z"));
+      const res = await GET(cronRequest("Bearer cron-secret"));
+
+      expect(res.status).toBe(500);
+      await expect(res.json()).resolves.toEqual({
+        error: "Failed to list organizations",
+      });
+      expect(mocks.sendWeeklyReports).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalled();
+    });
   });
 });

@@ -113,8 +113,71 @@ describe("DashboardTabs", () => {
     expect(screen.getByTestId("org-settings")).toBeInTheDocument();
     expect(latest(captured.orgSettings)).toEqual({
       breakSettingsPromise: undefined,
+      hasGeofencing: false,
       hasReporting: true,
+      locationSettingsPromise: undefined,
       orgSettingsPromise: p.orgSettingsPromise,
+      sitesPromise: undefined,
+    });
+  });
+
+  it("passes the geofencing entitlement and its settings to the panels", () => {
+    const locationSettings = {
+      org_id: "org_1",
+      capture_mode: "required",
+      restrict_clock_in: true,
+    };
+    const sites = [{ id: 1, org_id: "org_1", name: "Depot" }];
+    const p = props({
+      defaultTabPromise: resolved("settings"),
+      isAdminPromise: resolved(true),
+      hasReportingPromise: resolved(true),
+      hasGeofencingPromise: resolved(true),
+      locationSettingsPromise: ok(locationSettings),
+      sitesPromise: ok(sites),
+    } as Partial<DashboardTabsProps>);
+    render(<DashboardTabs {...p} />);
+    expect(latest(captured.orgSettings)).toMatchObject({
+      hasGeofencing: true,
+      locationSettingsPromise: p.locationSettingsPromise,
+      sitesPromise: p.sitesPromise,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Time Clock" }));
+    expect(latest(captured.timeClock)).toMatchObject({ locationSettings });
+  });
+
+  it("gives the clock no location settings when the org lacks the feature", () => {
+    render(
+      <DashboardTabs
+        {...props({
+          hasGeofencingPromise: resolved(false),
+          locationSettingsPromise: ok({
+            org_id: "org_1",
+            capture_mode: "required",
+            restrict_clock_in: true,
+          }),
+        } as Partial<DashboardTabsProps>)}
+      />,
+    );
+    expect(latest(captured.timeClock)).toMatchObject({
+      locationSettings: null,
+    });
+  });
+
+  it("gives the clock no location settings when the read failed", () => {
+    render(
+      <DashboardTabs
+        {...props({
+          hasGeofencingPromise: resolved(true),
+          locationSettingsPromise: resolved({
+            ok: false,
+            error: { reason: "boom" },
+          }),
+        } as Partial<DashboardTabsProps>)}
+      />,
+    );
+    expect(latest(captured.timeClock)).toMatchObject({
+      locationSettings: null,
     });
   });
 

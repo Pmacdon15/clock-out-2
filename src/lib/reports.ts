@@ -3,7 +3,13 @@ import { clerkClient } from "@clerk/nextjs/server";
 import { render } from "@react-email/render";
 import { format, subDays } from "date-fns";
 import { WeeklyReportEmail } from "@/components/emails/WeeklyReportEmail";
-import { getEffectiveDurationMs } from "./break-utils";
+import {
+  breakTypeLabel,
+  getBreakDurationMs,
+  getEffectiveDurationMs,
+  isPaidBreakType,
+} from "./break-utils";
+import { fetchAllPages } from "./clerk-pagination";
 import { dbGetBreakSettings, dbGetTimeEntriesForPeriod } from "./db";
 
 const sesClient = new SESClient({
@@ -67,11 +73,11 @@ export async function sendWeeklyReports(
     });
     allOrgs = [org];
   } else {
-    // Fetch all organizations in the instance
-    const orgsResult = await client.organizations.getOrganizationList({
-      limit: 100,
-    });
-    allOrgs = orgsResult.data;
+    // Fetch all organizations in the instance, page by page
+    allOrgs = await fetchAllPages(
+      (params) => client.organizations.getOrganizationList(params),
+      { label: "organizations" },
+    );
   }
 
   console.log(`[Reports] Found ${allOrgs.length} organizations to process.`);
@@ -91,13 +97,17 @@ export async function sendWeeklyReports(
 
     console.log(`[Reports] Processing Organization: ${org.name} (${orgId})`);
 
-    // Get members of this org
-    const membersData =
-      await client.organizations.getOrganizationMembershipList({
-        organizationId: orgId,
-        limit: 100,
-      });
-    const members = membersData.data;
+    // Get every member of this org, not just the first page. A failure part
+    // way through throws out of this org only: the cron records it and reports
+    // already emailed for earlier orgs stay sent.
+    const members = await fetchAllPages(
+      (params) =>
+        client.organizations.getOrganizationMembershipList({
+          organizationId: orgId,
+          ...params,
+        }),
+      { label: `members of ${orgId}` },
+    );
     console.log(
       `[Reports] Found ${members.length} members in organization ${org.name}.`,
     );
@@ -150,7 +160,12 @@ export async function sendWeeklyReports(
         {
           date: string;
           rawMs: number;
-          shifts: { start: string; end: string; duration: string }[];
+          shifts: {
+            start: string;
+            end: string;
+            duration: string;
+            breaks?: string;
+          }[];
         }
       >();
 
@@ -170,11 +185,25 @@ export async function sendWeeklyReports(
           dailyBreakdownMap.set(dateKey, dayData);
         }
 
+        // Breaks are listed per shift: the meal-period record regulators ask
+        // for, and the reason the unpaid ones are missing from the duration.
+        const breakLines = (entry.breaks ?? []).map((brk) => {
+          const minutes = Math.round(getBreakDurationMs(brk) / 60_000);
+          const paid = isPaidBreakType(brk.break_type) ? "paid" : "unpaid";
+          return `${breakTypeLabel(brk.break_type)} ${format(
+            new Date(brk.break_start),
+            "h:mm a",
+          )} - ${
+            brk.break_end ? format(new Date(brk.break_end), "h:mm a") : "..."
+          } (${minutes}m, ${paid})`;
+        });
+
         dayData.rawMs += durationMs;
         dayData.shifts.push({
           start: format(inDate, "h:mm a"),
           end: format(outDate, "h:mm a"),
           duration: formatDuration(durationMs),
+          ...(breakLines.length > 0 ? { breaks: breakLines.join("; ") } : {}),
         });
       }
 

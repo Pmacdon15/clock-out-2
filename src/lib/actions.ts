@@ -6,15 +6,31 @@ import { updateTag } from "next/cache";
 import {
   clockIn as dalClockIn,
   clockOut as dalClockOut,
+  createSiteDal as dalCreateSite,
+  deleteBreakDal as dalDeleteBreak,
+  deleteSiteDal as dalDeleteSite,
   deleteTimeEntry as dalDeleteTimeEntry,
+  endBreak as dalEndBreak,
+  startBreak as dalStartBreak,
+  updateBreakDal as dalUpdateBreak,
+  updateSiteDal as dalUpdateSite,
   updateTimeEntry as dalUpdateTimeEntry,
   updateBreakSettingsDal,
+  updateLocationSettingsDal,
   updateReportingSettingsDal,
 } from "./dal";
+import type { Coordinates } from "./geo";
+import { reverseGeocode, searchAddress } from "./geoapify";
 import { sendWeeklyReports } from "./reports";
+import type { BreakType } from "./types";
 
-export async function clockInAction() {
-  const result = await dalClockIn();
+/**
+ * `coordinates` is whatever the browser's Geolocation API gave the client, or
+ * undefined when it gave nothing. It is only ever evidence: the DAL reads the
+ * org's settings and sites and makes the geofence decision server-side.
+ */
+export async function clockInAction(coordinates?: Coordinates | null) {
+  const result = await dalClockIn(coordinates);
 
   return result.match(
     (entry) => {
@@ -27,8 +43,8 @@ export async function clockInAction() {
   );
 }
 
-export async function clockOutAction() {
-  const result = await dalClockOut();
+export async function clockOutAction(coordinates?: Coordinates | null) {
+  const result = await dalClockOut(coordinates);
 
   return result.match(
     (entry) => {
@@ -139,6 +155,195 @@ export async function updateBreakSettingAction(
     (entry) => {
       updateTag(`break-settings-${entry.org_id}`);
       return { success: true, data: entry };
+    },
+    (err) => {
+      return { success: false, error: err.reason };
+    },
+  );
+}
+
+/**
+ * Break records change the hours a shift is worth, so every break mutation
+ * invalidates the member's entries and the org-wide list the Hours view and
+ * the exports read from.
+ */
+function updateBreakTags(entry: { user_id: string; org_id: string }) {
+  if (entry.user_id) {
+    updateTag(`time-entries-${entry.user_id}-${entry.org_id}`);
+  }
+  updateTag(`org-time-entries-${entry.org_id}`);
+}
+
+export async function startBreakAction(breakType: BreakType = "unpaid_meal") {
+  const result = await dalStartBreak(breakType);
+
+  return result.match(
+    (brk) => {
+      updateBreakTags(brk);
+      return { success: true, data: brk };
+    },
+    (err) => {
+      return { success: false, error: err.reason };
+    },
+  );
+}
+
+export async function endBreakAction() {
+  const result = await dalEndBreak();
+
+  return result.match(
+    (brk) => {
+      updateBreakTags(brk);
+      return { success: true, data: brk };
+    },
+    (err) => {
+      return { success: false, error: err.reason };
+    },
+  );
+}
+
+export async function updateBreakAction(
+  id: number,
+  break_start: string,
+  break_end: string | null,
+  break_type: BreakType,
+) {
+  const result = await dalUpdateBreak(
+    id,
+    new Date(break_start),
+    break_end ? new Date(break_end) : null,
+    break_type,
+  );
+
+  return result.match(
+    (brk) => {
+      updateBreakTags(brk);
+      return { success: true, data: brk };
+    },
+    (err) => {
+      return { success: false, error: err.reason };
+    },
+  );
+}
+
+export async function updateLocationSettingsAction(
+  captureMode: string,
+  restrictClockIn: boolean,
+) {
+  const result = await updateLocationSettingsDal(captureMode, restrictClockIn);
+
+  return result.match(
+    (entry) => {
+      updateTag(`location-settings-${entry.org_id}`);
+      return { success: true, data: entry };
+    },
+    (err) => {
+      return { success: false, error: err.reason };
+    },
+  );
+}
+
+export async function createSiteAction(
+  name: string,
+  latitude: number,
+  longitude: number,
+  radiusMeters: number,
+  address?: string | null,
+) {
+  const result =
+    address === undefined
+      ? await dalCreateSite(name, latitude, longitude, radiusMeters)
+      : await dalCreateSite(name, latitude, longitude, radiusMeters, address);
+
+  return result.match(
+    (site) => {
+      updateTag(`sites-${site.org_id}`);
+      return { success: true, data: site };
+    },
+    (err) => {
+      return { success: false, error: err.reason };
+    },
+  );
+}
+
+export async function updateSiteAction(
+  id: number,
+  name: string,
+  latitude: number,
+  longitude: number,
+  radiusMeters: number,
+  address?: string | null,
+) {
+  const result =
+    address === undefined
+      ? await dalUpdateSite(id, name, latitude, longitude, radiusMeters)
+      : await dalUpdateSite(
+          id,
+          name,
+          latitude,
+          longitude,
+          radiusMeters,
+          address,
+        );
+
+  return result.match(
+    (site) => {
+      updateTag(`sites-${site.org_id}`);
+      return { success: true, data: site };
+    },
+    (err) => {
+      return { success: false, error: err.reason };
+    },
+  );
+}
+
+export async function searchAddressAction(query: string) {
+  const authUser = await auth.protect();
+  if (
+    !authUser.userId ||
+    !authUser.orgId ||
+    authUser.orgRole !== "org:admin" ||
+    !authUser.has({ feature: "geofencing" })
+  ) {
+    return { success: false as const, error: "Unauthorized" };
+  }
+  const results = await searchAddress(query);
+  return { success: true as const, data: results };
+}
+
+export async function reverseGeocodeAction(
+  latitude: number,
+  longitude: number,
+) {
+  const authUser = await auth.protect();
+  if (!authUser.userId || !authUser.orgId) {
+    return { success: false as const, error: "Unauthorized" };
+  }
+  const address = await reverseGeocode({ latitude, longitude });
+  return { success: true as const, data: address };
+}
+
+export async function deleteBreakAction(id: number) {
+  const result = await dalDeleteBreak(id);
+
+  return result.match(
+    (brk) => {
+      updateBreakTags(brk);
+      return { success: true };
+    },
+    (err) => {
+      return { success: false, error: err.reason };
+    },
+  );
+}
+
+export async function deleteSiteAction(id: number) {
+  const result = await dalDeleteSite(id);
+
+  return result.match(
+    (site) => {
+      updateTag(`sites-${site.org_id}`);
+      return { success: true, data: site };
     },
     (err) => {
       return { success: false, error: err.reason };

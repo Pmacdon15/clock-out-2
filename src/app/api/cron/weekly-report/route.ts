@@ -1,6 +1,7 @@
 import { clerkClient } from "@clerk/nextjs/server";
 import { format, getWeek, startOfDay, subDays, subMonths } from "date-fns";
 import { NextResponse } from "next/server";
+import { fetchAllPages } from "@/lib/clerk-pagination";
 import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 import { dbGetReportingSettings } from "@/lib/db";
 import { sendWeeklyReports } from "@/lib/reports";
@@ -15,10 +16,24 @@ export async function GET(request: Request) {
   const weekday = format(today, "EEEE"); // e.g., 'Monday'
 
   const client = await clerkClient();
-  const orgsResult = await client.organizations.getOrganizationList({
-    limit: 100,
-  });
-  const allOrgs = orgsResult.data;
+
+  // Every org, not just the first page: reports must keep working as the
+  // instance grows. Nothing has been emailed yet, so failing here is safe.
+  let allOrgs: Awaited<
+    ReturnType<typeof client.organizations.getOrganizationList>
+  >["data"];
+  try {
+    allOrgs = await fetchAllPages(
+      (params) => client.organizations.getOrganizationList(params),
+      { label: "organizations" },
+    );
+  } catch (error) {
+    console.error("[Cron] Failed to list organizations:", error);
+    return NextResponse.json(
+      { error: "Failed to list organizations" },
+      { status: 500 },
+    );
+  }
 
   console.log(
     `[Cron] Processing ${allOrgs.length} organizations on ${format(today, "yyyy-MM-dd")} (${weekday})`,
