@@ -1,18 +1,20 @@
 "use client";
 
 import { Check, Copy, Sparkles } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Card } from "./ui";
 
 const DEFAULT_MCP_URL = "https://clockout.patmac.ca/api/mcp";
 
 export default function McpConnectCard() {
   const [copied, setCopied] = useState(false);
+  const [mcpUrl, setMcpUrl] = useState(DEFAULT_MCP_URL);
 
-  const mcpUrl =
-    typeof window !== "undefined" && window.location.origin
-      ? `${window.location.origin}/api/mcp`
-      : DEFAULT_MCP_URL;
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.location?.origin) {
+      setMcpUrl(`${window.location.origin}/api/mcp`);
+    }
+  }, []);
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(mcpUrl);
@@ -43,6 +45,7 @@ export default function McpConnectCard() {
           <code
             className="rounded-lg border border-zinc-200 bg-zinc-50 px-3.5 py-2.5 font-mono text-xs text-zinc-800 select-all dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200"
             data-testid="mcp-endpoint-url"
+            suppressHydrationWarning
           >
             {mcpUrl}
           </code>

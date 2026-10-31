@@ -23,6 +23,7 @@ export type SiteLike = {
   latitude: number | string;
   longitude: number | string;
   radius_meters: number | string;
+  address?: string | null;
 };
 
 /** The location columns written onto a time entry. */
@@ -36,6 +37,8 @@ export type StoredLocation = {
    * matched no site (or no sites are configured).
    */
   siteName: string | null;
+  /** Human-readable address resolved via reverse geocoding. */
+  address?: string | null;
 };
 
 export type LocationDecision =

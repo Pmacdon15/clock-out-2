@@ -34,10 +34,14 @@ export type TimeEntry = {
   clock_in_accuracy_m?: number | null;
   /** Site matched at clock-in, snapshotted by name at punch time. */
   clock_in_site_name?: string | null;
+  /** Human-readable address resolved at clock-in via reverse geocoding. */
+  clock_in_address?: string | null;
   clock_out_latitude?: number | null;
   clock_out_longitude?: number | null;
   clock_out_accuracy_m?: number | null;
   clock_out_site_name?: string | null;
+  /** Human-readable address resolved at clock-out via reverse geocoding. */
+  clock_out_address?: string | null;
 };
 
 export type SerializableResult<T, E> =
@@ -77,6 +81,7 @@ export type SiteData = {
   latitude: number;
   longitude: number;
   radius_meters: number;
+  address?: string | null;
   created_at?: Date;
   updated_at?: Date;
 };

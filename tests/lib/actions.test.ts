@@ -19,10 +19,16 @@ const mocks = vi.hoisted(() => ({
   updateSiteDal: vi.fn(),
   deleteSiteDal: vi.fn(),
   sendWeeklyReports: vi.fn(),
+  reverseGeocode: vi.fn(),
+  searchAddress: vi.fn(),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: { protect: mocks.protect } }));
 vi.mock("next/cache", () => ({ updateTag: mocks.updateTag }));
+vi.mock("@/lib/geoapify", () => ({
+  reverseGeocode: mocks.reverseGeocode,
+  searchAddress: mocks.searchAddress,
+}));
 vi.mock("@/lib/dal", () => ({
   clockIn: mocks.clockIn,
   clockOut: mocks.clockOut,
@@ -51,6 +57,8 @@ import {
   deleteSiteAction,
   deleteTimeEntryAction,
   endBreakAction,
+  reverseGeocodeAction,
+  searchAddressAction,
   sendCurrentWeekReportAction,
   startBreakAction,
   updateBreakAction,
@@ -481,6 +489,45 @@ describe("site actions", () => {
     expect(mocks.updateTag).toHaveBeenCalledWith("sites-org_1");
   });
 
+  it("creates a site with address and forwards to DAL", async () => {
+    mocks.createSiteDal.mockResolvedValue(
+      ok({ ...site, address: "111 Albert St" }),
+    );
+    await expect(
+      createSiteAction("Depot", 45, -75, 150, "111 Albert St"),
+    ).resolves.toEqual({
+      success: true,
+      data: { ...site, address: "111 Albert St" },
+    });
+    expect(mocks.createSiteDal).toHaveBeenCalledWith(
+      "Depot",
+      45,
+      -75,
+      150,
+      "111 Albert St",
+    );
+  });
+
+  it("updates a site with address and forwards to DAL", async () => {
+    mocks.updateSiteDal.mockResolvedValue(
+      ok({ ...site, address: "111 Albert St" }),
+    );
+    await expect(
+      updateSiteAction(3, "Depot", 45, -75, 150, "111 Albert St"),
+    ).resolves.toEqual({
+      success: true,
+      data: { ...site, address: "111 Albert St" },
+    });
+    expect(mocks.updateSiteDal).toHaveBeenCalledWith(
+      3,
+      "Depot",
+      45,
+      -75,
+      150,
+      "111 Albert St",
+    );
+  });
+
   it.each([
     [
       "createSiteAction",
@@ -497,5 +544,79 @@ describe("site actions", () => {
     dalFn.mockResolvedValue(failure);
     await expect(action()).resolves.toEqual({ success: false, error: "nope" });
     expect(mocks.updateTag).not.toHaveBeenCalled();
+  });
+});
+
+describe("searchAddressAction", () => {
+  it("rejects unauthorized users or non-admins or without feature", async () => {
+    mocks.protect.mockResolvedValue({
+      userId: "u1",
+      orgId: "o1",
+      orgRole: "org:member",
+      has: () => true,
+    });
+    await expect(searchAddressAction("111 Albert")).resolves.toEqual({
+      success: false,
+      error: "Unauthorized",
+    });
+
+    mocks.protect.mockResolvedValue({
+      userId: "u1",
+      orgId: "o1",
+      orgRole: "org:admin",
+      has: () => false,
+    });
+    await expect(searchAddressAction("111 Albert")).resolves.toEqual({
+      success: false,
+      error: "Unauthorized",
+    });
+  });
+
+  it("returns address suggestions for authorized admins", async () => {
+    mocks.protect.mockResolvedValue({
+      userId: "u1",
+      orgId: "o1",
+      orgRole: "org:admin",
+      has: (opts: { feature?: string; permission?: string }) =>
+        opts?.feature === "geofencing",
+    });
+    const suggestions = [
+      {
+        formatted: "111 Albert St, Ottawa, ON",
+        latitude: 45.4215,
+        longitude: -75.6972,
+      },
+    ];
+    mocks.searchAddress.mockResolvedValue(suggestions);
+
+    await expect(searchAddressAction("111 Albert")).resolves.toEqual({
+      success: true,
+      data: suggestions,
+    });
+    expect(mocks.searchAddress).toHaveBeenCalledWith("111 Albert");
+  });
+});
+
+describe("reverseGeocodeAction", () => {
+  it("rejects unauthenticated users", async () => {
+    mocks.protect.mockResolvedValue({ userId: null, orgId: null });
+    await expect(reverseGeocodeAction(45.4215, -75.6972)).resolves.toEqual({
+      success: false,
+      error: "Unauthorized",
+    });
+  });
+
+  it("returns resolved address for authenticated members", async () => {
+    mocks.protect.mockResolvedValue({ userId: "u1", orgId: "o1" });
+    mocks.reverseGeocode.mockResolvedValue("111 Albert St, Ottawa, ON");
+
+    await expect(reverseGeocodeAction(45.4215, -75.6972)).resolves.toEqual({
+      success: true,
+      data: "111 Albert St, Ottawa, ON",
+    });
+    expect(mocks.reverseGeocode).toHaveBeenCalledWith({
+      latitude: 45.4215,
+      longitude: -75.6972,
+    });
   });
 });

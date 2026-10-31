@@ -30,6 +30,7 @@ type ExportableEntry = {
   clock_in_latitude?: number | null;
   clock_in_longitude?: number | null;
   clock_in_site_name?: string | null;
+  clock_in_address?: string | null;
 };
 
 export type ExportFormat = "pdf" | "xlsx";
@@ -238,17 +239,22 @@ export function collectBreakRecords(
 
 /** "Main warehouse (45.42100, -75.69000)", or "" when nothing was captured. */
 export function formatEntryLocation(entry: ExportableEntry): string {
-  const { clock_in_latitude, clock_in_longitude, clock_in_site_name } = entry;
+  const {
+    clock_in_latitude,
+    clock_in_longitude,
+    clock_in_site_name,
+    clock_in_address,
+  } = entry;
   if (
     typeof clock_in_latitude !== "number" ||
     typeof clock_in_longitude !== "number"
   ) {
-    return clock_in_site_name ?? "";
+    return clock_in_address ?? clock_in_site_name ?? "";
   }
-  const coordinates = formatCoordinates(clock_in_latitude, clock_in_longitude);
-  return clock_in_site_name
-    ? `${clock_in_site_name} (${coordinates})`
-    : coordinates;
+  const place =
+    clock_in_address ||
+    formatCoordinates(clock_in_latitude, clock_in_longitude);
+  return clock_in_site_name ? `${clock_in_site_name} (${place})` : place;
 }
 
 export const totalHours = (rows: ExportRow[]) =>

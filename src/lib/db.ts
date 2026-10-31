@@ -118,11 +118,13 @@ export async function dbClockIn(
     sql`
         INSERT INTO time_entries (
             user_id, org_id, clock_in,
-            clock_in_latitude, clock_in_longitude, clock_in_accuracy_m, clock_in_site_name
+            clock_in_latitude, clock_in_longitude, clock_in_accuracy_m, clock_in_site_name,
+            clock_in_address
         )
         SELECT ${userId}, ${orgId}, NOW(),
             ${location?.latitude ?? null}, ${location?.longitude ?? null},
-            ${location?.accuracy ?? null}, ${location?.siteName ?? null}
+            ${location?.accuracy ?? null}, ${location?.siteName ?? null},
+            ${location?.address ?? null}
         WHERE NOT EXISTS (
             SELECT 1 FROM time_entries
             WHERE user_id = ${userId} AND org_id = ${orgId} AND clock_out IS NULL
@@ -145,7 +147,8 @@ export async function dbClockOut(
             clock_out_latitude = ${location?.latitude ?? null},
             clock_out_longitude = ${location?.longitude ?? null},
             clock_out_accuracy_m = ${location?.accuracy ?? null},
-            clock_out_site_name = ${location?.siteName ?? null}
+            clock_out_site_name = ${location?.siteName ?? null},
+            clock_out_address = ${location?.address ?? null}
         WHERE user_id = ${userId} AND org_id = ${orgId} AND clock_out IS NULL
         RETURNING *
     `;
@@ -576,9 +579,14 @@ export function ensureLocationTables(): Promise<void> {
 			latitude DOUBLE PRECISION NOT NULL,
 			longitude DOUBLE PRECISION NOT NULL,
 			radius_meters DOUBLE PRECISION NOT NULL DEFAULT 150,
+			address TEXT,
 			created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
 			updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 		)
+	`;
+    await sql`
+		ALTER TABLE sites
+			ADD COLUMN IF NOT EXISTS address TEXT
 	`;
     await sql`
 		ALTER TABLE time_entries
@@ -586,10 +594,12 @@ export function ensureLocationTables(): Promise<void> {
 			ADD COLUMN IF NOT EXISTS clock_in_longitude DOUBLE PRECISION,
 			ADD COLUMN IF NOT EXISTS clock_in_accuracy_m DOUBLE PRECISION,
 			ADD COLUMN IF NOT EXISTS clock_in_site_name TEXT,
+			ADD COLUMN IF NOT EXISTS clock_in_address TEXT,
 			ADD COLUMN IF NOT EXISTS clock_out_latitude DOUBLE PRECISION,
 			ADD COLUMN IF NOT EXISTS clock_out_longitude DOUBLE PRECISION,
 			ADD COLUMN IF NOT EXISTS clock_out_accuracy_m DOUBLE PRECISION,
-			ADD COLUMN IF NOT EXISTS clock_out_site_name TEXT
+			ADD COLUMN IF NOT EXISTS clock_out_site_name TEXT,
+			ADD COLUMN IF NOT EXISTS clock_out_address TEXT
 	`;
   })().catch((error) => {
     locationTablesReady = null;
@@ -669,6 +679,7 @@ export async function dbCreateSite(
   latitude: number,
   longitude: number,
   radiusMeters: number,
+  address?: string | null,
 ) {
   await ensureLocationTables();
   await sql`
@@ -678,8 +689,8 @@ export async function dbCreateSite(
 	`;
 
   const [created] = await sql`
-		INSERT INTO sites (org_id, name, latitude, longitude, radius_meters)
-		VALUES (${orgId}, ${name}, ${latitude}, ${longitude}, ${radiusMeters})
+		INSERT INTO sites (org_id, name, latitude, longitude, radius_meters, address)
+		VALUES (${orgId}, ${name}, ${latitude}, ${longitude}, ${radiusMeters}, ${address ?? null})
 		RETURNING *
 	`;
   return created as unknown as SiteData;
@@ -692,6 +703,7 @@ export async function dbUpdateSite(
   latitude: number,
   longitude: number,
   radiusMeters: number,
+  address?: string | null,
 ) {
   await ensureLocationTables();
   const [updated] = await sql`
@@ -700,6 +712,7 @@ export async function dbUpdateSite(
 			latitude = ${latitude},
 			longitude = ${longitude},
 			radius_meters = ${radiusMeters},
+			address = ${address ?? null},
 			updated_at = NOW()
 		WHERE id = ${id} AND org_id = ${orgId}
 		RETURNING *

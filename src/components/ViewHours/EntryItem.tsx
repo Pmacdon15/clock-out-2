@@ -208,6 +208,7 @@ export function EntryItem({
           longitude: entry.clock_in_longitude,
           accuracy: entry.clock_in_accuracy_m,
           siteName: entry.clock_in_site_name,
+          address: entry.clock_in_address,
         },
         {
           label: "Out",
@@ -215,6 +216,7 @@ export function EntryItem({
           longitude: entry.clock_out_longitude,
           accuracy: entry.clock_out_accuracy_m,
           siteName: entry.clock_out_site_name,
+          address: entry.clock_out_address,
         },
       ].filter(
         (punch) =>
@@ -330,15 +332,26 @@ export function EntryItem({
               className="flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400"
               key={punch.label}
             >
-              <MapPin className="h-3 w-3" />
+              <MapPin className="h-3 w-3 shrink-0" />
               <span className="font-bold">{punch.label}</span>
-              <span className="tabular-nums">
-                {formatCoordinates(
-                  punch.latitude as number,
-                  punch.longitude as number,
-                )}
-              </span>
-              {typeof punch.accuracy === "number" && (
+              {punch.address ? (
+                <span
+                  title={`${formatCoordinates(
+                    punch.latitude as number,
+                    punch.longitude as number,
+                  )}${typeof punch.accuracy === "number" ? ` ±${Math.round(punch.accuracy)}m` : ""}`}
+                >
+                  {punch.address}
+                </span>
+              ) : (
+                <span className="tabular-nums">
+                  {formatCoordinates(
+                    punch.latitude as number,
+                    punch.longitude as number,
+                  )}
+                </span>
+              )}
+              {typeof punch.accuracy === "number" && !punch.address && (
                 <span>±{Math.round(punch.accuracy)}m</span>
               )}
               <span>
