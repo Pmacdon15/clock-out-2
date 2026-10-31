@@ -1361,5 +1361,41 @@ describe("captured location in the export", () => {
       "Record Type,Employee,Date,Day,Clock In,Clock Out,Hours,Daily Total,Period,Days Worked,Shifts,Avg Hours/Day",
     );
     expect(linesWithoutLoc[1]).not.toContain("Location");
+
+    // Grouped CSV with location covers period subtotal and period summary rows with location column
+    const groupedRows = buildExportRows(
+      [
+        {
+          ...located,
+          date: undefined,
+          clock_in: new Date("2026-03-08T09:00:00Z"),
+          clock_out: new Date("2026-03-08T17:00:00Z"),
+        },
+        {
+          ...located,
+          id: 2,
+          clock_in: new Date("2026-03-15T09:00:00Z"),
+          clock_out: new Date("2026-03-15T17:00:00Z"),
+        },
+      ],
+      () => "Ada",
+    );
+    const groupedCsv = toCsvText(groupedRows, {
+      ...meta,
+      startDate: "2026-03-01",
+      endDate: "2026-03-20",
+      groupBy: "week",
+    });
+    const groupedLines = groupedCsv.split("\r\n").filter(Boolean);
+    const subtotalLine = groupedLines.find((l) =>
+      l.startsWith("Period Subtotal,"),
+    );
+    expect(subtotalLine).toBeDefined();
+    expect(subtotalLine?.endsWith(",")).toBe(true);
+    const periodSummaryLine = groupedLines.find((l) =>
+      l.startsWith("Period Summary,"),
+    );
+    expect(periodSummaryLine).toBeDefined();
+    expect(periodSummaryLine?.endsWith(",")).toBe(true);
   });
 });
