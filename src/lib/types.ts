@@ -63,8 +63,19 @@ export type BreakSettingsData = {
   dock_lunch: boolean;
   lunch_duration_minutes: number;
   lunch_min_shift_hours: number;
+  /**
+   * Longest each kind of break may run, in minutes. Null/absent means no
+   * limit. A break that reaches its limit is ended automatically (the member
+   * is put back on the clock) and recorded as ending exactly at the limit.
+   */
+  max_meal_break_minutes?: number | null;
+  max_unpaid_rest_break_minutes?: number | null;
+  max_paid_break_minutes?: number | null;
   updated_at?: Date;
 };
+
+/** Per-break-type limits in minutes; null = no limit. */
+export type BreakLimits = Record<BreakType, number | null>;
 
 export type LocationSettingsData = {
   org_id: string;

@@ -1,17 +1,32 @@
 "use client";
 
 import { useMutation } from "@tanstack/react-query";
-import { Check, Coffee, Loader2, XCircle } from "lucide-react";
+import { Check, Coffee, Loader2, Timer, XCircle } from "lucide-react";
 import { startTransition, useState } from "react";
 import { toast } from "sonner";
 import { updateBreakSettingAction } from "@/lib/actions";
-import type { BreakSettingsData } from "@/lib/types";
+import {
+  BREAK_LIMIT_FIELDS,
+  BREAK_TYPE_VALUES,
+  BREAK_TYPES,
+  getBreakLimits,
+  isValidBreakLimit,
+  MAX_BREAK_LIMIT_MINUTES,
+} from "@/lib/break-utils";
+import type { BreakLimits, BreakSettingsData, BreakType } from "@/lib/types";
 import { Button, Card } from "./ui";
 
 interface BreakSettingsProps {
   initialData: BreakSettingsData | null;
   onUpdateOptimistic: (next: Partial<BreakSettingsData>) => void;
 }
+
+/** Starting value offered when an admin first switches a limit on. */
+const DEFAULT_LIMIT_MINUTES: Record<BreakType, number> = {
+  unpaid_meal: 30,
+  unpaid_rest: 15,
+  paid_rest: 15,
+};
 
 const options = [
   {
@@ -42,18 +57,52 @@ export default function BreakSettings({
   const [minShiftHours, setMinShiftHours] = useState<number>(
     initialData?.lunch_min_shift_hours ?? 5,
   );
+  // The limits as stored. The meal limit here is the manual one; while lunch
+  // is docked the deduction duration overrides it (see getBreakLimitMinutes).
+  const savedLimits = getBreakLimits({
+    max_meal_break_minutes: initialData?.max_meal_break_minutes,
+    max_unpaid_rest_break_minutes: initialData?.max_unpaid_rest_break_minutes,
+    max_paid_break_minutes: initialData?.max_paid_break_minutes,
+  });
+  const [limitEnabled, setLimitEnabled] = useState<Record<BreakType, boolean>>(
+    () => ({
+      unpaid_meal: savedLimits.unpaid_meal !== null,
+      unpaid_rest: savedLimits.unpaid_rest !== null,
+      paid_rest: savedLimits.paid_rest !== null,
+    }),
+  );
+  const [limitMinutes, setLimitMinutes] = useState<Record<BreakType, number>>(
+    () => ({
+      unpaid_meal: savedLimits.unpaid_meal ?? DEFAULT_LIMIT_MINUTES.unpaid_meal,
+      unpaid_rest: savedLimits.unpaid_rest ?? DEFAULT_LIMIT_MINUTES.unpaid_rest,
+      paid_rest: savedLimits.paid_rest ?? DEFAULT_LIMIT_MINUTES.paid_rest,
+    }),
+  );
+  const limits: BreakLimits = {
+    // While lunch is docked the manual meal limit is hidden, so keep it as
+    // stored rather than saving whatever is sitting in the hidden input.
+    unpaid_meal: dockLunch
+      ? savedLimits.unpaid_meal
+      : limitEnabled.unpaid_meal
+        ? limitMinutes.unpaid_meal
+        : null,
+    unpaid_rest: limitEnabled.unpaid_rest ? limitMinutes.unpaid_rest : null,
+    paid_rest: limitEnabled.paid_rest ? limitMinutes.paid_rest : null,
+  };
 
   const { mutate, isPending } = useMutation({
     mutationFn: ({
       dock,
       duration,
       minHours,
+      breakLimits,
     }: {
       dock: boolean;
       duration: number;
       minHours: number;
+      breakLimits: BreakLimits;
     }) => {
-      return updateBreakSettingAction(dock, duration, minHours);
+      return updateBreakSettingAction(dock, duration, minHours, breakLimits);
     },
     onSuccess: (res) => {
       if (res.success) {
@@ -67,9 +116,13 @@ export default function BreakSettings({
   const hasChanged =
     !initialData ||
     dockLunch !== initialData.dock_lunch ||
+    BREAK_TYPE_VALUES.some((type) => limits[type] !== savedLimits[type]) ||
     (dockLunch &&
       (durationMinutes !== initialData.lunch_duration_minutes ||
         minShiftHours !== initialData.lunch_min_shift_hours));
+  const limitsInvalid = BREAK_TYPE_VALUES.some(
+    (type) => !isValidBreakLimit(limits[type]),
+  );
 
   return (
     <Card className="p-8">
@@ -166,10 +219,97 @@ export default function BreakSettings({
         ))}
       </div>
 
+      <div className="mt-8 space-y-4 rounded-2xl border-2 border-zinc-200 p-6 dark:border-zinc-800">
+        <div>
+          <h4 className="flex items-center gap-2 font-bold text-lg">
+            <Timer className="h-5 w-5" />
+            Break Time Limits
+          </h4>
+          <p className="text-muted-foreground text-sm">
+            When a break reaches its limit, it ends automatically and the member
+            is clocked back in and told to return to work. Breaks ended late are
+            recorded as ending at the limit.
+          </p>
+        </div>
+        {BREAK_TYPE_VALUES.map((type) => {
+          const checkboxId = `limit-${type}`;
+          const inputId = BREAK_LIMIT_FIELDS[type];
+          const invalid = !isValidBreakLimit(limits[type]);
+          if (type === "unpaid_meal" && dockLunch) {
+            return (
+              <p
+                className="text-muted-foreground text-sm"
+                data-testid="meal-limit-from-deduction"
+                key={type}
+              >
+                <span className="font-medium text-foreground">
+                  {BREAK_TYPES[type].label}s
+                </span>{" "}
+                are limited to the {durationMinutes}-minute lunch deduction
+                above.
+              </p>
+            );
+          }
+          return (
+            <div className="space-y-2" key={type}>
+              <label
+                className="flex cursor-pointer items-center gap-3"
+                htmlFor={checkboxId}
+              >
+                <input
+                  checked={limitEnabled[type]}
+                  className="h-4 w-4 accent-zinc-900 dark:accent-zinc-100"
+                  id={checkboxId}
+                  onChange={(e) =>
+                    setLimitEnabled((prev) => ({
+                      ...prev,
+                      [type]: e.target.checked,
+                    }))
+                  }
+                  type="checkbox"
+                />
+                <span className="font-medium">
+                  Limit {BREAK_TYPES[type].label.toLowerCase()}s (
+                  {BREAK_TYPES[type].paid ? "paid" : "unpaid"})
+                </span>
+              </label>
+              {limitEnabled[type] && (
+                <div className="space-y-1 pl-7">
+                  <label className="font-medium text-sm" htmlFor={inputId}>
+                    Max {BREAK_TYPES[type].label} (minutes)
+                  </label>
+                  <input
+                    className="h-12 w-full rounded-xl border-2 border-zinc-200 bg-white px-4 dark:border-zinc-800 dark:bg-zinc-950"
+                    id={inputId}
+                    max={MAX_BREAK_LIMIT_MINUTES}
+                    min={1}
+                    onChange={(e) =>
+                      setLimitMinutes((prev) => ({
+                        ...prev,
+                        [type]: Number(e.target.value),
+                      }))
+                    }
+                    step={1}
+                    type="number"
+                    value={limitMinutes[type]}
+                  />
+                  {invalid && (
+                    <p className="text-red-600 text-sm dark:text-red-400">
+                      Enter a whole number of minutes between 1 and{" "}
+                      {MAX_BREAK_LIMIT_MINUTES}.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
       <div className="mt-8 flex justify-end">
         <Button
           className="h-12 px-8 font-bold"
-          disabled={isPending || !hasChanged}
+          disabled={isPending || !hasChanged || limitsInvalid}
           onClick={() => {
             startTransition(async () => {
               if (initialData) {
@@ -178,6 +318,9 @@ export default function BreakSettings({
                   dock_lunch: dockLunch,
                   lunch_duration_minutes: durationMinutes,
                   lunch_min_shift_hours: minShiftHours,
+                  max_meal_break_minutes: limits.unpaid_meal,
+                  max_unpaid_rest_break_minutes: limits.unpaid_rest,
+                  max_paid_break_minutes: limits.paid_rest,
                 });
               }
 
@@ -185,6 +328,7 @@ export default function BreakSettings({
                 dock: dockLunch,
                 duration: durationMinutes,
                 minHours: minShiftHours,
+                breakLimits: limits,
               });
             });
           }}

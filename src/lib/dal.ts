@@ -1,7 +1,14 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { fromZonedTime } from "date-fns-tz";
 import { errAsync, okAsync, type ResultAsync } from "neverthrow";
-import { isBreakType, validateBreak } from "./break-utils";
+import {
+  BREAK_TYPE_VALUES,
+  getBreakLimits,
+  isBreakOverLimit,
+  isBreakType,
+  isValidBreakLimit,
+  validateBreak,
+} from "./break-utils";
 import { fetchAllPages } from "./clerk-pagination";
 import {
   dbCheckActiveEntry,
@@ -39,6 +46,7 @@ import {
 } from "./geo";
 import { reverseGeocode } from "./geoapify";
 import type {
+  BreakLimits,
   BreakSettingsData,
   BreakType,
   LocationSettingsData,
@@ -339,6 +347,15 @@ export async function clockOut(coordinates?: Coordinates | null) {
     return { ok: true as const, location: null };
   });
 
+  // Close a break still running at clock-out, capped at its type's limit,
+  // so the shift never ends with an open (and ever-growing) break on it.
+  const breakSettings = await loadBreakSettings(orgId);
+  await Promise.resolve()
+    .then(() => dbEndOpenBreak(userId, orgId, getBreakLimits(breakSettings)))
+    .catch((e) => {
+      console.error("Error closing break at clock-out: ", e);
+    });
+
   return await dbClockOut(
     userId,
     orgId,
@@ -509,6 +526,8 @@ export async function updateBreakSettingsDal(
   dockLunch: boolean,
   durationMinutes: number = 30,
   minShiftHours: number = 5,
+  /** Per-break-type limits in minutes (null = none); undefined keeps them. */
+  limits?: BreakLimits,
 ) {
   const authUser = await auth.protect();
   if (!authUser.userId || !authUser.orgId || authUser.orgRole !== "org:admin") {
@@ -520,7 +539,9 @@ export async function updateBreakSettingsDal(
     durationMinutes > 480 ||
     !Number.isFinite(minShiftHours) ||
     minShiftHours < 0 ||
-    minShiftHours > 24
+    minShiftHours > 24 ||
+    (limits !== undefined &&
+      !BREAK_TYPE_VALUES.every((type) => isValidBreakLimit(limits[type])))
   ) {
     return errAsync({ reason: "Invalid break settings" } as const);
   }
@@ -529,6 +550,7 @@ export async function updateBreakSettingsDal(
     dockLunch,
     durationMinutes,
     minShiftHours,
+    limits,
   )
     .then((updated) => {
       return okAsync(updated);
@@ -574,6 +596,24 @@ export type BreakWithOwner = TimeEntryBreak & {
 };
 
 /**
+ * The org's break settings for internal checks. A lookup failure degrades to
+ * "no settings" (no paid-break limit) rather than blocking the punch.
+ */
+async function loadBreakSettings(
+  orgId: string,
+): Promise<BreakSettingsData | null> {
+  return await Promise.resolve()
+    .then(() => dbGetBreakSettings(orgId))
+    .then(
+      (settings) => settings ?? null,
+      (e) => {
+        console.error("Error fetching break settings: ", e);
+        return null;
+      },
+    );
+}
+
+/**
  * Starts a break on the caller's running shift. Breaks only exist inside a
  * shift, so this fails when the member is not clocked in, and refuses a
  * second break while one is still running.
@@ -603,8 +643,28 @@ export async function startBreak(breakType: BreakType = "unpaid_meal") {
   if (activeEntry === null) {
     return errAsync({ reason: "Not clocked in" } as const);
   }
-  if ((activeEntry.breaks ?? []).some((brk) => !brk.break_end)) {
-    return errAsync({ reason: "A break is already running" } as const);
+  const runningBreak = (activeEntry.breaks ?? []).find((brk) => !brk.break_end);
+  if (runningBreak) {
+    // A break past its type's limit is already over in all but the record:
+    // close it at its deadline, then let the new break start.
+    const breakSettings = await loadBreakSettings(orgId);
+    if (!isBreakOverLimit(runningBreak, breakSettings)) {
+      return errAsync({ reason: "A break is already running" } as const);
+    }
+    const closed = await dbEndOpenBreak(
+      userId,
+      orgId,
+      getBreakLimits(breakSettings),
+    ).then(
+      () => true,
+      (e) => {
+        console.error("Error closing expired paid break: ", e);
+        return false;
+      },
+    );
+    if (!closed) {
+      return errAsync({ reason: "Error starting break." } as const);
+    }
   }
 
   return await dbStartBreak(userId, orgId, breakType)
@@ -628,7 +688,11 @@ export async function startBreak(breakType: BreakType = "unpaid_meal") {
     });
 }
 
-/** Ends the break running on the caller's open shift. */
+/**
+ * Ends the break running on the caller's open shift. The break is capped at
+ * its type's limit, so ending it late (or automatically, once the limit runs
+ * out) records it as ending exactly at the limit.
+ */
 export async function endBreak() {
   const { userId, orgId } = await auth.protect();
   if (!userId || !orgId) {
@@ -637,7 +701,9 @@ export async function endBreak() {
     } as const);
   }
 
-  return await dbEndOpenBreak(userId, orgId)
+  const breakSettings = await loadBreakSettings(orgId);
+
+  return await dbEndOpenBreak(userId, orgId, getBreakLimits(breakSettings))
     .then(
       (
         ended,

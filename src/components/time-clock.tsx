@@ -10,7 +10,7 @@ import {
   Square,
   Trash2,
 } from "lucide-react";
-import { startTransition, useEffect, useState } from "react";
+import { startTransition, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useTimeframeDefaults } from "@/hooks/useTimeframeDefaults";
 import {
@@ -24,6 +24,7 @@ import {
   BREAK_TYPES,
   breakTypeLabel,
   DEFAULT_BREAK_TYPE,
+  getBreakDeadlineMs,
   getBreakDurationMs,
   getDockedMinutes,
   getEffectiveDurationMs,
@@ -47,6 +48,18 @@ import type {
 } from "@/lib/types";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 import { Button, Card } from "./ui";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "./ui/alert-dialog";
+
+/** What the "back to work" dialog says about the break that just ran out. */
+type ExpiredBreak = { label: string; limitMinutes: number };
 
 const formatDurationMs = (diffMs: number) => {
   const totalMinutes = Math.floor(Math.max(0, diffMs) / (1000 * 60));
@@ -80,6 +93,10 @@ export default function TimeClock({
   useTimeframeDefaults();
   const [elapsedTime, setElapsedTime] = useState<string>("");
   const [breakElapsed, setBreakElapsed] = useState<string>("");
+  const [breakRemaining, setBreakRemaining] = useState<string>("");
+  const [expiredBreak, setExpiredBreak] = useState<ExpiredBreak | null>(null);
+  // The break already being auto-ended, so the ticker fires it only once.
+  const autoEndedBreakId = useRef<number | null>(null);
   const [breakType, setBreakType] = useState<BreakType>(DEFAULT_BREAK_TYPE);
   const [isLocating, setIsLocating] = useState(false);
   const captureLocation = isCaptureEnabled(locationSettings);
@@ -92,6 +109,10 @@ export default function TimeClock({
     )[0];
 
   const openBreak = getOpenBreak(activeEntry);
+  // When the running break hits its type's limit, if the org set one.
+  const breakDeadlineMs = openBreak
+    ? getBreakDeadlineMs(openBreak, breakSettings)
+    : null;
 
   useEffect(() => {
     if (!activeEntry) return;
@@ -108,16 +129,30 @@ export default function TimeClock({
   useEffect(() => {
     if (!openBreak) {
       setBreakElapsed("");
+      setBreakRemaining("");
       return;
     }
 
-    const tick = () =>
-      setBreakElapsed(formatDurationMs(getBreakDurationMs(openBreak)));
+    const tick = () => {
+      const nowMs = Date.now();
+      setBreakElapsed(formatDurationMs(getBreakDurationMs(openBreak, nowMs)));
+      if (breakDeadlineMs === null) {
+        setBreakRemaining("");
+        return;
+      }
+      // Round up so the last minute reads "1m left", not "0m left".
+      setBreakRemaining(
+        formatDurationMs(
+          Math.ceil(Math.max(0, breakDeadlineMs - nowMs) / 60_000) * 60_000,
+        ),
+      );
+      if (nowMs >= breakDeadlineMs) autoEndBreak(openBreak, breakDeadlineMs);
+    };
     const interval = setInterval(tick, 1000);
     tick();
 
     return () => clearInterval(interval);
-  }, [openBreak]);
+  });
 
   const clockInMutation = useMutation({
     mutationFn: (coordinates?: Coordinates) => clockInAction(coordinates),
@@ -151,6 +186,47 @@ export default function TimeClock({
       else if ("error" in res) toast.error(res.error || "Failed to end break");
     },
   });
+
+  // Ends a break that ran past its limit and tells the member to get back
+  // to work. The server caps the record at the limit, so it doesn't matter
+  // how late this fires (e.g. the tab was asleep).
+  const autoEnd = useMutation({
+    mutationFn: endBreakAction,
+    onSuccess: (res) => {
+      if (!res.success && "error" in res)
+        toast.error(res.error || "Failed to end break");
+    },
+  });
+
+  function autoEndBreak(brk: TimeEntryBreak, deadlineMs: number) {
+    // The ticker only runs while a break is open on the active entry.
+    /* v8 ignore next -- @preserve */
+    if (!activeEntry) return;
+    if (autoEndedBreakId.current === brk.id) return;
+    autoEndedBreakId.current = brk.id;
+
+    const breaks = activeEntry.breaks as TimeEntryBreak[];
+    setExpiredBreak({
+      label: breakTypeLabel(brk.break_type),
+      limitMinutes: Math.round(
+        (deadlineMs - new Date(brk.break_start).getTime()) / 60_000,
+      ),
+    });
+
+    startTransition(() => {
+      setOptimisticEntries({
+        type: "UPDATE",
+        payload: {
+          id: activeEntry.id,
+          breaks: breaks.map((b) =>
+            b.id === brk.id ? { ...b, break_end: new Date(deadlineMs) } : b,
+          ),
+          updated_at: new Date(),
+        },
+      });
+      autoEnd.mutate();
+    });
+  }
 
   const handleStartBreak = () => {
     // The break controls only render while there is an active entry.
@@ -333,6 +409,15 @@ export default function TimeClock({
                     ? "paid"
                     : "unpaid (deducted)"}
                 </div>
+                {breakRemaining && (
+                  <p
+                    className="text-muted-foreground text-xs"
+                    data-testid="break-remaining"
+                  >
+                    {breakRemaining} left · you'll be clocked back in
+                    automatically
+                  </p>
+                )}
                 <Button
                   disabled={endBreakMutation.isPending}
                   onClick={handleEndBreak}
@@ -430,6 +515,28 @@ export default function TimeClock({
           )}
         </>
       )}
+
+      <AlertDialog
+        // There is no trigger, so the only change is the member closing it.
+        onOpenChange={() => setExpiredBreak(null)}
+        open={expiredBreak !== null}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Break's over — time to get back to work
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {expiredBreak
+                ? `Your ${expiredBreak.label.toLowerCase()} reached the ${expiredBreak.limitMinutes}-minute limit set by your organization, so you've been clocked back in automatically.`
+                : null}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction>Back to work</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <div className="mt-12 w-full text-left">
         <div className="mb-4 flex items-center justify-between">

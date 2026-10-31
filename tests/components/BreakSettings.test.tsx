@@ -33,6 +33,8 @@ function renderBreakSettings(initialData: BreakSettingsData | null = null) {
   return onUpdateOptimistic;
 }
 
+const noLimits = { unpaid_meal: null, unpaid_rest: null, paid_rest: null };
+
 const option = (label: RegExp) => screen.getByRole("button", { name: label });
 const save = () => screen.getByRole("button", { name: "Save Break Settings" });
 
@@ -98,12 +100,20 @@ describe("BreakSettings", () => {
         "Break settings updated",
       ),
     );
-    expect(mocks.updateBreakSettingAction).toHaveBeenCalledWith(true, 45, 6);
+    expect(mocks.updateBreakSettingAction).toHaveBeenCalledWith(
+      true,
+      45,
+      6,
+      noLimits,
+    );
     expect(onUpdateOptimistic).toHaveBeenCalledWith({
       ...saved,
       dock_lunch: true,
       lunch_duration_minutes: 45,
       lunch_min_shift_hours: 6,
+      max_meal_break_minutes: null,
+      max_unpaid_rest_break_minutes: null,
+      max_paid_break_minutes: null,
     });
   });
 
@@ -112,7 +122,12 @@ describe("BreakSettings", () => {
     const onUpdateOptimistic = renderBreakSettings(null);
     fireEvent.click(save());
     await waitFor(() =>
-      expect(mocks.updateBreakSettingAction).toHaveBeenCalledWith(false, 30, 5),
+      expect(mocks.updateBreakSettingAction).toHaveBeenCalledWith(
+        false,
+        30,
+        5,
+        noLimits,
+      ),
     );
     expect(onUpdateOptimistic).not.toHaveBeenCalled();
   });
@@ -146,5 +161,129 @@ describe("BreakSettings", () => {
     renderBreakSettings();
     fireEvent.click(save());
     await waitFor(() => expect(save()).toBeDisabled());
+  });
+});
+
+describe("BreakSettings break limits", () => {
+  const notDocked: BreakSettingsData = { ...saved, dock_lunch: false };
+
+  it("starts with every limit off when none are stored", () => {
+    renderBreakSettings(notDocked);
+    for (const label of [
+      /Limit meal periods/,
+      /Limit unpaid rest breaks/,
+      /Limit paid rest breaks/,
+    ]) {
+      expect(screen.getByLabelText(label)).not.toBeChecked();
+    }
+    expect(
+      screen.queryByLabelText("Max Paid rest break (minutes)"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("pre-fills the stored limits", () => {
+    renderBreakSettings({
+      ...notDocked,
+      max_meal_break_minutes: 45,
+      max_unpaid_rest_break_minutes: 10,
+      max_paid_break_minutes: 20,
+    });
+    expect(screen.getByLabelText("Max Meal period (minutes)")).toHaveValue(45);
+    expect(
+      screen.getByLabelText("Max Unpaid rest break (minutes)"),
+    ).toHaveValue(10);
+    expect(screen.getByLabelText("Max Paid rest break (minutes)")).toHaveValue(
+      20,
+    );
+    expect(save()).toBeDisabled();
+  });
+
+  it("saves the limits that were switched on", async () => {
+    mocks.updateBreakSettingAction.mockResolvedValue({ success: true });
+    const onUpdateOptimistic = renderBreakSettings(notDocked);
+    fireEvent.click(screen.getByLabelText(/Limit paid rest breaks/));
+    expect(save()).toBeEnabled();
+    fireEvent.change(screen.getByLabelText("Max Paid rest break (minutes)"), {
+      target: { value: "20" },
+    });
+    fireEvent.click(screen.getByLabelText(/Limit meal periods/));
+    fireEvent.click(screen.getByLabelText(/Limit unpaid rest breaks/));
+    fireEvent.change(screen.getByLabelText("Max Unpaid rest break (minutes)"), {
+      target: { value: "5" },
+    });
+    fireEvent.click(save());
+
+    await waitFor(() =>
+      expect(mocks.updateBreakSettingAction).toHaveBeenCalledWith(
+        false,
+        30,
+        5,
+        { unpaid_meal: 30, unpaid_rest: 5, paid_rest: 20 },
+      ),
+    );
+    expect(onUpdateOptimistic).toHaveBeenCalledWith(
+      expect.objectContaining({
+        max_meal_break_minutes: 30,
+        max_unpaid_rest_break_minutes: 5,
+        max_paid_break_minutes: 20,
+      }),
+    );
+  });
+
+  it("clears a limit that was switched off", async () => {
+    mocks.updateBreakSettingAction.mockResolvedValue({ success: true });
+    renderBreakSettings({ ...notDocked, max_paid_break_minutes: 15 });
+    fireEvent.click(screen.getByLabelText(/Limit paid rest breaks/));
+    fireEvent.click(save());
+    await waitFor(() =>
+      expect(mocks.updateBreakSettingAction).toHaveBeenCalledWith(
+        false,
+        30,
+        5,
+        noLimits,
+      ),
+    );
+  });
+
+  it.each([
+    ["zero", "0"],
+    ["too long", "481"],
+    ["fractional", "7.5"],
+  ])("blocks saving a %s limit", (_l, value) => {
+    renderBreakSettings(notDocked);
+    fireEvent.click(screen.getByLabelText(/Limit paid rest breaks/));
+    fireEvent.change(screen.getByLabelText("Max Paid rest break (minutes)"), {
+      target: { value },
+    });
+    expect(
+      screen.getByText(/Enter a whole number of minutes between 1 and 480/),
+    ).toBeInTheDocument();
+    expect(save()).toBeDisabled();
+  });
+
+  it("limits meal periods to the lunch deduction while docking", async () => {
+    mocks.updateBreakSettingAction.mockResolvedValue({ success: true });
+    renderBreakSettings({ ...saved, max_meal_break_minutes: 60 });
+    expect(screen.getByTestId("meal-limit-from-deduction")).toHaveTextContent(
+      "Meal periods are limited to the 30-minute lunch deduction above.",
+    );
+    expect(
+      screen.queryByLabelText(/Limit meal periods/),
+    ).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Break Duration (minutes)"), {
+      target: { value: "45" },
+    });
+    expect(screen.getByTestId("meal-limit-from-deduction")).toHaveTextContent(
+      "45-minute",
+    );
+    fireEvent.click(save());
+    // The hidden manual meal limit is kept as stored.
+    await waitFor(() =>
+      expect(mocks.updateBreakSettingAction).toHaveBeenCalledWith(true, 45, 5, {
+        unpaid_meal: 60,
+        unpaid_rest: null,
+        paid_rest: null,
+      }),
+    );
   });
 });

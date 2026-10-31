@@ -399,6 +399,28 @@ describe("clockOut", () => {
     expect(mocks.dbClockOut).toHaveBeenCalledWith("user_1", "org_1", null);
   });
 
+  it("closes a running break, capped at its limit, before clocking out", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetBreakSettings.mockResolvedValue({
+      max_unpaid_rest_break_minutes: 10,
+    });
+    mocks.dbEndOpenBreak.mockResolvedValue({ id: 3 });
+    mocks.dbClockOut.mockResolvedValue({ id: 11 });
+    expect((await clockOut()).isOk()).toBe(true);
+    expect(mocks.dbEndOpenBreak).toHaveBeenCalledWith("user_1", "org_1", {
+      unpaid_meal: null,
+      unpaid_rest: 10,
+      paid_rest: null,
+    });
+  });
+
+  it("still clocks out when closing the break fails", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbEndOpenBreak.mockRejectedValue(new Error("db"));
+    mocks.dbClockOut.mockResolvedValue({ id: 11 });
+    expect((await clockOut())._unsafeUnwrap()).toEqual({ id: 11 });
+  });
+
   it("returns an error when the update fails", async () => {
     mocks.protect.mockResolvedValue(member);
     mocks.dbClockOut.mockRejectedValue(new Error("db"));
@@ -691,6 +713,7 @@ describe("updateBreakSettingsDal", () => {
       true,
       30,
       5,
+      undefined,
     );
   });
 
@@ -704,6 +727,7 @@ describe("updateBreakSettingsDal", () => {
       true,
       30,
       5,
+      undefined,
     );
     expect(has).not.toHaveBeenCalled();
   });
@@ -717,7 +741,42 @@ describe("updateBreakSettingsDal", () => {
       true,
       45,
       6,
+      undefined,
     );
+  });
+
+  it("saves per-break-type limits", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbUpdateBreakSettings.mockResolvedValue({ org_id: "org_1" });
+    const limits = { unpaid_meal: 45, unpaid_rest: null, paid_rest: 15 };
+    expect((await updateBreakSettingsDal(false, 30, 5, limits)).isOk()).toBe(
+      true,
+    );
+    expect(mocks.dbUpdateBreakSettings).toHaveBeenCalledWith(
+      "org_1",
+      false,
+      30,
+      5,
+      limits,
+    );
+  });
+
+  it.each([
+    ["a zero limit", 0],
+    ["a fractional limit", 7.5],
+    ["an excessive limit", 481],
+    ["a NaN limit", Number.NaN],
+  ])("rejects %s", async (_label, value) => {
+    mocks.protect.mockResolvedValue(admin);
+    const result = await updateBreakSettingsDal(true, 30, 5, {
+      unpaid_meal: null,
+      unpaid_rest: null,
+      paid_rest: value,
+    });
+    expect(result._unsafeUnwrapErr()).toEqual({
+      reason: "Invalid break settings",
+    });
+    expect(mocks.dbUpdateBreakSettings).not.toHaveBeenCalled();
   });
 
   it("returns an error when the save fails", async () => {
@@ -812,6 +871,52 @@ describe("startBreak", () => {
     expect(mocks.dbStartBreak).not.toHaveBeenCalled();
   });
 
+  it("closes a break that ran past its limit, then starts the new one", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetActiveEntry.mockResolvedValue({
+      id: 1,
+      breaks: [
+        {
+          id: 2,
+          break_type: "paid_rest",
+          break_start: new Date(Date.now() - 20 * 60_000),
+          break_end: null,
+        },
+      ],
+    });
+    mocks.dbGetBreakSettings.mockResolvedValue({ max_paid_break_minutes: 15 });
+    mocks.dbEndOpenBreak.mockResolvedValue({ id: 2 });
+    mocks.dbStartBreak.mockResolvedValue({ id: 9, time_entry_id: 1 });
+    expect((await startBreak("unpaid_meal")).isOk()).toBe(true);
+    expect(mocks.dbEndOpenBreak).toHaveBeenCalledWith("user_1", "org_1", {
+      unpaid_meal: null,
+      unpaid_rest: null,
+      paid_rest: 15,
+    });
+    expect(mocks.dbStartBreak).toHaveBeenCalled();
+  });
+
+  it("reports a failure closing an expired break", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetActiveEntry.mockResolvedValue({
+      id: 1,
+      breaks: [
+        {
+          id: 2,
+          break_type: "paid_rest",
+          break_start: new Date(Date.now() - 20 * 60_000),
+          break_end: null,
+        },
+      ],
+    });
+    mocks.dbGetBreakSettings.mockResolvedValue({ max_paid_break_minutes: 15 });
+    mocks.dbEndOpenBreak.mockRejectedValue(new Error("db"));
+    expect((await startBreak())._unsafeUnwrapErr()).toEqual({
+      reason: "Error starting break.",
+    });
+    expect(mocks.dbStartBreak).not.toHaveBeenCalled();
+  });
+
   it("starts the break and returns it with its owner", async () => {
     mocks.protect.mockResolvedValue(member);
     mocks.dbGetActiveEntry.mockResolvedValue({ id: 1, breaks: [] });
@@ -862,6 +967,7 @@ describe("endBreak", () => {
 
   it("closes the running break", async () => {
     mocks.protect.mockResolvedValue(member);
+    mocks.dbGetBreakSettings.mockResolvedValue(undefined);
     mocks.dbEndOpenBreak.mockResolvedValue({ id: 9 });
     const result = await endBreak();
     expect(result._unsafeUnwrap()).toEqual({
@@ -869,7 +975,42 @@ describe("endBreak", () => {
       user_id: "user_1",
       org_id: "org_1",
     });
-    expect(mocks.dbEndOpenBreak).toHaveBeenCalledWith("user_1", "org_1");
+    expect(mocks.dbEndOpenBreak).toHaveBeenCalledWith("user_1", "org_1", {
+      unpaid_meal: null,
+      unpaid_rest: null,
+      paid_rest: null,
+    });
+  });
+
+  it("caps the break at the org's limits", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetBreakSettings.mockResolvedValue({
+      dock_lunch: true,
+      lunch_duration_minutes: 30,
+      max_meal_break_minutes: 60,
+      max_unpaid_rest_break_minutes: null,
+      max_paid_break_minutes: 15,
+    });
+    mocks.dbEndOpenBreak.mockResolvedValue({ id: 9 });
+    await endBreak();
+    // Lunch is docked, so the meal limit is the 30-minute deduction.
+    expect(mocks.dbEndOpenBreak).toHaveBeenCalledWith("user_1", "org_1", {
+      unpaid_meal: 30,
+      unpaid_rest: null,
+      paid_rest: 15,
+    });
+  });
+
+  it("ends the break without limits when settings can't be loaded", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetBreakSettings.mockRejectedValue(new Error("db"));
+    mocks.dbEndOpenBreak.mockResolvedValue({ id: 9 });
+    expect((await endBreak()).isOk()).toBe(true);
+    expect(mocks.dbEndOpenBreak).toHaveBeenCalledWith("user_1", "org_1", {
+      unpaid_meal: null,
+      unpaid_rest: null,
+      paid_rest: null,
+    });
   });
 
   it("refuses when no break is running", async () => {

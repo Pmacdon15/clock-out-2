@@ -1,4 +1,4 @@
-import type { BreakSettingsData, BreakType } from "./types";
+import type { BreakLimits, BreakSettingsData, BreakType } from "./types";
 
 /** A break record, loose enough for rows that still carry string dates. */
 export type BreakLike = {
@@ -53,6 +53,112 @@ export function getOpenBreak<T extends BreakLike>(
   entry: { breaks?: T[] | null } | null | undefined,
 ): T | undefined {
   return entry?.breaks?.find((b) => !b.break_end);
+}
+
+/** Upper bound accepted for any break limit, in minutes (8 hours). */
+export const MAX_BREAK_LIMIT_MINUTES = 480;
+
+/** The `break_settings` column holding each break type's limit. */
+export const BREAK_LIMIT_FIELDS = {
+  unpaid_meal: "max_meal_break_minutes",
+  unpaid_rest: "max_unpaid_rest_break_minutes",
+  paid_rest: "max_paid_break_minutes",
+} as const satisfies Record<BreakType, keyof BreakSettingsData>;
+
+type BreakLimitSettings = Partial<
+  Pick<
+    BreakSettingsData,
+    | (typeof BREAK_LIMIT_FIELDS)[BreakType]
+    | "dock_lunch"
+    | "lunch_duration_minutes"
+  >
+>;
+
+const normalizeLimit = (value: unknown): number | null => {
+  const minutes = Number(value);
+  return value !== null && Number.isFinite(minutes) && minutes > 0
+    ? minutes
+    : null;
+};
+
+/**
+ * Whether the meal-period limit comes from the lunch deduction: when the org
+ * docks lunch, a meal period may last exactly as long as the deduction.
+ */
+export function isMealLimitFromDeduction(
+  breakSettings?: BreakLimitSettings | null,
+): boolean {
+  return (
+    Boolean(breakSettings?.dock_lunch) &&
+    normalizeLimit(breakSettings?.lunch_duration_minutes) !== null
+  );
+}
+
+/**
+ * The org's limit for one break type in minutes, or null when there is none.
+ * Zero, negative and non-numeric values all mean "no limit". While lunch is
+ * docked, the meal-period limit is the lunch deduction duration; otherwise
+ * it is the separately stored meal limit.
+ */
+export function getBreakLimitMinutes(
+  type: BreakType | string,
+  breakSettings?: BreakLimitSettings | null,
+): number | null {
+  if (!isBreakType(type)) return null;
+  if (type === "unpaid_meal" && isMealLimitFromDeduction(breakSettings)) {
+    return normalizeLimit(breakSettings?.lunch_duration_minutes);
+  }
+  return normalizeLimit(breakSettings?.[BREAK_LIMIT_FIELDS[type]]);
+}
+
+/** Every break type's limit, for the server to cap break ends with. */
+export function getBreakLimits(
+  breakSettings?: BreakLimitSettings | null,
+): BreakLimits {
+  return {
+    unpaid_meal: getBreakLimitMinutes("unpaid_meal", breakSettings),
+    unpaid_rest: getBreakLimitMinutes("unpaid_rest", breakSettings),
+    paid_rest: getBreakLimitMinutes("paid_rest", breakSettings),
+  };
+}
+
+/** Whether a limit value is acceptable to store (null clears it). */
+export function isValidBreakLimit(value: unknown): boolean {
+  return (
+    value === null ||
+    (Number.isInteger(value) &&
+      (value as number) >= 1 &&
+      (value as number) <= MAX_BREAK_LIMIT_MINUTES)
+  );
+}
+
+/**
+ * When a break must end under the org's limit for its type, in epoch
+ * milliseconds. Null when that type has no limit.
+ */
+export function getBreakDeadlineMs(
+  brk: BreakLike,
+  breakSettings?: BreakLimitSettings | null,
+): number | null {
+  const limit = getBreakLimitMinutes(brk.break_type, breakSettings);
+  if (limit === null) return null;
+  const startMs = new Date(brk.break_start).getTime();
+  if (Number.isNaN(startMs)) return null;
+  return startMs + limit * 60_000;
+}
+
+/**
+ * Whether a still-running break has reached its type's limit, meaning the
+ * member should already be back on the clock.
+ */
+export function isBreakOverLimit(
+  brk: BreakLike,
+  breakSettings?: BreakLimitSettings | null,
+  nowMs: number = Date.now(),
+): boolean {
+  if (brk.break_end) return false;
+  const deadline = getBreakDeadlineMs(brk, breakSettings);
+  return deadline !== null && nowMs >= deadline;
 }
 
 const shiftBounds = (entry: ShiftLike, nowMs: number) => ({
