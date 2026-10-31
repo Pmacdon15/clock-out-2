@@ -11,7 +11,18 @@ import {
 } from "date-fns";
 import { formatInTimeZone, fromZonedTime, toZonedTime } from "date-fns-tz";
 import { z } from "zod";
-import { getEffectiveDurationMs } from "@/lib/break-utils";
+import {
+  breakTypeLabel,
+  DEFAULT_BREAK_TYPE,
+  getBreakDurationMs,
+  getEffectiveDurationMs,
+  getOpenBreak,
+  getPaidBreakMs,
+  getUnpaidBreakMs,
+  isBreakType,
+  isPaidBreakType,
+  validateBreak,
+} from "@/lib/break-utils";
 import { fetchAllPages } from "@/lib/clerk-pagination";
 import {
   findMatchingSite,
@@ -36,22 +47,29 @@ import {
   toXlsx,
   XLSX_MIME,
 } from "@/lib/timesheet-export";
-import type { TimeEntry } from "@/lib/types";
+import type { BreakType, TimeEntry, TimeEntryBreak } from "@/lib/types";
 import { isOverMemberShipLimit } from "@/lib/utils-clerk";
 import {
   dbClockInAt,
   dbClockOutAt,
+  dbDeleteBreak,
   dbDeleteTimeEntry,
+  dbEndOpenBreak,
   dbFindOverlappingTimeEntries,
   dbGetActiveEntry,
   dbGetBreakSettings,
+  dbGetBreakWithEntry,
+  dbGetEntryBreaks,
   dbGetOrgActiveEntries,
   dbGetOrgTimeEntries,
   dbGetReportingSettings,
   dbGetSites,
   dbGetTimeEntries,
   dbGetTimeEntryById,
+  dbInsertBreak,
   dbInsertTimeEntry,
+  dbStartBreak,
+  dbUpdateBreak,
   dbUpdateBreakSettings,
   dbUpdateReportingSettings,
   dbUpdateTimeEntry,
@@ -428,6 +446,12 @@ export const updateTimeEntryInputSchema = z.object({
     .describe(
       "Alternatively, set the shift's total hours worked (adjusts clock_out relative to clock_in).",
     ),
+  skip_lunch: z
+    .boolean()
+    .optional()
+    .describe(
+      "Set to true to mark this shift as 'Skipped lunch / break (do not dock)' so automatic lunch deduction is not subtracted, or false to allow automatic lunch deduction.",
+    ),
   timezone: timezoneField,
 });
 
@@ -437,6 +461,83 @@ export const deleteTimeEntryInputSchema = z.object({
     .number()
     .int()
     .describe("The numeric ID of the time entry to delete."),
+});
+
+export const toggleBreakInputSchema = z.object({
+  org_id: orgIdField,
+  member: memberField,
+  action: z
+    .enum(["toggle", "start", "end"])
+    .optional()
+    .describe(
+      "Action to perform on the active shift's break: 'toggle' (starts a break if none is running, or ends the running break if one is open; default), 'start' (starts a break of break_type), or 'end' (ends the currently running break).",
+    ),
+  break_type: z
+    .enum(["unpaid_meal", "unpaid_rest", "paid_rest"])
+    .optional()
+    .describe(
+      "Kind of break when starting a break (one of the 3 supported kinds): 'unpaid_meal' (Meal period — unpaid, deducted from hours; default), 'unpaid_rest' (Unpaid rest break — unpaid, deducted from hours), or 'paid_rest' (Paid rest break — paid, recorded for compliance and not deducted).",
+    ),
+  timezone: timezoneField,
+});
+
+export const manageBreaksInputSchema = z.object({
+  org_id: orgIdField,
+  action: z
+    .enum(["add", "update", "delete", "list", "start", "end", "toggle"])
+    .optional()
+    .describe(
+      "Action to perform: 'add' (admin: add a break of one of the 3 kinds — 'unpaid_meal', 'unpaid_rest', or 'paid_rest' — to a shift), 'update' (admin: edit an existing break's break_type, break_start, break_end, or duration_minutes), 'delete' (admin: remove a break), 'list' (list breaks recorded on a shift), or 'start'/'end'/'toggle' (start, end, or toggle a live break on an active shift). Defaults to 'list'.",
+    ),
+  break_id: z
+    .number()
+    .int()
+    .optional()
+    .describe(
+      "Numeric ID of the break record to update or delete (from list_time_entries, get_weekly_timecard, or manage_breaks). Optional if entry_id or member + date identifies a shift with a single break.",
+    ),
+  entry_id: z
+    .number()
+    .int()
+    .optional()
+    .describe(
+      "Numeric ID of the time entry (shift) to add a break to, list breaks for, or locate a single break on. Optional if member + date (or an active shift) identifies the shift.",
+    ),
+  member: memberField,
+  date: z
+    .string()
+    .optional()
+    .describe(
+      "Shift date as YYYY-MM-DD (used to locate the time entry when entry_id is omitted, and to resolve time-of-day strings like '12:00' or '12:30 PM').",
+    ),
+  break_type: z
+    .enum(["unpaid_meal", "unpaid_rest", "paid_rest"])
+    .optional()
+    .describe(
+      "Break kind (one of the 3 supported kinds): 'unpaid_meal' (Meal period — unpaid, deducted from hours; default when adding/starting), 'unpaid_rest' (Unpaid rest break — unpaid, deducted from hours), or 'paid_rest' (Paid rest break — paid, recorded for compliance and not deducted).",
+    ),
+  break_start: z
+    .string()
+    .optional()
+    .describe(
+      "Break start time as ISO 8601, 'YYYY-MM-DD HH:mm', or time of day ('12:00' / '12:00 PM' relative to the shift's date).",
+    ),
+  break_end: z
+    .string()
+    .nullable()
+    .optional()
+    .describe(
+      "Break end time as ISO 8601, 'YYYY-MM-DD HH:mm', or time of day ('12:30' / '12:30 PM' relative to the shift's date), or null for a running break on an active shift.",
+    ),
+  duration_minutes: z
+    .number()
+    .positive()
+    .max(480)
+    .optional()
+    .describe(
+      "Break duration in minutes (e.g. 30 or 15). When adding or updating a break, can be provided instead of break_end (or without break_start to place a break of that duration inside the shift).",
+    ),
+  timezone: timezoneField,
 });
 
 export const manageReportingSettingsInputSchema = z.object({
@@ -478,16 +579,16 @@ export const manageReportingSettingsInputSchema = z.object({
 export const manageBreakSettingsInputSchema = z.object({
   org_id: orgIdField,
   action: z
-    .enum(["get", "update"])
+    .enum(["get", "update", "toggle"])
     .optional()
     .describe(
-      "Action to perform: 'get' (view the current lunch/break deduction settings) or 'update' (change them). Defaults to 'get'.",
+      "Action to perform: 'get' (view the current lunch/break deduction settings), 'update' (change them), or 'toggle' (toggle dock_lunch on or off). Defaults to 'get'.",
     ),
   dock_lunch: z
     .boolean()
     .optional()
     .describe(
-      "When action is 'update': true to automatically deduct an unpaid lunch/break from qualifying shifts, false to count all time between clock-in and clock-out. If omitted, the current setting is kept.",
+      "When action is 'update' or 'toggle': true to automatically deduct an unpaid lunch/break from qualifying shifts, false to count all time between clock-in and clock-out. If omitted during 'toggle', flips the current setting.",
     ),
   lunch_duration_minutes: z
     .number()
@@ -919,6 +1020,32 @@ function resolveMemberFromList(
   };
 }
 
+export function formatBreakForResponse(brk: TimeEntryBreak, tz: string) {
+  const startDate = new Date(brk.break_start);
+  const endDate = brk.break_end ? new Date(brk.break_end) : null;
+  const durationMs = getBreakDurationMs(brk);
+  const dur = formatDurationMs(durationMs);
+  const paid = isPaidBreakType(brk.break_type);
+
+  return {
+    id: brk.id,
+    break_id: brk.id,
+    entry_id: brk.time_entry_id,
+    time_entry_id: brk.time_entry_id,
+    break_type: brk.break_type,
+    label: breakTypeLabel(brk.break_type),
+    paid,
+    is_open: endDate === null,
+    break_start: startDate.toISOString(),
+    break_start_local: formatTimestampInTz(startDate, tz),
+    break_end: endDate ? endDate.toISOString() : null,
+    break_end_local: endDate ? formatTimestampInTz(endDate, tz) : null,
+    duration_minutes: dur.totalMinutes,
+    duration_hours: dur.decimalHours,
+    formatted_duration: dur.formatted,
+  };
+}
+
 function formatEntryForResponse(
   entry: TimeEntry,
   memberMap: Map<string, OrgMemberInfo>,
@@ -931,6 +1058,10 @@ function formatEntryForResponse(
     clockInDate.getTime();
   const dur = formatDurationMs(durationMs);
   const member = memberMap.get(entry.user_id);
+  const breaks = (entry.breaks ?? []).map((b) => formatBreakForResponse(b, tz));
+  const openBreak = getOpenBreak(entry);
+  const unpaidBreakMinutes = Math.round(getUnpaidBreakMs(entry) / 60_000);
+  const paidBreakMinutes = Math.round(getPaidBreakMs(entry) / 60_000);
 
   return {
     id: entry.id,
@@ -950,6 +1081,11 @@ function formatEntryForResponse(
     duration_minutes: dur.totalMinutes,
     duration_hours: dur.decimalHours,
     formatted_duration: dur.formatted,
+    skip_lunch: Boolean(entry.skip_lunch),
+    breaks,
+    open_break: openBreak ? formatBreakForResponse(openBreak, tz) : null,
+    unpaid_break_minutes: unpaidBreakMinutes,
+    paid_break_minutes: paidBreakMinutes,
   };
 }
 
@@ -1324,13 +1460,21 @@ export async function getClockStatus(
 
   const clockInDate = new Date(active.clock_in);
   const dur = formatDurationMs(Date.now() - clockInDate.getTime());
+  const openBreak = getOpenBreak(active);
+  const formattedOpenBreak = openBreak
+    ? formatBreakForResponse(openBreak, tz)
+    : null;
+  const formattedBreaks = (active.breaks ?? []).map((b) =>
+    formatBreakForResponse(b, tz),
+  );
 
   return {
-    summary: `${target.name} is clocked in at ${org.orgName} (for ${dur.formatted}, since ${formatTimestampInTz(clockInDate, tz)}).`,
+    summary: `${target.name} is clocked in at ${org.orgName} (for ${dur.formatted}, since ${formatTimestampInTz(clockInDate, tz)}${formattedOpenBreak ? `, currently on ${formattedOpenBreak.label} for ${formattedOpenBreak.formatted_duration}` : ""}).`,
     data: {
       organization: { org_id: org.orgId, name: org.orgName },
       member: { user_id: target.userId, name: target.name, role: target.role },
       is_clocked_in: true,
+      is_on_break: Boolean(formattedOpenBreak),
       active_entry: {
         entry_id: active.id,
         clock_in: clockInDate.toISOString(),
@@ -1338,6 +1482,8 @@ export async function getClockStatus(
         elapsed_minutes: dur.totalMinutes,
         elapsed_hours: dur.decimalHours,
         formatted_duration: dur.formatted,
+        open_break: formattedOpenBreak,
+        breaks: formattedBreaks,
       },
     },
   };
@@ -2570,13 +2716,23 @@ export async function updateTimeEntryTool(
     };
   }
 
-  const updated = await dbUpdateTimeEntry(
-    targetEntry.id,
-    newClockIn,
-    newClockOut,
-    org.orgId,
-    true,
-  );
+  const updated =
+    input.skip_lunch !== undefined
+      ? await dbUpdateTimeEntry(
+          targetEntry.id,
+          newClockIn,
+          newClockOut,
+          org.orgId,
+          true,
+          input.skip_lunch,
+        )
+      : await dbUpdateTimeEntry(
+          targetEntry.id,
+          newClockIn,
+          newClockOut,
+          org.orgId,
+          true,
+        );
 
   if (!updated) {
     return {
@@ -2592,12 +2748,679 @@ export async function updateTimeEntryTool(
   const afterFormatted = formatEntryForResponse(updated, memberMap, tz);
 
   return {
-    summary: `Updated time entry #${updated.id} for ${afterFormatted.member_name} on ${afterFormatted.date}: ${afterFormatted.clock_in_local} → ${afterFormatted.clock_out_local ?? "active"} (${afterFormatted.formatted_duration}).`,
+    summary: `Updated time entry #${updated.id} for ${afterFormatted.member_name} on ${afterFormatted.date}: ${afterFormatted.clock_in_local} → ${afterFormatted.clock_out_local ?? "active"} (${afterFormatted.formatted_duration}${input.skip_lunch !== undefined ? `, skip_lunch=${afterFormatted.skip_lunch}` : ""}).`,
     data: {
       status: "updated",
       organization: { org_id: org.orgId, name: org.orgName },
       before: beforeFormatted,
       entry: afterFormatted,
+    },
+  };
+}
+
+export async function toggleBreakTool(
+  caller: McpCaller,
+  input: z.infer<typeof toggleBreakInputSchema>,
+): Promise<ToolResult> {
+  const orgRes = await resolveOrg(caller.userId, input.org_id);
+  if (!orgRes.ok) return orgRes.result;
+  const { org } = orgRes;
+  const tz = validTimezone(input.timezone);
+
+  const members = await fetchOrgMembers(org.orgId);
+  const memberRes = resolveMemberFromList(
+    members,
+    caller.userId,
+    org.isAdmin,
+    input.member,
+  );
+  if (!memberRes.ok) return memberRes.result;
+  const target = memberRes.member;
+
+  const active = await dbGetActiveEntry(target.userId, org.orgId);
+  if (!active) {
+    return {
+      summary: `${target.name} is not currently clocked in at ${org.orgName}. Clock in before starting or ending a break.`,
+      data: {
+        status: "not_clocked_in",
+        member: { user_id: target.userId, name: target.name },
+      },
+      isError: true,
+    };
+  }
+
+  const openBreak = getOpenBreak(active);
+  const requestedAction = input.action ?? "toggle";
+
+  if (requestedAction === "start" && openBreak) {
+    const formattedOpen = formatBreakForResponse(openBreak, tz);
+    return {
+      summary: `${target.name} is already on a ${formattedOpen.label} (${formattedOpen.formatted_duration} so far, since ${formattedOpen.break_start_local}). End the current break before starting another.`,
+      data: {
+        status: "break_already_running",
+        active_entry_id: active.id,
+        open_break: formattedOpen,
+      },
+      isError: true,
+    };
+  }
+
+  if (requestedAction === "end" && !openBreak) {
+    return {
+      summary: `${target.name} does not have a break running right now.`,
+      data: {
+        status: "no_break_running",
+        active_entry_id: active.id,
+      },
+      isError: true,
+    };
+  }
+
+  const shouldEnd =
+    requestedAction === "end" ||
+    (requestedAction === "toggle" && Boolean(openBreak));
+
+  if (shouldEnd) {
+    const ended = await dbEndOpenBreak(target.userId, org.orgId);
+    if (!ended) {
+      return {
+        summary: `${target.name} does not have a break running right now.`,
+        data: {
+          status: "no_break_running",
+          active_entry_id: active.id,
+        },
+        isError: true,
+      };
+    }
+
+    invalidateTimeEntryCache(target.userId, org.orgId);
+    const formattedBreak = formatBreakForResponse(ended, tz);
+
+    return {
+      summary: `Ended ${formattedBreak.label} for ${target.name} at ${org.orgName} (${formattedBreak.formatted_duration}: ${formattedBreak.break_start_local} → ${formattedBreak.break_end_local}).`,
+      data: {
+        status: "break_ended",
+        organization: { org_id: org.orgId, name: org.orgName },
+        member: { user_id: target.userId, name: target.name },
+        entry_id: active.id,
+        break: formattedBreak,
+      },
+    };
+  }
+
+  const breakType: BreakType = input.break_type ?? DEFAULT_BREAK_TYPE;
+  if (!isBreakType(breakType)) {
+    return {
+      summary: `Invalid break_type "${String(breakType)}". Use 'unpaid_meal', 'unpaid_rest', or 'paid_rest'.`,
+      data: { status: "invalid_break_type", break_type: breakType },
+      isError: true,
+    };
+  }
+
+  const started = await dbStartBreak(target.userId, org.orgId, breakType);
+  if (!started) {
+    return {
+      summary: `${target.name} already has a break running on their active shift.`,
+      data: { status: "break_already_running", active_entry_id: active.id },
+      isError: true,
+    };
+  }
+
+  invalidateTimeEntryCache(target.userId, org.orgId);
+  const formattedBreak = formatBreakForResponse(started, tz);
+
+  return {
+    summary: `Started ${formattedBreak.label} (${formattedBreak.paid ? "paid" : "unpaid"}) for ${target.name} at ${org.orgName} (${formattedBreak.break_start_local}).`,
+    data: {
+      status: "break_started",
+      organization: { org_id: org.orgId, name: org.orgName },
+      member: { user_id: target.userId, name: target.name },
+      entry_id: active.id,
+      break: formattedBreak,
+    },
+  };
+}
+
+async function resolveTargetEntryForBreak(
+  org: OrgContext,
+  callerUserId: string,
+  members: OrgMemberInfo[],
+  memberMap: Map<string, OrgMemberInfo>,
+  tz: string,
+  input: {
+    entry_id?: number;
+    member?: string;
+    date?: string;
+  },
+): Promise<{ ok: true; entry: TimeEntry } | { ok: false; result: ToolResult }> {
+  if (input.entry_id !== undefined) {
+    const entry = await dbGetTimeEntryById(input.entry_id, org.orgId);
+    if (!entry) {
+      return {
+        ok: false,
+        result: {
+          summary: `Time entry #${input.entry_id} was not found in ${org.orgName}.`,
+          data: { status: "entry_not_found", entry_id: input.entry_id },
+          isError: true,
+        },
+      };
+    }
+    if (!org.isAdmin && entry.user_id !== callerUserId) {
+      return {
+        ok: false,
+        result: {
+          summary:
+            "Only organization admins (org:admin) can view or manage other members' breaks.",
+          data: { status: "forbidden" },
+          isError: true,
+        },
+      };
+    }
+    return { ok: true, entry };
+  }
+
+  const memberRes = resolveMemberFromList(
+    members,
+    callerUserId,
+    org.isAdmin,
+    input.member,
+  );
+  if (!memberRes.ok) return memberRes;
+  const targetMember = memberRes.member;
+
+  if (input.date) {
+    const dateStr = input.date.slice(0, 10);
+    const dayStart = fromZonedTime(`${dateStr}T00:00:00.000`, tz);
+    const dayEnd = fromZonedTime(`${dateStr}T23:59:59.999`, tz);
+    const dayEntries = await dbGetTimeEntries(
+      targetMember.userId,
+      org.orgId,
+      dayStart,
+      dayEnd,
+    );
+    if (dayEntries.length === 0) {
+      return {
+        ok: false,
+        result: {
+          summary: `No time entry found for ${targetMember.name} on ${dateStr}.`,
+          data: { status: "entry_not_found", date: dateStr },
+          isError: true,
+        },
+      };
+    }
+    if (dayEntries.length > 1) {
+      return {
+        ok: false,
+        result: {
+          summary: `${targetMember.name} has ${dayEntries.length} time entries on ${dateStr} (${dayEntries.map((e) => `#${e.id}`).join(", ")}). Please specify entry_id.`,
+          data: {
+            status: "multiple_entries_on_date",
+            entries: dayEntries.map((e) =>
+              formatEntryForResponse(e, memberMap, tz),
+            ),
+          },
+          isError: true,
+        },
+      };
+    }
+    const found = dayEntries[0];
+    if (found) return { ok: true, entry: found };
+  }
+
+  const active = await dbGetActiveEntry(targetMember.userId, org.orgId);
+  if (active) {
+    return { ok: true, entry: active };
+  }
+
+  return {
+    ok: false,
+    result: {
+      summary:
+        "Provide entry_id (or member + date) to identify the shift, or have an active clock-in shift.",
+      data: { status: "missing_identifier" },
+      isError: true,
+    },
+  };
+}
+
+export async function manageBreaksTool(
+  caller: McpCaller,
+  input: z.infer<typeof manageBreaksInputSchema>,
+): Promise<ToolResult> {
+  const action = input.action ?? "list";
+
+  if (action === "start" || action === "end" || action === "toggle") {
+    return toggleBreakTool(caller, {
+      org_id: input.org_id,
+      member: input.member,
+      action,
+      break_type: input.break_type,
+      timezone: input.timezone,
+    });
+  }
+
+  const orgRes = await resolveOrg(caller.userId, input.org_id);
+  if (!orgRes.ok) return orgRes.result;
+  const { org } = orgRes;
+  const tz = validTimezone(input.timezone);
+
+  const members = await fetchOrgMembers(org.orgId);
+  const memberMap = new Map(members.map((m) => [m.userId, m]));
+
+  if (action === "list") {
+    const entryRes = await resolveTargetEntryForBreak(
+      org,
+      caller.userId,
+      members,
+      memberMap,
+      tz,
+      input,
+    );
+    if (!entryRes.ok) return entryRes.result;
+    const entry = entryRes.entry;
+    const breaks = entry.breaks ?? (await dbGetEntryBreaks(entry.id));
+    const formattedBreaks = breaks.map((b) => formatBreakForResponse(b, tz));
+    const formattedEntry = formatEntryForResponse(
+      { ...entry, breaks },
+      memberMap,
+      tz,
+    );
+
+    return {
+      summary:
+        formattedBreaks.length === 0
+          ? `Shift #${entry.id} for ${formattedEntry.member_name} on ${formattedEntry.date} has no recorded breaks.`
+          : `Shift #${entry.id} for ${formattedEntry.member_name} on ${formattedEntry.date} has ${formattedBreaks.length} break${formattedBreaks.length === 1 ? "" : "s"}: ${formattedBreaks.map((b) => `#${b.id} ${b.label} (${b.formatted_duration}, ${b.paid ? "paid" : "unpaid"})`).join(", ")}.`,
+      data: {
+        status: "ok",
+        organization: { org_id: org.orgId, name: org.orgName },
+        entry: formattedEntry,
+        breaks_count: formattedBreaks.length,
+        breaks: formattedBreaks,
+      },
+    };
+  }
+
+  if (!org.isAdmin) {
+    return {
+      summary: `Only organization admins (org:admin) can ${action} breaks on time entries. Regular members can start and end live breaks on their active shift with toggle_break.`,
+      data: { status: "forbidden" },
+      isError: true,
+    };
+  }
+
+  if (action === "add") {
+    const entryRes = await resolveTargetEntryForBreak(
+      org,
+      caller.userId,
+      members,
+      memberMap,
+      tz,
+      input,
+    );
+    if (!entryRes.ok) return entryRes.result;
+    const targetEntry = entryRes.entry;
+
+    const breakType: BreakType = input.break_type ?? DEFAULT_BREAK_TYPE;
+    if (!isBreakType(breakType)) {
+      return {
+        summary: `Invalid break_type "${String(breakType)}". Choose one of the 3 kinds: 'unpaid_meal', 'unpaid_rest', or 'paid_rest'.`,
+        data: { status: "invalid_break_type", break_type: breakType },
+        isError: true,
+      };
+    }
+
+    const existingBreaks = targetEntry.breaks?.length
+      ? targetEntry.breaks
+      : await dbGetEntryBreaks(targetEntry.id);
+    const shiftBaseDate =
+      input.date?.slice(0, 10) ||
+      formatInTimeZone(new Date(targetEntry.clock_in), tz, "yyyy-MM-dd");
+
+    let breakStart: Date | null = null;
+    let breakEnd: Date | null = null;
+    const defaultDurationMinutes = breakType === "unpaid_meal" ? 30 : 15;
+
+    if (input.break_start !== undefined) {
+      breakStart = parseFlexibleDateTime(input.break_start, tz, shiftBaseDate);
+      if (!breakStart) {
+        return {
+          summary: `Could not parse break_start "${input.break_start}".`,
+          data: {
+            status: "invalid_break_start",
+            break_start: input.break_start,
+          },
+          isError: true,
+        };
+      }
+      if (input.break_end !== undefined && input.break_end !== null) {
+        breakEnd = parseFlexibleDateTime(input.break_end, tz, shiftBaseDate);
+        if (!breakEnd) {
+          return {
+            summary: `Could not parse break_end "${input.break_end}".`,
+            data: { status: "invalid_break_end", break_end: input.break_end },
+            isError: true,
+          };
+        }
+      } else if (input.duration_minutes !== undefined) {
+        breakEnd = new Date(
+          breakStart.getTime() + Math.round(input.duration_minutes * 60_000),
+        );
+      } else if (input.break_end === null || !targetEntry.clock_out) {
+        breakEnd = null;
+      } else {
+        breakEnd = new Date(
+          breakStart.getTime() + defaultDurationMinutes * 60_000,
+        );
+      }
+    } else if (input.break_end !== undefined && input.break_end !== null) {
+      breakEnd = parseFlexibleDateTime(input.break_end, tz, shiftBaseDate);
+      if (!breakEnd) {
+        return {
+          summary: `Could not parse break_end "${input.break_end}".`,
+          data: { status: "invalid_break_end", break_end: input.break_end },
+          isError: true,
+        };
+      }
+      const mins = input.duration_minutes ?? defaultDurationMinutes;
+      breakStart = new Date(breakEnd.getTime() - Math.round(mins * 60_000));
+    } else {
+      // Place a break of `duration_minutes` (or default 30m/15m) inside the shift
+      const mins = input.duration_minutes ?? defaultDurationMinutes;
+      const durationMs = Math.round(mins * 60_000);
+      const clockInMs = new Date(targetEntry.clock_in).getTime();
+      const clockOutMs = targetEntry.clock_out
+        ? new Date(targetEntry.clock_out).getTime()
+        : Date.now();
+      const sorted = [...existingBreaks].sort(
+        (a, b) =>
+          new Date(a.break_start).getTime() - new Date(b.break_start).getTime(),
+      );
+      const lastEndMs =
+        sorted.length > 0
+          ? Math.max(
+              ...sorted.map((b) =>
+                b.break_end ? new Date(b.break_end).getTime() : clockOutMs,
+              ),
+            )
+          : null;
+      const startMs =
+        lastEndMs !== null && lastEndMs + durationMs <= clockOutMs
+          ? lastEndMs
+          : clockInMs +
+            Math.max(0, Math.floor((clockOutMs - clockInMs - durationMs) / 2));
+      breakStart = new Date(startMs);
+      breakEnd = new Date(startMs + durationMs);
+    }
+
+    const invalid = validateBreak({
+      entry: {
+        clock_in: targetEntry.clock_in,
+        clock_out: targetEntry.clock_out,
+      },
+      breaks: existingBreaks,
+      break_start: breakStart,
+      break_end: breakEnd,
+      break_type: breakType,
+    });
+    if (invalid) {
+      return {
+        summary: `Cannot add break to shift #${targetEntry.id}: ${invalid}.`,
+        data: {
+          status: "invalid_break",
+          reason: invalid,
+          entry_id: targetEntry.id,
+        },
+        isError: true,
+      };
+    }
+
+    const inserted = await dbInsertBreak(
+      targetEntry.id,
+      org.orgId,
+      breakStart,
+      breakEnd,
+      breakType,
+    );
+    if (!inserted) {
+      return {
+        summary: `Failed to add break to shift #${targetEntry.id}.`,
+        data: { status: "add_break_failed", entry_id: targetEntry.id },
+        isError: true,
+      };
+    }
+
+    invalidateTimeEntryCache(targetEntry.user_id, org.orgId);
+
+    const formattedBreak = formatBreakForResponse(inserted, tz);
+    const memberName =
+      memberMap.get(targetEntry.user_id)?.name ?? targetEntry.user_id;
+
+    return {
+      summary: `Added ${formattedBreak.label} (${formattedBreak.paid ? "paid" : "unpaid"}, ${formattedBreak.formatted_duration}: ${formattedBreak.break_start_local} → ${formattedBreak.break_end_local ?? "open"}) to shift #${targetEntry.id} for ${memberName}.`,
+      data: {
+        status: "break_added",
+        organization: { org_id: org.orgId, name: org.orgName },
+        entry_id: targetEntry.id,
+        member_name: memberName,
+        break: formattedBreak,
+      },
+    };
+  }
+
+  // Locate target break for "update" or "delete"
+  let existingBreak: {
+    id: number;
+    time_entry_id: number;
+    break_type: BreakType;
+    break_start: Date;
+    break_end: Date | null;
+    user_id: string;
+    org_id: string;
+    clock_in: Date;
+    clock_out: Date | null;
+  } | null = null;
+  let siblingBreaks: TimeEntryBreak[] = [];
+
+  if (input.break_id !== undefined) {
+    const found = await dbGetBreakWithEntry(input.break_id, org.orgId);
+    if (!found) {
+      return {
+        summary: `Break #${input.break_id} was not found in ${org.orgName}.`,
+        data: { status: "break_not_found", break_id: input.break_id },
+        isError: true,
+      };
+    }
+    existingBreak = found;
+    siblingBreaks = await dbGetEntryBreaks(found.time_entry_id);
+  } else {
+    const entryRes = await resolveTargetEntryForBreak(
+      org,
+      caller.userId,
+      members,
+      memberMap,
+      tz,
+      input,
+    );
+    if (!entryRes.ok) return entryRes.result;
+    const targetEntry = entryRes.entry;
+    siblingBreaks = targetEntry.breaks?.length
+      ? targetEntry.breaks
+      : await dbGetEntryBreaks(targetEntry.id);
+    if (siblingBreaks.length === 0) {
+      return {
+        summary: `Time entry #${targetEntry.id} has no breaks to ${action}.`,
+        data: { status: "break_not_found", entry_id: targetEntry.id },
+        isError: true,
+      };
+    }
+    if (siblingBreaks.length > 1) {
+      return {
+        summary: `Time entry #${targetEntry.id} has ${siblingBreaks.length} breaks (${siblingBreaks.map((b) => `#${b.id} ${breakTypeLabel(b.break_type)}`).join(", ")}). Please specify break_id.`,
+        data: {
+          status: "multiple_breaks_on_entry",
+          entry_id: targetEntry.id,
+          breaks: siblingBreaks.map((b) => formatBreakForResponse(b, tz)),
+        },
+        isError: true,
+      };
+    }
+    const only = siblingBreaks[0];
+    if (only) {
+      existingBreak = {
+        ...only,
+        user_id: targetEntry.user_id,
+        org_id: targetEntry.org_id,
+        clock_in: targetEntry.clock_in,
+        clock_out: targetEntry.clock_out,
+      };
+    }
+  }
+
+  if (!existingBreak) {
+    return {
+      summary: "Break not found.",
+      data: { status: "break_not_found" },
+      isError: true,
+    };
+  }
+
+  if (action === "delete") {
+    const deleted = await dbDeleteBreak(existingBreak.id, org.orgId);
+    if (!deleted) {
+      return {
+        summary: `Break #${existingBreak.id} was not found in ${org.orgName}.`,
+        data: { status: "break_not_found", break_id: existingBreak.id },
+        isError: true,
+      };
+    }
+
+    invalidateTimeEntryCache(existingBreak.user_id, org.orgId);
+    const formattedDeleted = formatBreakForResponse(
+      { ...existingBreak, ...deleted },
+      tz,
+    );
+    const memberName =
+      memberMap.get(existingBreak.user_id)?.name ?? existingBreak.user_id;
+
+    return {
+      summary: `Deleted break #${deleted.id} (${formattedDeleted.label}, ${formattedDeleted.formatted_duration}) from shift #${deleted.time_entry_id} for ${memberName}.`,
+      data: {
+        status: "break_deleted",
+        organization: { org_id: org.orgId, name: org.orgName },
+        entry_id: deleted.time_entry_id,
+        member_name: memberName,
+        deleted_break: formattedDeleted,
+      },
+    };
+  }
+
+  // action === "update"
+  const newBreakType: BreakType = input.break_type ?? existingBreak.break_type;
+  if (!isBreakType(newBreakType)) {
+    return {
+      summary: `Invalid break_type "${String(newBreakType)}". Choose one of the 3 kinds: 'unpaid_meal', 'unpaid_rest', or 'paid_rest'.`,
+      data: { status: "invalid_break_type", break_type: newBreakType },
+      isError: true,
+    };
+  }
+
+  const shiftBaseDate =
+    input.date?.slice(0, 10) ||
+    formatInTimeZone(new Date(existingBreak.clock_in), tz, "yyyy-MM-dd");
+
+  let newBreakStart: Date;
+  if (input.break_start !== undefined) {
+    const parsed = parseFlexibleDateTime(input.break_start, tz, shiftBaseDate);
+    if (!parsed) {
+      return {
+        summary: `Could not parse break_start "${input.break_start}".`,
+        data: { status: "invalid_break_start", break_start: input.break_start },
+        isError: true,
+      };
+    }
+    newBreakStart = parsed;
+  } else {
+    newBreakStart = new Date(existingBreak.break_start);
+  }
+
+  let newBreakEnd: Date | null;
+  if (input.break_end === null) {
+    newBreakEnd = null;
+  } else if (input.break_end !== undefined) {
+    const parsed = parseFlexibleDateTime(input.break_end, tz, shiftBaseDate);
+    if (!parsed) {
+      return {
+        summary: `Could not parse break_end "${input.break_end}".`,
+        data: { status: "invalid_break_end", break_end: input.break_end },
+        isError: true,
+      };
+    }
+    newBreakEnd = parsed;
+  } else if (input.duration_minutes !== undefined) {
+    newBreakEnd = new Date(
+      newBreakStart.getTime() + Math.round(input.duration_minutes * 60_000),
+    );
+  } else {
+    newBreakEnd = existingBreak.break_end
+      ? new Date(existingBreak.break_end)
+      : null;
+  }
+
+  const invalid = validateBreak({
+    entry: {
+      clock_in: existingBreak.clock_in,
+      clock_out: existingBreak.clock_out,
+    },
+    breaks: siblingBreaks,
+    break_start: newBreakStart,
+    break_end: newBreakEnd,
+    break_type: newBreakType,
+    excludeBreakId: existingBreak.id,
+  });
+  if (invalid) {
+    return {
+      summary: `Cannot update break #${existingBreak.id}: ${invalid}.`,
+      data: {
+        status: "invalid_break",
+        reason: invalid,
+        break_id: existingBreak.id,
+      },
+      isError: true,
+    };
+  }
+
+  const updated = await dbUpdateBreak(
+    existingBreak.id,
+    org.orgId,
+    newBreakStart,
+    newBreakEnd,
+    newBreakType,
+  );
+  if (!updated) {
+    return {
+      summary: `Failed to update break #${existingBreak.id}.`,
+      data: { status: "update_failed", break_id: existingBreak.id },
+      isError: true,
+    };
+  }
+
+  invalidateTimeEntryCache(existingBreak.user_id, org.orgId);
+
+  const beforeFormatted = formatBreakForResponse(existingBreak, tz);
+  const afterFormatted = formatBreakForResponse(updated, tz);
+  const memberName =
+    memberMap.get(existingBreak.user_id)?.name ?? existingBreak.user_id;
+
+  return {
+    summary: `Updated break #${updated.id} on shift #${updated.time_entry_id} for ${memberName}: ${afterFormatted.label} (${afterFormatted.paid ? "paid" : "unpaid"}, ${afterFormatted.formatted_duration}: ${afterFormatted.break_start_local} → ${afterFormatted.break_end_local ?? "open"}).`,
+    data: {
+      status: "break_updated",
+      organization: { org_id: org.orgId, name: org.orgName },
+      entry_id: updated.time_entry_id,
+      member_name: memberName,
+      before: beforeFormatted,
+      break: afterFormatted,
     },
   };
 }
@@ -2803,6 +3626,7 @@ export async function manageBreakSettingsTool(
   }
 
   if (
+    input.action !== "toggle" &&
     input.dock_lunch === undefined &&
     input.lunch_duration_minutes === undefined &&
     input.lunch_min_shift_hours === undefined
@@ -2815,9 +3639,15 @@ export async function manageBreakSettingsTool(
     };
   }
 
+  const nextDockLunch =
+    input.dock_lunch ??
+    (input.action === "toggle"
+      ? !currentSettings.dock_lunch
+      : currentSettings.dock_lunch);
+
   const updated = await dbUpdateBreakSettings(
     org.orgId,
-    input.dock_lunch ?? currentSettings.dock_lunch,
+    nextDockLunch,
     input.lunch_duration_minutes ?? currentSettings.lunch_duration_minutes,
     input.lunch_min_shift_hours ?? currentSettings.lunch_min_shift_hours,
   );

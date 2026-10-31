@@ -14,7 +14,10 @@ import {
   listMembersInputSchema,
   listOrganizationsInputSchema,
   listTimeEntriesInputSchema,
+  manageBreakSettingsInputSchema,
+  manageBreaksInputSchema,
   manageReportingSettingsInputSchema,
+  toggleBreakInputSchema,
   updateTimeEntryInputSchema,
   whoIsWorkingInputSchema,
 } from "@/mcp/tools";
@@ -60,12 +63,15 @@ describe("portable JSON schema", () => {
     get_clock_status: getClockStatusInputSchema,
     clock_in: clockInInputSchema,
     clock_out: clockOutInputSchema,
+    toggle_break: toggleBreakInputSchema,
+    manage_breaks: manageBreaksInputSchema,
     add_time_entry: addTimeEntryInputSchema,
     list_time_entries: listTimeEntriesInputSchema,
     get_weekly_timecard: getWeeklyTimecardInputSchema,
     update_time_entry: updateTimeEntryInputSchema,
     delete_time_entry: deleteTimeEntryInputSchema,
     manage_reporting_settings: manageReportingSettingsInputSchema,
+    manage_break_settings: manageBreakSettingsInputSchema,
   };
 
   for (const [name, schema] of Object.entries(schemas)) {

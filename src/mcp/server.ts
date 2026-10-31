@@ -28,11 +28,15 @@ import {
   type McpCaller,
   manageBreakSettingsInputSchema,
   manageBreakSettingsTool,
+  manageBreaksInputSchema,
+  manageBreaksTool,
   manageReportingSettingsInputSchema,
   manageReportingSettingsTool,
   runHoursReportInputSchema,
   runHoursReportTool,
   type ToolResult,
+  toggleBreakInputSchema,
+  toggleBreakTool,
   updateTimeEntryInputSchema,
   updateTimeEntryTool,
   whoIsWorking,
@@ -304,11 +308,51 @@ export function registerClockOutTools(server: McpServer) {
   );
 
   server.registerTool(
+    "toggle_break",
+    {
+      title: "Start, end, or toggle a live break",
+      description:
+        "Starts, ends, or toggles a live break on an active shift for yourself, or (when called by an org admin) for any organization member by name, email, or user_id. Supports all 3 break kinds: 'unpaid_meal' (Meal period — unpaid, deducted from hours; default), 'unpaid_rest' (Unpaid rest break — unpaid, deducted from hours), and 'paid_rest' (Paid rest break — paid, recorded for compliance and not deducted). Pass action: 'toggle' (default), 'start', or 'end'.",
+      inputSchema: portable(toggleBreakInputSchema),
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    },
+    (args, ctx) =>
+      run(server, ctx.http?.authInfo, (caller) =>
+        toggleBreakTool(caller, args),
+      ),
+  );
+
+  server.registerTool(
+    "manage_breaks",
+    {
+      title: "Add, edit, delete, or list breaks on a shift",
+      description:
+        "Manages recorded breaks of the 3 kinds — 'unpaid_meal' (Meal period, unpaid), 'unpaid_rest' (Unpaid rest break, unpaid), and 'paid_rest' (Paid rest break, paid) — on a time entry. Organization admins ('org:admin') can add a break to any shift (action: 'add', with break_type and break_start/break_end or duration_minutes), edit an existing break's type or times (action: 'update', by break_id or shift), or delete a break (action: 'delete', by break_id or shift). Anyone can list breaks on their shift (action: 'list') or start/end/toggle a live break on an active shift (action: 'start' | 'end' | 'toggle').",
+      inputSchema: portable(manageBreaksInputSchema),
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    },
+    (args, ctx) =>
+      run(server, ctx.http?.authInfo, (caller) =>
+        manageBreaksTool(caller, args),
+      ),
+  );
+
+  server.registerTool(
     "update_time_entry",
     {
       title: "Change hours on an existing time entry",
       description:
-        "Admin tool to change the clock_in, clock_out, or hours_worked of a shift that is already logged (for yourself or any member in the organization), identified by entry_id or by member + date. Strictly checks that the updated hours do not overlap with any other shift so double times cannot happen, and invalidates the cache. Only call when the user explicitly asks to change existing hours.",
+        "Admin tool to change the clock_in, clock_out, hours_worked, or skip_lunch ('do not dock' break flag) of a shift that is already logged (for yourself or any member in the organization), identified by entry_id or by member + date. Strictly checks that the updated hours do not overlap with any other shift so double times cannot happen, and invalidates the cache. Only call when the user explicitly asks to change existing hours.",
       inputSchema: portable(updateTimeEntryInputSchema),
       annotations: {
         readOnlyHint: false,
