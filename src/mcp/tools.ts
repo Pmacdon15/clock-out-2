@@ -13,6 +13,12 @@ import { formatInTimeZone, fromZonedTime, toZonedTime } from "date-fns-tz";
 import { z } from "zod";
 import { getEffectiveDurationMs } from "@/lib/break-utils";
 import { fetchAllPages } from "@/lib/clerk-pagination";
+import {
+  findMatchingSite,
+  type SiteLike,
+  type StoredLocation,
+} from "@/lib/geo";
+import { reverseGeocode, searchAddress } from "@/lib/geoapify";
 import { loadPdfImage } from "@/lib/pdf-image";
 import { orgHasReportingFeature, sendWeeklyReports } from "@/lib/reports";
 import {
@@ -42,6 +48,7 @@ import {
   dbGetOrgActiveEntries,
   dbGetOrgTimeEntries,
   dbGetReportingSettings,
+  dbGetSites,
   dbGetTimeEntries,
   dbGetTimeEntryById,
   dbInsertTimeEntry,
@@ -118,6 +125,35 @@ export const getClockStatusInputSchema = z.object({
   timezone: timezoneField,
 });
 
+const siteField = z
+  .string()
+  .optional()
+  .describe(
+    "Work site name or address. If omitted on clock-in, defaults to the organization's primary work site if configured.",
+  );
+
+const addressField = z
+  .string()
+  .optional()
+  .describe(
+    "Optional street address or location name to record with the punch.",
+  );
+
+const latitudeField = z
+  .number()
+  .optional()
+  .describe("Optional latitude coordinate of the punch location.");
+
+const longitudeField = z
+  .number()
+  .optional()
+  .describe("Optional longitude coordinate of the punch location.");
+
+const accuracyField = z
+  .number()
+  .optional()
+  .describe("Optional accuracy in meters.");
+
 export const clockInInputSchema = z.object({
   org_id: orgIdField,
   member: memberField,
@@ -127,6 +163,11 @@ export const clockInInputSchema = z.object({
     .describe(
       "Optional ISO 8601 or 'YYYY-MM-DD HH:mm' start time if clocking in as of a specific time. Defaults to right now.",
     ),
+  site: siteField,
+  address: addressField,
+  latitude: latitudeField,
+  longitude: longitudeField,
+  accuracy: accuracyField,
   timezone: timezoneField,
 });
 
@@ -139,6 +180,11 @@ export const clockOutInputSchema = z.object({
     .describe(
       "Optional ISO 8601 or 'YYYY-MM-DD HH:mm' end time if clocking out as of a specific time. Defaults to right now.",
     ),
+  site: siteField,
+  address: addressField,
+  latitude: latitudeField,
+  longitude: longitudeField,
+  accuracy: accuracyField,
   timezone: timezoneField,
 });
 
@@ -907,6 +953,175 @@ function formatEntryForResponse(
   };
 }
 
+export type McpLocationInput = {
+  site?: string;
+  address?: string;
+  latitude?: number;
+  longitude?: number;
+  accuracy?: number;
+};
+
+export async function resolveMcpLocation(
+  orgId: string,
+  input: McpLocationInput,
+  defaultToPrimary = true,
+): Promise<StoredLocation | null> {
+  let sites: SiteLike[] = [];
+  try {
+    sites = (await dbGetSites(orgId)) as unknown as SiteLike[];
+  } catch (err) {
+    console.error("Failed to load sites for MCP location resolution:", err);
+  }
+
+  // 1. Explicit coordinates provided
+  if (
+    typeof input.latitude === "number" &&
+    typeof input.longitude === "number"
+  ) {
+    const coords = {
+      latitude: input.latitude,
+      longitude: input.longitude,
+      accuracy: input.accuracy ?? null,
+    };
+
+    let siteName: string | null = null;
+    let address: string | null = input.address ?? null;
+
+    if (input.site) {
+      siteName = input.site;
+      const matched = sites.find(
+        (s) => s.name.toLowerCase() === input.site?.toLowerCase(),
+      );
+      if (matched?.address && !address) {
+        address = matched.address;
+      }
+    } else if (sites.length > 0) {
+      const match = findMatchingSite(coords, sites);
+      if (match) {
+        siteName = match.name;
+        if (match.address && !address) {
+          address = match.address;
+        }
+      }
+    }
+
+    if (!address) {
+      try {
+        address = await reverseGeocode({
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+        });
+      } catch (err) {
+        console.error("MCP reverse geocode error:", err);
+      }
+    }
+
+    return {
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+      accuracy: coords.accuracy,
+      siteName,
+      address: address ?? null,
+    };
+  }
+
+  // 2. Specific site name provided
+  if (input.site) {
+    const trimmed = input.site.trim();
+    const matched =
+      sites.find((s) => s.name.toLowerCase() === trimmed.toLowerCase()) ??
+      sites.find((s) => s.name.toLowerCase().includes(trimmed.toLowerCase()));
+
+    if (matched) {
+      const lat = Number(matched.latitude);
+      const lon = Number(matched.longitude);
+      let address: string | null = matched.address ?? null;
+      if (!address) {
+        try {
+          address = await reverseGeocode({ latitude: lat, longitude: lon });
+        } catch (err) {
+          console.error("MCP reverse geocode error:", err);
+        }
+      }
+      return {
+        latitude: lat,
+        longitude: lon,
+        accuracy: 0,
+        siteName: matched.name,
+        address: address ?? null,
+      };
+    }
+
+    // Site wasn't in DB: try searching as address
+    try {
+      const suggestions = await searchAddress(trimmed);
+      if (suggestions.length > 0) {
+        const s = suggestions[0];
+        return {
+          latitude: s.latitude,
+          longitude: s.longitude,
+          accuracy: 0,
+          siteName: trimmed,
+          address: s.formatted,
+        };
+      }
+    } catch (err) {
+      console.error("MCP address search error:", err);
+    }
+
+    return null;
+  }
+
+  // 3. Specific address provided
+  if (input.address) {
+    try {
+      const suggestions = await searchAddress(input.address.trim());
+      if (suggestions.length > 0) {
+        const s = suggestions[0];
+        const match = findMatchingSite(
+          { latitude: s.latitude, longitude: s.longitude },
+          sites,
+        );
+        return {
+          latitude: s.latitude,
+          longitude: s.longitude,
+          accuracy: 0,
+          siteName: match?.name ?? null,
+          address: s.formatted,
+        };
+      }
+    } catch (err) {
+      console.error("MCP address search error:", err);
+    }
+
+    return null;
+  }
+
+  // 4. Default to organization's primary site (first site) if enabled and sites exist
+  if (defaultToPrimary && sites.length > 0) {
+    const primary = sites[0];
+    const lat = Number(primary.latitude);
+    const lon = Number(primary.longitude);
+    let address: string | null = primary.address ?? null;
+    if (!address) {
+      try {
+        address = await reverseGeocode({ latitude: lat, longitude: lon });
+      } catch (err) {
+        console.error("MCP reverse geocode error:", err);
+      }
+    }
+    return {
+      latitude: lat,
+      longitude: lon,
+      accuracy: 0,
+      siteName: primary.name,
+      address: address ?? null,
+    };
+  }
+
+  return null;
+}
+
 /*
  * ============================================================================
  * Tool Implementations
@@ -1206,7 +1421,14 @@ export async function clockInTool(
     customClockIn = parsed;
   }
 
-  const entry = await dbClockInAt(target.userId, org.orgId, customClockIn);
+  const punchLocation = await resolveMcpLocation(org.orgId, input, true);
+
+  const entry = await dbClockInAt(
+    target.userId,
+    org.orgId,
+    customClockIn,
+    punchLocation,
+  );
   if (!entry) {
     return {
       summary: `${target.name} is already clocked in.`,
@@ -1219,12 +1441,17 @@ export async function clockInTool(
   const memberMap = new Map(members.map((m) => [m.userId, m]));
   const formatted = formatEntryForResponse(entry, memberMap, tz);
 
+  const locationLabel = punchLocation?.siteName
+    ? `${punchLocation.siteName}${punchLocation.address ? ` (${punchLocation.address})` : ""}`
+    : (punchLocation?.address ?? null);
+
   return {
-    summary: `Clocked in ${target.name} at ${org.orgName} (${formatted.clock_in_local}).`,
+    summary: `Clocked in ${target.name} at ${org.orgName}${locationLabel ? ` at ${locationLabel}` : ""} (${formatted.clock_in_local}).`,
     data: {
       status: "clocked_in",
       organization: { org_id: org.orgId, name: org.orgName },
       entry: formatted,
+      location: punchLocation,
     },
   };
 }
@@ -1302,7 +1529,14 @@ export async function clockOutTool(
     customClockOut = parsed;
   }
 
-  const updated = await dbClockOutAt(target.userId, org.orgId, customClockOut);
+  const punchLocation = await resolveMcpLocation(org.orgId, input, false);
+
+  const updated = await dbClockOutAt(
+    target.userId,
+    org.orgId,
+    customClockOut,
+    punchLocation,
+  );
   if (!updated) {
     return {
       summary: `Could not clock out ${target.name}.`,
@@ -1316,12 +1550,17 @@ export async function clockOutTool(
   const memberMap = new Map(members.map((m) => [m.userId, m]));
   const formatted = formatEntryForResponse(updated, memberMap, tz);
 
+  const locationLabel = punchLocation?.siteName
+    ? `${punchLocation.siteName}${punchLocation.address ? ` (${punchLocation.address})` : ""}`
+    : (punchLocation?.address ?? null);
+
   return {
-    summary: `Clocked out ${target.name} at ${org.orgName} (${formatted.formatted_duration} worked: ${formatted.clock_in_local} → ${formatted.clock_out_local}).`,
+    summary: `Clocked out ${target.name} at ${org.orgName}${locationLabel ? ` at ${locationLabel}` : ""} (${formatted.formatted_duration} worked: ${formatted.clock_in_local} → ${formatted.clock_out_local}).`,
     data: {
       status: "clocked_out",
       organization: { org_id: org.orgId, name: org.orgName },
       entry: formatted,
+      location: punchLocation,
     },
   };
 }

@@ -37,6 +37,7 @@ import {
   isCaptureEnabled,
   type StoredLocation,
 } from "./geo";
+import { reverseGeocode } from "./geoapify";
 import type {
   BreakSettingsData,
   BreakType,
@@ -91,9 +92,38 @@ async function resolvePunchLocation(
     enforceGeofence,
   });
 
-  return decision.allowed
-    ? { ok: true, location: decision.location }
-    : { ok: false, reason: decision.reason };
+  if (!decision.allowed) {
+    return { ok: false, reason: decision.reason };
+  }
+
+  if (!decision.location) {
+    return { ok: true, location: null };
+  }
+
+  let address: string | null = null;
+  try {
+    address = await reverseGeocode({
+      latitude: decision.location.latitude,
+      longitude: decision.location.longitude,
+    });
+  } catch (err) {
+    console.error("Error reverse geocoding punch location: ", err);
+  }
+
+  if (!address && decision.location.siteName && sites?.length) {
+    const matched = sites.find((s) => s.name === decision.location?.siteName);
+    if (matched?.address) {
+      address = matched.address;
+    }
+  }
+
+  return {
+    ok: true,
+    location: {
+      ...decision.location,
+      address,
+    },
+  };
 }
 
 function parseFilterDate(
@@ -880,6 +910,7 @@ export async function createSiteDal(
   latitude: number,
   longitude: number,
   radiusMeters: number,
+  address?: string | null,
 ) {
   const authUser = await auth.protect();
   if (
@@ -895,12 +926,22 @@ export async function createSiteDal(
     return errAsync({ reason: invalid } as const);
   }
 
-  return await dbCreateSite(
-    authUser.orgId,
-    name.trim(),
-    latitude,
-    longitude,
-    radiusMeters,
+  return await (address === undefined
+    ? dbCreateSite(
+        authUser.orgId,
+        name.trim(),
+        latitude,
+        longitude,
+        radiusMeters,
+      )
+    : dbCreateSite(
+        authUser.orgId,
+        name.trim(),
+        latitude,
+        longitude,
+        radiusMeters,
+        address,
+      )
   )
     .then((created) => {
       return okAsync(created);
@@ -917,6 +958,7 @@ export async function updateSiteDal(
   latitude: number,
   longitude: number,
   radiusMeters: number,
+  address?: string | null,
 ) {
   const authUser = await auth.protect();
   if (
@@ -932,13 +974,24 @@ export async function updateSiteDal(
     return errAsync({ reason: invalid } as const);
   }
 
-  return await dbUpdateSite(
-    id,
-    authUser.orgId,
-    name.trim(),
-    latitude,
-    longitude,
-    radiusMeters,
+  return await (address === undefined
+    ? dbUpdateSite(
+        id,
+        authUser.orgId,
+        name.trim(),
+        latitude,
+        longitude,
+        radiusMeters,
+      )
+    : dbUpdateSite(
+        id,
+        authUser.orgId,
+        name.trim(),
+        latitude,
+        longitude,
+        radiusMeters,
+        address,
+      )
   )
     .then(
       (

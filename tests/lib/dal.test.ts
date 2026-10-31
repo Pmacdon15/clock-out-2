@@ -1022,6 +1022,7 @@ describe("clockIn location enforcement", () => {
       longitude: -75.6972,
       accuracy: 8,
       siteName: "Depot",
+      address: null,
     });
   });
 
@@ -1128,6 +1129,7 @@ describe("clockOut location capture", () => {
       longitude: -79.3832,
       accuracy: 30,
       siteName: null,
+      address: null,
     });
   });
 
@@ -1394,10 +1396,16 @@ describe.each([
   ["createSiteDal", false],
   ["updateSiteDal", true],
 ] as const)("%s", (_name, isUpdate) => {
-  const call = (siteName: string, lat: number, lon: number, radius: number) =>
+  const call = (
+    siteName: string,
+    lat: number,
+    lon: number,
+    radius: number,
+    address?: string | null,
+  ) =>
     isUpdate
-      ? updateSiteDal(7, siteName, lat, lon, radius)
-      : createSiteDal(siteName, lat, lon, radius);
+      ? updateSiteDal(7, siteName, lat, lon, radius, address)
+      : createSiteDal(siteName, lat, lon, radius, address);
   const dbFn = () => (isUpdate ? mocks.dbUpdateSite : mocks.dbCreateSite);
   const failureReason = isUpdate
     ? "Failed to update site"
@@ -1485,6 +1493,24 @@ describe.each([
       ...(isUpdate
         ? [7, "org_1", "Depot", 45, -75, 150]
         : ["org_1", "Depot", 45, -75, 150]),
+    );
+  });
+
+  it("saves site with address when provided", async () => {
+    mocks.protect.mockResolvedValue(withFeatures(admin, "geofencing"));
+    dbFn().mockResolvedValue({
+      id: 7,
+      org_id: "org_1",
+      name: "Depot",
+      address: "111 Albert St",
+    });
+    expect(
+      (await call("  Depot  ", 45, -75, 150, "111 Albert St")).isOk(),
+    ).toBe(true);
+    expect(dbFn()).toHaveBeenCalledWith(
+      ...(isUpdate
+        ? [7, "org_1", "Depot", 45, -75, 150, "111 Albert St"]
+        : ["org_1", "Depot", 45, -75, 150, "111 Albert St"]),
     );
   });
 

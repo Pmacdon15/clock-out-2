@@ -46,9 +46,11 @@ CREATE TABLE IF NOT EXISTS sites (
     latitude DOUBLE PRECISION NOT NULL,
     longitude DOUBLE PRECISION NOT NULL,
     radius_meters DOUBLE PRECISION NOT NULL DEFAULT 150,
+    address TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+ALTER TABLE sites ADD COLUMN IF NOT EXISTS address TEXT;
 
 -- Where a punch happened, captured only when the org turns location on.
 -- `*_site_name` is a snapshot of the matched site's name at punch time, so
@@ -57,10 +59,12 @@ ALTER TABLE time_entries ADD COLUMN IF NOT EXISTS clock_in_latitude DOUBLE PRECI
 ALTER TABLE time_entries ADD COLUMN IF NOT EXISTS clock_in_longitude DOUBLE PRECISION;
 ALTER TABLE time_entries ADD COLUMN IF NOT EXISTS clock_in_accuracy_m DOUBLE PRECISION;
 ALTER TABLE time_entries ADD COLUMN IF NOT EXISTS clock_in_site_name TEXT;
+ALTER TABLE time_entries ADD COLUMN IF NOT EXISTS clock_in_address TEXT;
 ALTER TABLE time_entries ADD COLUMN IF NOT EXISTS clock_out_latitude DOUBLE PRECISION;
 ALTER TABLE time_entries ADD COLUMN IF NOT EXISTS clock_out_longitude DOUBLE PRECISION;
 ALTER TABLE time_entries ADD COLUMN IF NOT EXISTS clock_out_accuracy_m DOUBLE PRECISION;
 ALTER TABLE time_entries ADD COLUMN IF NOT EXISTS clock_out_site_name TEXT;
+ALTER TABLE time_entries ADD COLUMN IF NOT EXISTS clock_out_address TEXT;
 
 CREATE INDEX idx_time_entries_user_org ON time_entries (user_id, org_id);
 

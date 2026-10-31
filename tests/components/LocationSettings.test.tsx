@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   createSiteAction: vi.fn(),
   updateSiteAction: vi.fn(),
   deleteSiteAction: vi.fn(),
+  searchAddressAction: vi.fn(),
+  reverseGeocodeAction: vi.fn(),
   captureCurrentPosition: vi.fn(),
   toast: { success: vi.fn(), error: vi.fn() },
 }));
@@ -17,6 +19,8 @@ vi.mock("@/lib/actions", () => ({
   createSiteAction: mocks.createSiteAction,
   updateSiteAction: mocks.updateSiteAction,
   deleteSiteAction: mocks.deleteSiteAction,
+  searchAddressAction: mocks.searchAddressAction,
+  reverseGeocodeAction: mocks.reverseGeocodeAction,
 }));
 vi.mock("@/lib/geolocation", () => ({
   captureCurrentPosition: mocks.captureCurrentPosition,
@@ -468,5 +472,79 @@ describe("LocationSettings 'use my location'", () => {
       ),
     );
     expect(screen.getByLabelText("Latitude")).toHaveValue(null);
+  });
+
+  it("fills address and site name when reverse geocoding succeeds on 'use my location'", async () => {
+    mocks.captureCurrentPosition.mockResolvedValue({
+      ok: true,
+      coordinates: { latitude: 45.4215, longitude: -75.6972, accuracy: 10 },
+    });
+    mocks.reverseGeocodeAction.mockResolvedValue({
+      success: true,
+      data: "111 Albert St, Ottawa, ON",
+    });
+    renderPanel();
+
+    fireEvent.click(screen.getByRole("button", { name: /Use my location/ }));
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Site name")).toHaveValue(
+        "111 Albert St, Ottawa, ON",
+      ),
+    );
+    expect(screen.getByLabelText("Latitude")).toHaveValue(45.4215);
+    expect(screen.getByLabelText("Longitude")).toHaveValue(-75.6972);
+  });
+});
+
+describe("LocationSettings address search", () => {
+  it("searches address and selects a suggestion to auto-fill", async () => {
+    mocks.searchAddressAction.mockResolvedValue({
+      success: true,
+      data: [
+        {
+          formatted: "111 Albert St, Ottawa, ON",
+          latitude: 45.4215,
+          longitude: -75.6972,
+          addressLine1: "111 Albert St",
+        },
+      ],
+    });
+    mocks.createSiteAction.mockResolvedValue({ success: true });
+    renderPanel();
+
+    const searchInput = screen.getByLabelText("Find address");
+    fireEvent.change(searchInput, { target: { value: "111 Albert" } });
+
+    await waitFor(() =>
+      expect(screen.getByText("111 Albert St, Ottawa, ON")).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByText("111 Albert St, Ottawa, ON"));
+
+    expect(screen.getByLabelText("Site name")).toHaveValue("111 Albert St");
+    expect(screen.getByLabelText("Latitude")).toHaveValue(45.4215);
+    expect(screen.getByLabelText("Longitude")).toHaveValue(-75.6972);
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Site" }));
+
+    await waitFor(() =>
+      expect(mocks.createSiteAction).toHaveBeenCalledWith(
+        "111 Albert St",
+        45.4215,
+        -75.6972,
+        150,
+        "111 Albert St, Ottawa, ON",
+      ),
+    );
+  });
+
+  it("displays site address in the sites list", () => {
+    const siteWithAddress = {
+      ...depot,
+      address: "100 Main St, Ottawa, ON",
+    };
+    renderPanel({ sites: [siteWithAddress] });
+    expect(screen.getByText("100 Main St, Ottawa, ON")).toBeInTheDocument();
   });
 });
