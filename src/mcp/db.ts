@@ -11,13 +11,16 @@ import {
   dbGetBreakSettings,
   dbGetBreakWithEntry,
   dbGetEntryBreaks,
+  dbGetLocationSettings,
   dbGetOrgTimeEntries,
   dbGetReportingSettings,
   dbGetSites,
+  dbGetSitesForEnforcement,
   dbGetTimeEntries,
   dbStartBreak,
   dbUpdateBreak,
   dbUpdateBreakSettings,
+  dbUpdateLocationSettings,
   dbUpdateReportingSettings,
   dbUpdateTimeEntry,
   ensureTimeEntryBreaksTable,
@@ -36,13 +39,16 @@ export {
   dbGetBreakSettings,
   dbGetBreakWithEntry,
   dbGetEntryBreaks,
+  dbGetLocationSettings,
   dbGetOrgTimeEntries,
   dbGetReportingSettings,
   dbGetSites,
+  dbGetSitesForEnforcement,
   dbGetTimeEntries,
   dbStartBreak,
   dbUpdateBreak,
   dbUpdateBreakSettings,
+  dbUpdateLocationSettings,
   dbUpdateReportingSettings,
   dbUpdateTimeEntry,
 };
@@ -225,6 +231,15 @@ export function invalidateReportingSettingsCache(orgId: string) {
 export function invalidateBreakSettingsCache(orgId: string) {
   try {
     revalidateTag(`break-settings-${orgId}`, { expire: 0 });
+  } catch (error) {
+    console.warn("Cache invalidation warning:", error);
+  }
+}
+
+export function invalidateLocationSettingsCache(orgId: string) {
+  try {
+    revalidateTag(`location-settings-${orgId}`, { expire: 0 });
+    revalidateTag(`sites-${orgId}`, { expire: 0 });
   } catch (error) {
     console.warn("Cache invalidation warning:", error);
   }
