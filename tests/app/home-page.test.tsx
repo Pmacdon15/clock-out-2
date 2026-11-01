@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   getOrgSites: vi.fn(),
   getOrgTimeEntries: vi.fn(),
   getTimeEntries: vi.fn(),
+  getTimeOffRequests: vi.fn(),
 }));
 
 vi.mock("@clerk/nextjs", () => ({
@@ -38,6 +39,7 @@ vi.mock("@/lib/dal", () => ({
   getOrgSites: mocks.getOrgSites,
   getOrgTimeEntries: mocks.getOrgTimeEntries,
   getTimeEntries: mocks.getTimeEntries,
+  getTimeOffRequests: mocks.getTimeOffRequests,
 }));
 vi.mock("@/components/DashboardTabs", () => ({
   default: (props: DashboardTabsProps) => {
@@ -82,6 +84,7 @@ function renderHome() {
   mocks.getOrgSites.mockReturnValue(Promise.resolve("sites"));
   mocks.getOrgMembers.mockReturnValue(Promise.resolve(["members"]));
   mocks.getOrgReportingSettings.mockReturnValue(Promise.resolve("settings"));
+  mocks.getTimeOffRequests.mockReturnValue(Promise.resolve("time_off"));
   mocks.getOrgTimeEntries.mockImplementation(async (filters) => ({
     org: filters,
   }));
@@ -157,6 +160,7 @@ describe("Home page", () => {
       userId: undefined,
       filters: undefined,
     });
+    await expect(props.timeOffPromise).resolves.toBe("time_off");
     await expect(props.hasReportingPromise).resolves.toBe(true);
     await expect(props.isAdminPromise).resolves.toBe(true);
     await expect(props.membersPromise).resolves.toEqual(["members"]);

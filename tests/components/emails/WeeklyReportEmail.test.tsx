@@ -130,4 +130,23 @@ describe("WeeklyReportEmail", () => {
       "https://clockout.patmac.ca/?defaultTab=view&timeframe=week",
     );
   });
+
+  it("shows approved time off when there is some", async () => {
+    const doc = await renderEmail({
+      ...base,
+      totalTimeOff: "16h",
+      timeOff: [
+        { type: "Vacation", dates: "Jan 1 – Jan 2, 2026", hours: "16h" },
+      ],
+    });
+    const text = doc.body.textContent ?? "";
+    expect(text).toContain("Approved Time Off: 16h");
+    expect(text).toContain("Vacation · Jan 1 – Jan 2, 2026");
+  });
+
+  it("leaves time off out when there is none", async () => {
+    const text = (await renderEmail(base)).body.textContent ?? "";
+    expect(text).not.toContain("Approved Time Off");
+    expect(text).not.toContain("Time Off");
+  });
 });

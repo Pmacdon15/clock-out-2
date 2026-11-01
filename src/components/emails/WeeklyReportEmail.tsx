@@ -39,6 +39,9 @@ interface WeeklyReportEmailProps {
       breaks?: string;
     }[];
   }[];
+  /** Approved time off in the period, already formatted for display. */
+  timeOff?: { type: string; dates: string; hours: string }[];
+  totalTimeOff?: string;
 }
 
 export const WeeklyReportEmail = ({
@@ -57,6 +60,8 @@ export const WeeklyReportEmail = ({
   customStart = "",
   customEnd = "",
   breakdown = [],
+  timeOff = [],
+  totalTimeOff = "0h",
 }: WeeklyReportEmailProps) => {
   let linkWithParams = `${dashboardUrl}/?defaultTab=view&timeframe=${timeframe}`;
   if (userId) linkWithParams += `&userId=${userId}`;
@@ -98,6 +103,11 @@ export const WeeklyReportEmail = ({
             <Text className="text-[14px] text-black leading-[24px]">
               <strong>Total Hours Logged:</strong> {totalHours}
             </Text>
+            {timeOff.length > 0 && (
+              <Text className="text-[14px] text-black leading-[24px]">
+                <strong>Approved Time Off:</strong> {totalTimeOff}
+              </Text>
+            )}
 
             {chartUrl && (
               <Section className="my-[20px]">
@@ -160,6 +170,37 @@ export const WeeklyReportEmail = ({
                 ))
               )}
             </Section>
+
+            {timeOff.length > 0 && (
+              <Section className="mt-[24px]">
+                <Heading className="m-0 mb-4 font-bold text-[18px] text-black">
+                  Time Off
+                </Heading>
+                {timeOff.map((item) => (
+                  <div
+                    key={`${item.type}-${item.dates}`}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      padding: "4px 0",
+                    }}
+                  >
+                    <Text
+                      className="m-0 text-[13px] text-gray-600"
+                      style={{ margin: 0 }}
+                    >
+                      {item.type} · {item.dates}
+                    </Text>
+                    <Text
+                      className="m-0 font-medium text-[13px] text-black"
+                      style={{ margin: 0 }}
+                    >
+                      {item.hours}
+                    </Text>
+                  </div>
+                ))}
+              </Section>
+            )}
 
             <Section className="mt-[32px] mb-[32px] text-center">
               <Button

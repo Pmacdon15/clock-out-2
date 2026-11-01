@@ -12,6 +12,7 @@ import {
   TimeframeSelector,
   type TimeframeValue,
 } from "./ViewHours/TimeframeSelector";
+import { TimeOffSummary } from "./ViewHours/TimeOffSummary";
 import { TimesheetExport } from "./ViewHours/TimesheetExport";
 
 export default function ViewHours({
@@ -21,6 +22,7 @@ export default function ViewHours({
   breakSettings,
   membersPromise,
   orgTimeEntriesPromise,
+  timeOffPromise,
   selectedUserIdPromise,
   timeframePromise,
   startDatePromise,
@@ -32,6 +34,8 @@ export default function ViewHours({
   const members = use(membersPromise || Promise.resolve([]));
   const selectedUserId = use(selectedUserIdPromise || Promise.resolve(""));
   const orgTimeEntriesResult = use(orgTimeEntriesPromise);
+  const timeOffResult = timeOffPromise ? use(timeOffPromise) : null;
+  const timeOffRequests = timeOffResult?.ok ? timeOffResult.value : [];
 
   const startDate =
     (startDatePromise ? use(startDatePromise) : null) ??
@@ -204,6 +208,13 @@ export default function ViewHours({
               visibleMemberIds={visibleMemberIds}
             />
           )}
+          <TimeOffSummary
+            endDate={endDate}
+            members={members}
+            requests={timeOffRequests}
+            startDate={startDate}
+            userId={isViewingAll ? null : selectedUserId || currentUserId || ""}
+          />
           <DaysWorkedBreakdown
             entries={displayEntries}
             isViewingAll={isViewingAll}
