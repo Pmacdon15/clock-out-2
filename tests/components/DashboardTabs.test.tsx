@@ -7,6 +7,7 @@ const captured = vi.hoisted(() => ({
   timeClock: [] as Record<string, unknown>[],
   viewHours: [] as Record<string, unknown>[],
   orgSettings: [] as Record<string, unknown>[],
+  schedule: [] as Record<string, unknown>[],
   orgSwitcher: vi.fn(),
 }));
 
@@ -28,6 +29,12 @@ vi.mock("@/components/OrgSettings", () => ({
     return <div data-testid="org-settings" />;
   },
 }));
+vi.mock("@/components/Schedule", () => ({
+  default: (props: Record<string, unknown>) => {
+    captured.schedule.push(props);
+    return <div data-testid="schedule" />;
+  },
+}));
 vi.mock("@/components/OrgSwitcher", () => ({
   useOrgSwitcher: captured.orgSwitcher,
 }));
@@ -47,6 +54,7 @@ function props(
     orgSettingsPromise: ok(null),
     orgTimeEntriesPromise: ok([]),
     recentEntriesPromise: ok(recent),
+    schedulePromise: ok([]),
     membersPromise: resolved([]),
     endDatePromise: resolved(undefined),
     startDatePromise: resolved(undefined),
@@ -100,6 +108,18 @@ describe("DashboardTabs", () => {
       orgTimeEntriesPromise: p.orgTimeEntriesPromise,
       startDatePromise: p.startDatePromise,
       endDatePromise: p.endDatePromise,
+    });
+  });
+
+  it("shows the schedule tab to every member", () => {
+    const p = props();
+    render(<DashboardTabs {...p} />);
+    fireEvent.click(screen.getByRole("button", { name: "Schedule" }));
+    expect(screen.getByTestId("schedule")).toBeInTheDocument();
+    expect(latest(captured.schedule)).toEqual({
+      isAdmin: false,
+      membersPromise: p.membersPromise,
+      schedulePromise: p.schedulePromise,
     });
   });
 

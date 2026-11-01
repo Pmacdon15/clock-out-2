@@ -153,6 +153,9 @@ export interface DashboardTabsProps {
   recentEntriesPromise: Promise<
     SerializableResult<TimeEntry[], { reason: string }>
   >;
+  schedulePromise: Promise<
+    SerializableResult<ScheduledShiftWithStatus[], { reason: string }>
+  >;
   membersPromise?: Promise<
     {
       id: string;
@@ -196,3 +199,40 @@ export interface ViewHoursProps {
   endDatePromise?: Promise<string | undefined>;
   currentUserIdPromise?: Promise<string | null | undefined>;
 }
+
+/** A shift an admin has published for a member. */
+export type ScheduledShift = {
+  id: number;
+  org_id: string;
+  user_id: string;
+  shift_start: Date;
+  shift_end: Date;
+  note: string | null;
+  created_by: string;
+  created_at?: Date;
+  updated_at?: Date;
+};
+
+/**
+ * How a scheduled shift compares with the member's actual clock times.
+ * - `scheduled`: not started yet (or still inside the late grace period)
+ * - `on_time` / `late`: the member clocked in for it
+ * - `not_clocked_in`: started more than the grace period ago, shift still
+ *   running, and no clock-in yet
+ * - `no_show`: the shift ended without a clock-in
+ */
+export type ShiftStatus =
+  | "scheduled"
+  | "on_time"
+  | "late"
+  | "not_clocked_in"
+  | "no_show";
+
+export type ScheduledShiftWithStatus = ScheduledShift & {
+  status: ShiftStatus;
+  /** Clock-in of the time entry matched to this shift, if any. */
+  actual_clock_in: Date | null;
+  actual_clock_out: Date | null;
+  /** Minutes after the scheduled start the member clocked in (0 if early). */
+  minutes_late: number | null;
+};
