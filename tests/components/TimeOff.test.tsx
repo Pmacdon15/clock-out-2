@@ -1,12 +1,19 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
-import type { TimeOffRequest } from "@/lib/types";
+import {
+  cleanup as cleanupDom,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { TimeOffAllowance, TimeOffRequest } from "@/lib/types";
 import { renderWithClient, resolved } from "../utils";
 
 const mocks = vi.hoisted(() => ({
   createTimeOffRequestAction: vi.fn(),
   reviewTimeOffRequestAction: vi.fn(),
   cancelTimeOffRequestAction: vi.fn(),
+  setTimeOffAllowanceAction: vi.fn(),
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
@@ -14,6 +21,7 @@ vi.mock("@/lib/actions", () => ({
   createTimeOffRequestAction: mocks.createTimeOffRequestAction,
   reviewTimeOffRequestAction: mocks.reviewTimeOffRequestAction,
   cancelTimeOffRequestAction: mocks.cancelTimeOffRequestAction,
+  setTimeOffAllowanceAction: mocks.setTimeOffAllowanceAction,
 }));
 vi.mock("sonner", () => ({ toast: mocks.toast }));
 
@@ -258,5 +266,155 @@ describe("TimeOff", () => {
     fireEvent.click(submit);
     await waitFor(() => expect(submit).toBeDisabled());
     expect(submit.querySelector(".animate-spin")).not.toBeNull();
+  });
+});
+
+describe("TimeOff PTO allowances", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-06-01T12:00:00"));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const allowance = (user_id: string, pto_days: number): TimeOffAllowance => ({
+    org_id: "org_1",
+    user_id,
+    pto_days,
+  });
+
+  function renderWithAllowances(
+    requests: TimeOffRequest[],
+    allowances: TimeOffAllowance[] | null,
+    {
+      isAdmin = false,
+      userId = "me" as string | null,
+      withMembers = true,
+    } = {},
+  ) {
+    renderWithClient(
+      <TimeOff
+        allowancesPromise={resolved(
+          allowances
+            ? { ok: true as const, value: allowances }
+            : { ok: false as const, error: { reason: "boom" } },
+        )}
+        currentUserIdPromise={resolved(userId)}
+        isAdmin={isAdmin}
+        membersPromise={withMembers ? resolved(members) : resolved([])}
+        timeOffPromise={resolved({ ok: true as const, value: requests })}
+      />,
+    );
+  }
+
+  it("shows a member their PTO balance for the year", () => {
+    renderWithAllowances(
+      [
+        request({ status: "approved" }), // Mar 9–10: 2 days used
+        request({ start_date: "2026-04-01", end_date: "2026-04-01" }), // pending
+        request({ request_type: "sick", status: "approved" }),
+        request({ request_type: "unpaid", status: "approved" }),
+      ],
+      [allowance("me", 10)],
+    );
+    const balance = card("My PTO for 2026");
+    expect(within(balance).getByText("10 days")).toBeVisible();
+    expect(within(balance).getByText("2 days")).toBeVisible();
+    expect(within(balance).getByText("1 day")).toBeVisible();
+    expect(within(balance).getByText("7 days")).toBeVisible();
+    // The request form says how much is left while vacation is picked.
+    expect(screen.getByText("7 days of PTO left for 2026")).toBeVisible();
+    expect(screen.queryByText("PTO days per employee")).toBeNull();
+  });
+
+  it("never shows a negative balance", () => {
+    renderWithAllowances(
+      [request({ status: "approved" })],
+      [allowance("me", 1)],
+    );
+    expect(screen.getByText("0 days of PTO left for 2026")).toBeVisible();
+  });
+
+  it("explains unpaid time off and hides the PTO hint for other types", () => {
+    renderWithAllowances([], [allowance("me", 5)]);
+    fireEvent.change(screen.getByLabelText("Type"), {
+      target: { value: "unpaid" },
+    });
+    expect(
+      screen.getByText("Unpaid time off doesn't use your PTO and isn't paid."),
+    ).toBeVisible();
+    expect(screen.queryByText(/of PTO left/)).toBeNull();
+  });
+
+  it("shows no balance without an allowance, a user, or allowances", () => {
+    renderWithAllowances([], []);
+    expect(screen.queryByText(/My PTO/)).toBeNull();
+    expect(screen.queryByText(/of PTO left/)).toBeNull();
+    cleanupDom();
+    renderWithAllowances([], [allowance("me", 5)], { userId: null });
+    expect(screen.queryByText(/My PTO/)).toBeNull();
+    cleanupDom();
+    renderWithAllowances([], null, { isAdmin: true });
+    expect(screen.queryByText(/My PTO/)).toBeNull();
+    expect(screen.queryByText("PTO days per employee")).toBeNull();
+  });
+
+  it("lets admins see and set each member's PTO days", async () => {
+    mocks.setTimeOffAllowanceAction.mockResolvedValue({
+      success: true,
+      data: {},
+    });
+    renderWithAllowances(
+      [request({ user_id: "u2", status: "approved" })],
+      [allowance("u2", 15)],
+      { isAdmin: true },
+    );
+    const settings = card("PTO days per employee");
+    const rows = within(settings).getAllByRole("listitem");
+    expect(rows[0]).toHaveTextContent("No PTO limit");
+    expect(rows[1]).toHaveTextContent(
+      "2 days used · 0 days pending · 13 days left",
+    );
+
+    const graceInput = screen.getByLabelText("PTO days per year for Grace");
+    expect(graceInput).toHaveValue(15);
+    const graceSave = within(rows[1]).getByRole("button", { name: "Save" });
+    expect(graceSave).toBeDisabled();
+
+    // Clearing the field removes the limit.
+    fireEvent.change(graceInput, { target: { value: "" } });
+    fireEvent.click(graceSave);
+    await waitFor(() =>
+      expect(mocks.setTimeOffAllowanceAction).toHaveBeenCalledWith("u2", null),
+    );
+    expect(mocks.toast.success).toHaveBeenCalledWith("PTO allowance saved");
+
+    const meInput = screen.getByLabelText("PTO days per year for Me");
+    expect(meInput).toHaveValue(null);
+    fireEvent.change(meInput, { target: { value: "12.5" } });
+    fireEvent.click(within(rows[0]).getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(mocks.setTimeOffAllowanceAction).toHaveBeenCalledWith("me", 12.5),
+    );
+  });
+
+  it("shows a spinner while an allowance saves", async () => {
+    mocks.setTimeOffAllowanceAction.mockReturnValue(new Promise(() => {}));
+    renderWithAllowances([], [], { isAdmin: true });
+    fireEvent.change(screen.getByLabelText("PTO days per year for Me"), {
+      target: { value: "3" },
+    });
+    const save = within(card("PTO days per employee")).getAllByRole("button", {
+      name: "Save",
+    })[0];
+    fireEvent.click(save);
+    await waitFor(() => expect(save).toBeDisabled());
+    expect(save.querySelector(".animate-spin")).not.toBeNull();
+  });
+
+  it("shows admins an empty member list", () => {
+    renderWithAllowances([], [], { isAdmin: true, withMembers: false });
+    expect(screen.getByText("No members yet.")).toBeVisible();
   });
 });

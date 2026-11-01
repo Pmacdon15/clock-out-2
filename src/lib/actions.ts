@@ -17,6 +17,7 @@ import {
   deleteTimeEntry as dalDeleteTimeEntry,
   endBreak as dalEndBreak,
   reviewTimeOffRequestDal as dalReviewTimeOffRequest,
+  setTimeOffAllowanceDal as dalSetTimeOffAllowance,
   startBreak as dalStartBreak,
   updateBreakDal as dalUpdateBreak,
   updateSiteDal as dalUpdateSite,
@@ -457,4 +458,12 @@ export async function reviewTimeOffRequestAction(
 
 export async function cancelTimeOffRequestAction(id: number) {
   return timeOffResult(await dalCancelTimeOffRequest(id));
+}
+
+/** Sets a member's yearly PTO days; null removes the limit. */
+export async function setTimeOffAllowanceAction(
+  memberId: string,
+  ptoDays: number | null,
+) {
+  return timeOffResult(await dalSetTimeOffAllowance(memberId, ptoDays));
 }

@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   getOrgTimeEntries: vi.fn(),
   getSchedule: vi.fn(),
   getTimeEntries: vi.fn(),
+  getTimeOffAllowances: vi.fn(),
   getTimeOffRequests: vi.fn(),
 }));
 
@@ -43,6 +44,7 @@ vi.mock("@/lib/dal", () => ({
   getOrgTimeEntries: mocks.getOrgTimeEntries,
   getSchedule: mocks.getSchedule,
   getTimeEntries: mocks.getTimeEntries,
+  getTimeOffAllowances: mocks.getTimeOffAllowances,
   getTimeOffRequests: mocks.getTimeOffRequests,
 }));
 vi.mock("@/components/DashboardTabs", () => ({
@@ -92,6 +94,7 @@ function renderHome() {
   mocks.getOrgMembers.mockReturnValue(Promise.resolve(["members"]));
   mocks.getOrgReportingSettings.mockReturnValue(Promise.resolve("settings"));
   mocks.getTimeOffRequests.mockReturnValue(Promise.resolve("time_off"));
+  mocks.getTimeOffAllowances.mockReturnValue(Promise.resolve("allowances"));
   mocks.getSchedule.mockReturnValue(Promise.resolve("schedule"));
   mocks.getOrgTimeEntries.mockImplementation(async (filters) => ({
     org: filters,
@@ -170,6 +173,7 @@ describe("Home page", () => {
     });
     await expect(props.schedulePromise).resolves.toBe("schedule");
     await expect(props.timeOffPromise).resolves.toBe("time_off");
+    await expect(props.timeOffAllowancesPromise).resolves.toBe("allowances");
     await expect(props.hasReportingPromise).resolves.toBe(true);
     await expect(props.isAdminPromise).resolves.toBe(true);
     await expect(props.membersPromise).resolves.toEqual(["members"]);

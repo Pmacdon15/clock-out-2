@@ -190,6 +190,17 @@ describe("WeeklyReportEmail", () => {
     expect(text).toContain("Vacation · Jan 1 – Jan 2, 2026");
   });
 
+  it("notes unpaid time off beside the paid total", async () => {
+    const doc = await renderEmail({
+      ...base,
+      totalTimeOff: "0h",
+      totalUnpaidTimeOff: "8h",
+      timeOff: [{ type: "Unpaid time off", dates: "Jan 1, 2026", hours: "8h" }],
+    });
+    const text = doc.body.textContent ?? "";
+    expect(text).toContain("Approved Time Off: 0h (+ 8h unpaid)");
+  });
+
   it("leaves time off out when there is none", async () => {
     const text = (await renderEmail(base)).body.textContent ?? "";
     expect(text).not.toContain("Approved Time Off");

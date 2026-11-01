@@ -134,7 +134,7 @@ CREATE TABLE IF NOT EXISTS time_off_requests (
     id SERIAL PRIMARY KEY,
     org_id TEXT NOT NULL,
     user_id TEXT NOT NULL,
-    request_type TEXT NOT NULL CHECK (request_type IN ('vacation', 'sick')),
+    request_type TEXT NOT NULL CHECK (request_type IN ('vacation', 'sick', 'unpaid')),
     start_date DATE NOT NULL,
     end_date DATE NOT NULL,
     hours_per_day DOUBLE PRECISION NOT NULL DEFAULT 8,
@@ -149,3 +149,12 @@ CREATE TABLE IF NOT EXISTS time_off_requests (
 );
 CREATE INDEX IF NOT EXISTS idx_time_off_requests_org_dates
     ON time_off_requests (org_id, end_date);
+
+-- PTO (vacation) days each member gets per calendar year. No row = no limit.
+CREATE TABLE IF NOT EXISTS time_off_allowances (
+    org_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    pto_days DOUBLE PRECISION NOT NULL CHECK (pto_days >= 0),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    PRIMARY KEY (org_id, user_id)
+);

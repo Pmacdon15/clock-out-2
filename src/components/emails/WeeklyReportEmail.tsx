@@ -50,7 +50,10 @@ interface WeeklyReportEmailProps {
   }[];
   /** Approved time off in the period, already formatted for display. */
   timeOff?: { type: string; dates: string; hours: string }[];
+  /** Paid time off hours (vacation and sick days). */
   totalTimeOff?: string;
+  /** Unpaid time off hours, when there are any. */
+  totalUnpaidTimeOff?: string;
 }
 
 export const WeeklyReportEmail = ({
@@ -74,6 +77,7 @@ export const WeeklyReportEmail = ({
   breakdown = [],
   timeOff = [],
   totalTimeOff = "0h",
+  totalUnpaidTimeOff,
 }: WeeklyReportEmailProps) => {
   let linkWithParams = `${dashboardUrl}/?defaultTab=view&timeframe=${timeframe}`;
   if (userId) linkWithParams += `&userId=${userId}`;
@@ -131,6 +135,12 @@ export const WeeklyReportEmail = ({
             {timeOff.length > 0 && (
               <Text className="text-[14px] text-black leading-[24px]">
                 <strong>Approved Time Off:</strong> {totalTimeOff}
+                {totalUnpaidTimeOff && (
+                  <span className="text-gray-500">
+                    {" "}
+                    (+ {totalUnpaidTimeOff} unpaid)
+                  </span>
+                )}
               </Text>
             )}
 

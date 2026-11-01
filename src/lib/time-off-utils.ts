@@ -1,12 +1,21 @@
 import { format } from "date-fns";
 import type { TimeOffRequest, TimeOffStatus, TimeOffType } from "./types";
 
-export const TIME_OFF_TYPES: TimeOffType[] = ["vacation", "sick"];
+export const TIME_OFF_TYPES: TimeOffType[] = ["vacation", "sick", "unpaid"];
 
 export const TIME_OFF_TYPE_LABELS: Record<TimeOffType, string> = {
-  vacation: "Vacation",
+  vacation: "Vacation (PTO)",
   sick: "Sick day",
+  unpaid: "Unpaid time off",
 };
+
+/** Time off types that are paid; unpaid time off is listed but not paid. */
+export function isPaidTimeOff(type: TimeOffType) {
+  return type !== "unpaid";
+}
+
+/** Most PTO days an admin can give a member per year. */
+export const MAX_PTO_DAYS = 365;
 
 export const TIME_OFF_STATUS_LABELS: Record<TimeOffStatus, string> = {
   pending: "Pending",
@@ -129,4 +138,84 @@ export function formatTimeOffDates(
 /** "8h" or "7.5h". */
 export function formatTimeOffHours(hours: number) {
   return `${Number.isInteger(hours) ? hours : hours.toFixed(1)}h`;
+}
+
+/** Returns why a PTO allowance can't be saved, or null when it's fine. */
+export function invalidAllowanceReason(days: number): string | null {
+  if (!Number.isFinite(days) || days < 0 || days > MAX_PTO_DAYS) {
+    return `PTO days must be between 0 and ${MAX_PTO_DAYS}`;
+  }
+  if (Math.round(days * 2) !== days * 2) {
+    return "PTO days must be in half days";
+  }
+  return null;
+}
+
+/** First and last day of a calendar year as `YYYY-MM-DD`. */
+function yearRange(year: number): [string, string] {
+  return [`${year}-01-01`, `${year}-12-31`];
+}
+
+/**
+ * PTO days a member has used in `year`: every day of their vacation requests
+ * with one of `statuses` that falls in that year.
+ */
+export function ptoDaysUsed(
+  requests: Pick<
+    TimeOffRequest,
+    "user_id" | "request_type" | "status" | "start_date" | "end_date"
+  >[],
+  userId: string,
+  year: number,
+  statuses: TimeOffStatus[] = ["approved"],
+) {
+  const [start, end] = yearRange(year);
+  return requests
+    .filter(
+      (r) =>
+        r.user_id === userId &&
+        r.request_type === "vacation" &&
+        statuses.includes(r.status),
+    )
+    .reduce((sum, r) => sum + timeOffDaysInRange(r, start, end), 0);
+}
+
+/**
+ * Why taking `request` would go over the member's yearly PTO allowance, or
+ * null when it fits (or isn't PTO). `existing` are the member's other
+ * requests that already count against the allowance.
+ */
+export function ptoOverAllowanceReason(
+  request: Pick<
+    TimeOffRequest,
+    "user_id" | "request_type" | "start_date" | "end_date"
+  > & { id?: number },
+  allowanceDays: number | null | undefined,
+  existing: Pick<
+    TimeOffRequest,
+    "id" | "user_id" | "request_type" | "status" | "start_date" | "end_date"
+  >[],
+  statuses: TimeOffStatus[] = ["approved"],
+): string | null {
+  if (request.request_type !== "vacation") return null;
+  if (allowanceDays === null || allowanceDays === undefined) return null;
+  const others = existing.filter((r) => r.id !== request.id);
+  const firstYear = Number(request.start_date.slice(0, 4));
+  const lastYear = Number(request.end_date.slice(0, 4));
+  for (let year = firstYear; year <= lastYear; year++) {
+    const [start, end] = yearRange(year);
+    const wanted = timeOffDaysInRange(request, start, end);
+    const used = ptoDaysUsed(others, request.user_id, year, statuses);
+    if (used + wanted > allowanceDays) {
+      const left = Math.max(0, allowanceDays - used);
+      return `Not enough PTO for ${year}: ${formatDays(left)} left, ${formatDays(wanted)} asked for`;
+    }
+  }
+  return null;
+}
+
+/** "1 day" or "2.5 days". */
+export function formatDays(days: number) {
+  const n = Number.isInteger(days) ? days : Number(days.toFixed(1));
+  return `${n} ${n === 1 ? "day" : "days"}`;
 }

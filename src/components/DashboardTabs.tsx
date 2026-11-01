@@ -26,6 +26,7 @@ export default function DashboardTabs({
   recentEntriesPromise,
   schedulePromise,
   timeOffPromise,
+  timeOffAllowancesPromise,
   membersPromise,
   selectedUserIdPromise,
   selectedWeekPromise,
@@ -148,6 +149,7 @@ export default function DashboardTabs({
           <TimeOff
             currentUserIdPromise={userIdPromise}
             isAdmin={isAdmin}
+            allowancesPromise={timeOffAllowancesPromise}
             membersPromise={membersPromise}
             timeOffPromise={timeOffPromise}
           />
