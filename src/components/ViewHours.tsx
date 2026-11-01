@@ -2,12 +2,14 @@
 
 import { useUser } from "@clerk/nextjs";
 import { use, useMemo, useState } from "react";
+import { computeEntryOvertime, isOvertimeEnabled } from "@/lib/overtime";
 import type { ViewHoursProps } from "@/lib/types";
 import { DaysWorkedBreakdown } from "./ViewHours/DaysWorkedBreakdown";
 import { EntryList } from "./ViewHours/EntryList";
 import { HoursBarChart } from "./ViewHours/HoursBarChart";
 import { HoursLineChart } from "./ViewHours/HoursLineChart";
 import { MemberToggles } from "./ViewHours/MemberToggles";
+import { OvertimeSummary } from "./ViewHours/OvertimeSummary";
 import {
   TimeframeSelector,
   type TimeframeValue,
@@ -19,6 +21,7 @@ export default function ViewHours({
   setOptimisticEntries,
   isAdmin = false,
   breakSettings,
+  overtimeSettings,
   membersPromise,
   orgTimeEntriesPromise,
   selectedUserIdPromise,
@@ -98,6 +101,15 @@ export default function ViewHours({
   // Since the entries are already filtered by the server, we use them directly.
   const displayEntries = isViewingAll ? orgEntries : entries;
 
+  const overtimeEnabled = isOvertimeEnabled(overtimeSettings);
+  const overtimeByEntry = useMemo(
+    () =>
+      overtimeEnabled
+        ? computeEntryOvertime(displayEntries, overtimeSettings, breakSettings)
+        : undefined,
+    [overtimeEnabled, displayEntries, overtimeSettings, breakSettings],
+  );
+
   // Previous total hours calculation placeholder
   const previousTotalHours = 0;
 
@@ -133,6 +145,7 @@ export default function ViewHours({
             entries={displayEntries}
             isViewingAll={isViewingAll}
             members={members}
+            overtimeSettings={overtimeSettings}
             startDate={startDate}
           />
         )}
@@ -204,6 +217,15 @@ export default function ViewHours({
               visibleMemberIds={visibleMemberIds}
             />
           )}
+          {overtimeByEntry && (
+            <OvertimeSummary
+              entries={displayEntries}
+              isViewingAll={isViewingAll}
+              members={members}
+              overtimeByEntry={overtimeByEntry}
+              overtimeSettings={overtimeSettings}
+            />
+          )}
           <DaysWorkedBreakdown
             entries={displayEntries}
             isViewingAll={isViewingAll}
@@ -214,6 +236,7 @@ export default function ViewHours({
             isAdmin={isAdmin}
             isViewingAll={isViewingAll}
             members={members}
+            overtimeByEntry={overtimeByEntry}
             setOptimisticEntries={setOptimisticEntries}
           />
         </div>

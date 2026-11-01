@@ -6,6 +6,7 @@ import type {
   BreakSettingsData,
   BreakType,
   LocationSettingsData,
+  OvertimeSettingsData,
   ReportingSettingsData,
   SiteData,
   TimeEntry,
@@ -361,6 +362,82 @@ export async function dbUpdateBreakSettings(
 		RETURNING *
 	`;
   return updated as BreakSettingsData;
+}
+
+/* --------------------------------------------------------- overtime -- */
+
+let overtimeSettingsTableReady: Promise<void> | null = null;
+
+/**
+ * Overtime thresholds are free for every admin. Production databases that
+ * predate `overtime_settings` in schema.sql don't have the table, so create
+ * it on first use, the same way `ensureBreakSettingsTable` does. Runs once
+ * per server instance; a failure is not cached, so the next call retries.
+ */
+export function ensureOvertimeSettingsTable(): Promise<void> {
+  overtimeSettingsTableReady ??= (async () => {
+    await sql`
+		CREATE TABLE IF NOT EXISTS settings (
+			org_id TEXT PRIMARY KEY,
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+		)
+	`;
+    await sql`
+		CREATE TABLE IF NOT EXISTS overtime_settings (
+			org_id TEXT PRIMARY KEY REFERENCES settings(org_id) ON DELETE CASCADE,
+			daily_threshold_hours DOUBLE PRECISION,
+			weekly_threshold_hours DOUBLE PRECISION,
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+		)
+	`;
+  })().catch((error) => {
+    overtimeSettingsTableReady = null;
+    throw error;
+  });
+  return overtimeSettingsTableReady;
+}
+
+/** Test-only: forget that the table check ran. */
+export function resetOvertimeSettingsTableCheck() {
+  overtimeSettingsTableReady = null;
+}
+
+export async function dbGetOvertimeSettings(orgId: string) {
+  "use cache";
+  cacheTag(`overtime-settings-${orgId}`);
+  cacheLife("hours");
+  await ensureOvertimeSettingsTable();
+  const [settings] = await sql`
+		SELECT * FROM overtime_settings WHERE org_id = ${orgId}
+	`;
+  return settings as OvertimeSettingsData | undefined;
+}
+
+export async function dbUpdateOvertimeSettings(
+  orgId: string,
+  dailyThresholdHours: number | null,
+  weeklyThresholdHours: number | null,
+) {
+  await ensureOvertimeSettingsTable();
+  await sql`
+		INSERT INTO settings (org_id, updated_at)
+		VALUES (${orgId}, NOW())
+		ON CONFLICT (org_id) DO UPDATE SET updated_at = NOW()
+	`;
+
+  const [updated] = await sql`
+		INSERT INTO overtime_settings (
+			org_id, daily_threshold_hours, weekly_threshold_hours, updated_at
+		)
+		VALUES (${orgId}, ${dailyThresholdHours}, ${weeklyThresholdHours}, NOW())
+		ON CONFLICT (org_id)
+		DO UPDATE SET
+            daily_threshold_hours = ${dailyThresholdHours},
+            weekly_threshold_hours = ${weeklyThresholdHours},
+            updated_at = NOW()
+		RETURNING *
+	`;
+  return updated as OvertimeSettingsData;
 }
 
 /* ----------------------------------------------------------- breaks -- */

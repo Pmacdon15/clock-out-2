@@ -63,6 +63,36 @@ describe("EntryItem display", () => {
     expect(screen.queryByTestId("delete")).not.toBeInTheDocument();
   });
 
+  it("highlights a shift's overtime share", () => {
+    renderItem({
+      isAdmin: false,
+      overtime: {
+        regularHours: 8,
+        overtimeHours: 0.5,
+        dailyOvertimeHours: 0.5,
+        weeklyOvertimeHours: 0,
+      },
+    });
+    expect(screen.getByTestId("overtime-5")).toHaveTextContent(
+      "+0.50h overtime",
+    );
+    expect(screen.getByText("8.50h").className).toContain("text-orange-600");
+  });
+
+  it("shows no overtime badge for a shift without overtime", () => {
+    renderItem({
+      isAdmin: false,
+      overtime: {
+        regularHours: 8.5,
+        overtimeHours: 0,
+        dailyOvertimeHours: 0,
+        weeklyOvertimeHours: 0,
+      },
+    });
+    expect(screen.queryByTestId("overtime-5")).not.toBeInTheDocument();
+    expect(screen.getByText("8.50h").className).not.toContain("orange");
+  });
+
   it("measures open entries up to now", () => {
     renderItem({ entry: { ...entry, clock_out: null }, isAdmin: false });
     expect(screen.getByText("3.00h")).toBeInTheDocument();

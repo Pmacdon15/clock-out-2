@@ -77,6 +77,17 @@ export type BreakSettingsData = {
 /** Per-break-type limits in minutes; null = no limit. */
 export type BreakLimits = Record<BreakType, number | null>;
 
+/**
+ * Overtime thresholds in hours. Null/absent turns that threshold off; with
+ * both off, nothing is ever counted as overtime.
+ */
+export type OvertimeSettingsData = {
+  org_id: string;
+  daily_threshold_hours: number | null;
+  weekly_threshold_hours: number | null;
+  updated_at?: Date;
+};
+
 export type LocationSettingsData = {
   org_id: string;
   /** 'off' | 'optional' | 'required' */
@@ -132,6 +143,9 @@ export interface DashboardTabsProps {
       }
     >
   >;
+  overtimeSettingsPromise?: Promise<
+    SerializableResult<OvertimeSettingsData | null, { reason: string }>
+  >;
   sitesPromise?: Promise<SerializableResult<SiteData[], { reason: string }>>;
   orgTimeEntriesPromise: Promise<
     SerializableResult<TimeEntry[], { reason: string }>
@@ -163,6 +177,7 @@ export interface ViewHoursProps {
   setOptimisticEntries: (action: EntryAction) => void;
   isAdmin?: boolean;
   breakSettings?: BreakSettingsData | null;
+  overtimeSettings?: OvertimeSettingsData | null;
   membersPromise?: Promise<
     {
       id: string;

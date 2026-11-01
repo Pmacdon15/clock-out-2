@@ -5,12 +5,14 @@ import type {
   BreakSettingsData,
   LocationSettingsData,
   OrgSettingsData,
+  OvertimeSettingsData,
   ReportingSettingsData,
   SerializableResult,
   SiteData,
 } from "@/lib/types";
 import BreakSettings from "./BreakSettings";
 import LocationSettings from "./LocationSettings";
+import OvertimeSettings from "./OvertimeSettings";
 import ReportingSettings from "./ReportingSettings";
 
 interface OrgSettingsProps {
@@ -38,6 +40,9 @@ interface OrgSettingsProps {
       }
     >
   >;
+  overtimeSettingsPromise?: Promise<
+    SerializableResult<OvertimeSettingsData | null, { reason: string }>
+  >;
   sitesPromise?: Promise<SerializableResult<SiteData[], { reason: string }>>;
   hasReporting: boolean;
   hasGeofencing?: boolean;
@@ -49,6 +54,7 @@ export default function OrgSettings({
   orgSettingsPromise,
   breakSettingsPromise,
   locationSettingsPromise,
+  overtimeSettingsPromise,
   sitesPromise,
 }: OrgSettingsProps) {
   const settingsResult = use(orgSettingsPromise);
@@ -57,6 +63,9 @@ export default function OrgSettings({
     : null;
   const locationSettingsResult = locationSettingsPromise
     ? use(locationSettingsPromise)
+    : null;
+  const overtimeSettingsResult = overtimeSettingsPromise
+    ? use(overtimeSettingsPromise)
     : null;
   const sitesResult = sitesPromise ? use(sitesPromise) : null;
   const sites = sitesResult?.ok ? sitesResult.value : [];
@@ -87,11 +96,27 @@ export default function OrgSettings({
       },
     );
 
+  const [optimisticOvertimeSettings, setOptimisticOvertimeSettings] =
+    useOptimistic(
+      overtimeSettingsResult?.ok ? overtimeSettingsResult.value : null,
+      (
+        state: OvertimeSettingsData | null,
+        next: Partial<OvertimeSettingsData>,
+      ) => {
+        if (!state) return state;
+        return { ...state, ...next };
+      },
+    );
+
   return (
     <div className="space-y-8">
       <BreakSettings
         initialData={optimisticBreakSettings}
         onUpdateOptimistic={(next) => setOptimisticBreakSettings(next)}
+      />
+      <OvertimeSettings
+        initialData={optimisticOvertimeSettings}
+        onUpdateOptimistic={(next) => setOptimisticOvertimeSettings(next)}
       />
       <LocationSettings
         hasGeofencing={hasGeofencing}

@@ -7,13 +7,16 @@ vi.mock("@/components/ViewHours/EntryItem", () => ({
     entry,
     isAdmin,
     memberName,
+    overtime,
   }: {
     entry: { id: number };
     isAdmin: boolean;
     memberName?: string;
+    overtime?: { overtimeHours: number };
   }) => (
     <div data-testid="entry">
-      {entry.id}|{String(isAdmin)}|{memberName ?? "none"}
+      {entry.id}|{String(isAdmin)}|{memberName ?? "none"}|
+      {overtime ? overtime.overtimeHours : "no-ot"}
     </div>
   ),
 }));
@@ -76,5 +79,27 @@ describe("EntryList", () => {
       />,
     );
     expect(screen.getByTestId("entry")).toHaveTextContent("3|false|none");
+  });
+
+  it("hands each entry its overtime split", () => {
+    const first = makeEntry({ id: 1, user_id: "u1" });
+    const second = makeEntry({ id: 2, user_id: "u1" });
+    const split = {
+      regularHours: 6,
+      overtimeHours: 2,
+      dailyOvertimeHours: 2,
+      weeklyOvertimeHours: 0,
+    };
+    render(
+      <EntryList
+        entries={[first, second]}
+        isAdmin={false}
+        overtimeByEntry={new Map([[second, split]])}
+        setOptimisticEntries={vi.fn()}
+      />,
+    );
+    const items = screen.getAllByTestId("entry");
+    expect(items[0]).toHaveTextContent("1|false|none|no-ot");
+    expect(items[1]).toHaveTextContent("2|false|none|2");
   });
 });

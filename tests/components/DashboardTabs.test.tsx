@@ -209,6 +209,59 @@ describe("DashboardTabs", () => {
     expect(latest(captured.timeClock).breakSettings).toBeNull();
   });
 
+  it("passes overtime settings to the hours view and the settings tab", () => {
+    const overtimeSettings = {
+      org_id: "org_1",
+      daily_threshold_hours: 8,
+      weekly_threshold_hours: 40,
+    };
+    const overtimeSettingsPromise = ok(overtimeSettings);
+    render(
+      <DashboardTabs
+        {...props({
+          defaultTabPromise: resolved("view"),
+          overtimeSettingsPromise,
+        })}
+      />,
+    );
+    expect(latest(captured.viewHours).overtimeSettings).toEqual(
+      overtimeSettings,
+    );
+
+    render(
+      <DashboardTabs
+        {...props({
+          defaultTabPromise: resolved("settings"),
+          isAdminPromise: resolved(true),
+          overtimeSettingsPromise,
+        })}
+      />,
+    );
+    expect(latest(captured.orgSettings).overtimeSettingsPromise).toBe(
+      overtimeSettingsPromise,
+    );
+
+    render(
+      <DashboardTabs
+        {...props({
+          defaultTabPromise: resolved("view"),
+          overtimeSettingsPromise: resolved({
+            ok: false,
+            error: { reason: "err" },
+          }),
+        })}
+      />,
+    );
+    expect(latest(captured.viewHours).overtimeSettings).toBeNull();
+  });
+
+  it("gives the hours view no overtime settings without the promise", () => {
+    render(
+      <DashboardTabs {...props({ defaultTabPromise: resolved("view") })} />,
+    );
+    expect(latest(captured.viewHours).overtimeSettings).toBeNull();
+  });
+
   it("shows settings to admins without reporting so they can set lunch breaks", () => {
     const p = props({
       defaultTabPromise: resolved("settings"),

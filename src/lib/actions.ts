@@ -17,6 +17,7 @@ import {
   updateTimeEntry as dalUpdateTimeEntry,
   updateBreakSettingsDal,
   updateLocationSettingsDal,
+  updateOvertimeSettingsDal,
   updateReportingSettingsDal,
 } from "./dal";
 import type { Coordinates } from "./geo";
@@ -156,6 +157,26 @@ export async function updateBreakSettingAction(
   return result.match(
     (entry) => {
       updateTag(`break-settings-${entry.org_id}`);
+      return { success: true, data: entry };
+    },
+    (err) => {
+      return { success: false, error: err.reason };
+    },
+  );
+}
+
+export async function updateOvertimeSettingsAction(
+  dailyThresholdHours: number | null,
+  weeklyThresholdHours: number | null,
+) {
+  const result = await updateOvertimeSettingsDal(
+    dailyThresholdHours,
+    weeklyThresholdHours,
+  );
+
+  return result.match(
+    (entry) => {
+      updateTag(`overtime-settings-${entry.org_id}`);
       return { success: true, data: entry };
     },
     (err) => {
