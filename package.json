@@ -6,11 +6,15 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "next typegen && tsc --noEmit",
     "lint": "biome check --write --unsafe",
     "format": "biome format --write",
     "postbuild": "next-sitemap",
     "test": "vitest run",
+    "test:unit": "vitest run --project unit",
+    "test:components": "vitest run --project components",
+    "test:app": "vitest run --project app",
+    "test:build": "next build && vitest run --project build",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
   },
@@ -57,6 +61,7 @@
     "typescript": "^7.0.2",
     "vitest": "^4.1.12"
   },
+  "packageManager": "bun@1.4.4",
   "ignoreScripts": [
     "sharp",
     "unrs-resolver"

@@ -1,0 +1,40 @@
+name: Audit
+
+# Fails on high and critical advisories only. Lows are reported in the log
+# but do not block: some have no patched release to move to, and a check
+# that cannot be made green stops being read.
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  schedule:
+    # Advisories land without anyone touching the repo, so check weekly too.
+    - cron: "41 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+
+      # Full report first, so the log shows the lows as well.
+      - name: Report all advisories
+        run: bun audit || true
+
+      - name: Fail on high and critical
+        run: bun audit --audit-level=high

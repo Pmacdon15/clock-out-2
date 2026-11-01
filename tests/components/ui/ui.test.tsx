@@ -83,27 +83,27 @@ describe("Icons", () => {
   });
 });
 
-describe("Tabs", () => {
-  function Example(props: Partial<Parameters<typeof Tabs>[0]>) {
-    return (
-      <Tabs className="tabs" {...props}>
-        <TabsList className="list">
-          <TabsTrigger className="t" value="a">
-            A
-          </TabsTrigger>
-          <TabsTrigger value="b">B</TabsTrigger>
-        </TabsList>
-        <TabsContent className="c" value="a">
-          Panel A
-        </TabsContent>
-        <TabsContent value="b">Panel B</TabsContent>
-      </Tabs>
-    );
-  }
+function TabsExample(props: Partial<Parameters<typeof Tabs>[0]>) {
+  return (
+    <Tabs className="tabs" {...props}>
+      <TabsList className="list">
+        <TabsTrigger className="t" value="a">
+          A
+        </TabsTrigger>
+        <TabsTrigger value="b">B</TabsTrigger>
+      </TabsList>
+      <TabsContent className="c" value="a">
+        Panel A
+      </TabsContent>
+      <TabsContent value="b">Panel B</TabsContent>
+    </Tabs>
+  );
+}
 
+describe("Tabs", () => {
   it("shows the default tab and switches on click", () => {
     const onValueChange = vi.fn();
-    render(<Example defaultValue="a" onValueChange={onValueChange} />);
+    render(<TabsExample defaultValue="a" onValueChange={onValueChange} />);
     expect(screen.getByText("Panel A")).toBeInTheDocument();
     expect(screen.queryByText("Panel B")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "A" })).toHaveClass("bg-white");
@@ -114,22 +114,22 @@ describe("Tabs", () => {
   });
 
   it("works without a change handler", () => {
-    render(<Example defaultValue="a" />);
+    render(<TabsExample defaultValue="a" />);
     fireEvent.click(screen.getByRole("button", { name: "B" }));
     expect(screen.getByText("Panel B")).toBeInTheDocument();
   });
 
   it("follows the controlled value", () => {
-    const { rerender } = render(<Example value="b" />);
+    const { rerender } = render(<TabsExample value="b" />);
     expect(screen.getByText("Panel B")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "A" }));
     expect(screen.getByText("Panel B")).toBeInTheDocument();
-    rerender(<Example value="a" />);
+    rerender(<TabsExample value="a" />);
     expect(screen.getByText("Panel A")).toBeInTheDocument();
   });
 
   it("shows nothing when no tab is selected", () => {
-    render(<Example />);
+    render(<TabsExample />);
     expect(screen.queryByText(/Panel/)).not.toBeInTheDocument();
   });
 

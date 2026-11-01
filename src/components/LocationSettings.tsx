@@ -214,7 +214,7 @@ export default function LocationSettings({
     captureMode !== initialData.capture_mode ||
     restrictClockIn !== initialData.restrict_clock_in;
 
-  const useMyLocation = async () => {
+  const fillFromMyLocation = async () => {
     setIsLocating(true);
     const capture = await captureCurrentPosition();
     if (!capture.ok) {
@@ -607,7 +607,7 @@ export default function LocationSettings({
               <Button
                 className="h-12 w-full gap-2"
                 disabled={isLocating}
-                onClick={useMyLocation}
+                onClick={fillFromMyLocation}
                 type="button"
                 variant="outline"
               >
