@@ -37,6 +37,16 @@ ALTER TABLE break_settings ADD COLUMN IF NOT EXISTS max_meal_break_minutes INTEG
 ALTER TABLE break_settings ADD COLUMN IF NOT EXISTS max_unpaid_rest_break_minutes INTEGER;
 ALTER TABLE break_settings ADD COLUMN IF NOT EXISTS max_paid_break_minutes INTEGER;
 
+-- Overtime thresholds in hours. NULL turns that threshold off. Daily
+-- overtime is hours past the daily threshold on one day; weekly overtime is
+-- the remaining hours past the weekly threshold in a Monday-Sunday week.
+CREATE TABLE IF NOT EXISTS overtime_settings (
+    org_id TEXT PRIMARY KEY REFERENCES settings(org_id) ON DELETE CASCADE,
+    daily_threshold_hours DOUBLE PRECISION,
+    weekly_threshold_hours DOUBLE PRECISION,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS location_settings (
     org_id TEXT PRIMARY KEY REFERENCES settings(org_id) ON DELETE CASCADE,
     -- 'off' | 'optional' | 'required'

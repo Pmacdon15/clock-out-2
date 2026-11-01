@@ -168,4 +168,26 @@ describe("TimesheetExport", () => {
     expect(screen.getByRole("button", { name: "Spreadsheet" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "CSV" })).toBeDisabled();
   });
+
+  it("splits out overtime when the org tracks it", async () => {
+    render(
+      <TimesheetExport
+        employeeName="Me"
+        entries={[makeEntry({ user_id: "me" })]}
+        overtimeSettings={{
+          org_id: "org_1",
+          daily_threshold_hours: 7.5,
+          weekly_threshold_hours: null,
+        }}
+        {...period}
+      />,
+    );
+    expect(screen.getByText("0.50 hrs overtime")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "CSV" }));
+    expect(exportTimesheet).toHaveBeenLastCalledWith(
+      "csv",
+      [expect.objectContaining({ hours: 8, overtimeHours: 0.5 })],
+      { employee: "Me", ...period },
+    );
+  });
 });

@@ -18,6 +18,7 @@ export default function DashboardTabs({
   orgSettingsPromise,
   breakSettingsPromise,
   locationSettingsPromise,
+  overtimeSettingsPromise,
   sitesPromise,
   entriesPromise,
   orgTimeEntriesPromise,
@@ -50,6 +51,12 @@ export default function DashboardTabs({
     : null;
   const breakSettings = breakSettingsResult?.ok
     ? breakSettingsResult.value
+    : null;
+  const overtimeSettingsResult = overtimeSettingsPromise
+    ? use(overtimeSettingsPromise)
+    : null;
+  const overtimeSettings = overtimeSettingsResult?.ok
+    ? overtimeSettingsResult.value
     : null;
   const locationSettingsResult = locationSettingsPromise
     ? use(locationSettingsPromise)
@@ -110,6 +117,7 @@ export default function DashboardTabs({
             isAdmin={isAdmin}
             membersPromise={membersPromise}
             orgTimeEntriesPromise={orgTimeEntriesPromise}
+            overtimeSettings={overtimeSettings}
             selectedMonthPromise={selectedMonthPromise}
             selectedUserIdPromise={selectedUserIdPromise}
             selectedWeekPromise={selectedWeekPromise}
@@ -140,6 +148,7 @@ export default function DashboardTabs({
               hasReporting={hasReporting}
               locationSettingsPromise={locationSettingsPromise}
               orgSettingsPromise={orgSettingsPromise}
+              overtimeSettingsPromise={overtimeSettingsPromise}
               sitesPromise={sitesPromise}
             />
           </Suspense>

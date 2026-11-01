@@ -29,6 +29,7 @@ import {
   dbGetEntryBreaks,
   dbGetLocationSettings,
   dbGetOrgTimeEntries,
+  dbGetOvertimeSettings,
   dbGetReportingSettings,
   dbGetScheduledShifts,
   dbGetSites,
@@ -38,6 +39,7 @@ import {
   dbUpdateBreak,
   dbUpdateBreakSettings,
   dbUpdateLocationSettings,
+  dbUpdateOvertimeSettings,
   dbUpdateReportingSettings,
   dbUpdateSite,
   dbUpdateTimeEntry,
@@ -50,6 +52,11 @@ import {
 } from "./geo";
 import { reverseGeocode } from "./geoapify";
 import {
+  isValidOvertimeThreshold,
+  MAX_DAILY_OVERTIME_HOURS,
+  MAX_WEEKLY_OVERTIME_HOURS,
+} from "./overtime";
+import {
   evaluateShifts,
   invalidShiftReason,
   SCHEDULE_FUTURE_DAYS,
@@ -60,6 +67,7 @@ import type {
   BreakSettingsData,
   BreakType,
   LocationSettingsData,
+  OvertimeSettingsData,
   ReportingSettingsData,
   ScheduledShift,
   ScheduledShiftWithStatus,
@@ -596,6 +604,65 @@ export async function getOrgBreakSettings(): Promise<
     .catch((e) => {
       console.error("Error fetching break settings.: ", e);
       return { error: { reason: "Error fetching break settings." }, ok: false };
+    });
+}
+
+/* ------------------------------------------------------------ overtime -- */
+
+export async function updateOvertimeSettingsDal(
+  dailyThresholdHours: number | null,
+  weeklyThresholdHours: number | null,
+) {
+  const authUser = await auth.protect();
+  if (!authUser.userId || !authUser.orgId || authUser.orgRole !== "org:admin") {
+    return errAsync({ reason: "Unauthorized" } as const);
+  }
+  if (
+    !isValidOvertimeThreshold(dailyThresholdHours, MAX_DAILY_OVERTIME_HOURS) ||
+    !isValidOvertimeThreshold(weeklyThresholdHours, MAX_WEEKLY_OVERTIME_HOURS)
+  ) {
+    return errAsync({ reason: "Invalid overtime settings" } as const);
+  }
+  return await dbUpdateOvertimeSettings(
+    authUser.orgId,
+    dailyThresholdHours,
+    weeklyThresholdHours,
+  )
+    .then((updated) => {
+      return okAsync(updated);
+    })
+    .catch((e) => {
+      console.error("Update overtime settings error: ", e);
+      return errAsync({
+        reason: "Failed to update overtime settings",
+      } as const);
+    });
+}
+
+export async function getOrgOvertimeSettings(): Promise<
+  SerializableResult<OvertimeSettingsData | null, { reason: string }>
+> {
+  const { userId, orgId } = await auth.protect();
+  if (!userId || !orgId) {
+    return {
+      error: { reason: "Unauthorized or no organization selected" },
+      ok: false,
+    };
+  }
+
+  return await dbGetOvertimeSettings(orgId)
+    .then((settings) => {
+      return {
+        value: settings || null,
+        ok: true as const,
+      };
+    })
+    .catch((e) => {
+      console.error("Error fetching overtime settings.: ", e);
+      return {
+        error: { reason: "Error fetching overtime settings." },
+        ok: false,
+      };
     });
 }
 

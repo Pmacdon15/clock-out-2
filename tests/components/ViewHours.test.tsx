@@ -36,6 +36,9 @@ vi.mock("@/components/ViewHours/DaysWorkedBreakdown", () => ({
 vi.mock("@/components/ViewHours/EntryList", () => ({
   EntryList: (p: Captured) => capture("EntryList")(p),
 }));
+vi.mock("@/components/ViewHours/OvertimeSummary", () => ({
+  OvertimeSummary: (p: Captured) => capture("OvertimeSummary")(p),
+}));
 vi.mock("@/components/ViewHours/TimesheetExport", () => ({
   TimesheetExport: (p: Captured) => capture("TimesheetExport")(p),
 }));
@@ -295,5 +298,45 @@ describe("ViewHours timesheet export", () => {
       isViewingAll: true,
       members,
     });
+  });
+});
+
+describe("ViewHours overtime", () => {
+  const overtimeSettings = {
+    org_id: "org_1",
+    daily_threshold_hours: 6,
+    weekly_threshold_hours: null,
+  };
+
+  it("shows no overtime panel or splits when the org tracks none", () => {
+    renderView();
+    expect(screen.queryByTestId("OvertimeSummary")).not.toBeInTheDocument();
+    expect(latest("EntryList").overtimeByEntry).toBeUndefined();
+  });
+
+  it("splits the shown entries and passes the splits to the panels", () => {
+    renderView({ overtimeSettings, timeframePromise: resolved("custom") });
+    const summary = latest("OvertimeSummary");
+    expect(summary).toMatchObject({
+      entries: myEntries,
+      isViewingAll: false,
+      members,
+      overtimeSettings,
+    });
+    const splits = summary.overtimeByEntry as Map<
+      unknown,
+      { overtimeHours: number }
+    >;
+    // makeEntry shifts run 8h; the daily threshold is 6h.
+    expect(splits.get(myEntries[0])?.overtimeHours).toBe(2);
+    expect(latest("EntryList").overtimeByEntry).toBe(splits);
+    expect(latest("TimesheetExport").overtimeSettings).toBe(overtimeSettings);
+  });
+
+  it("splits the org's entries when viewing all", () => {
+    renderView({ overtimeSettings, selectedUserIdPromise: resolved("all") });
+    const summary = latest("OvertimeSummary");
+    expect(summary.entries).toBe(orgEntries);
+    expect(summary.isViewingAll).toBe(true);
   });
 });
