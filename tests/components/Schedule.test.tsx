@@ -19,7 +19,10 @@ vi.mock("@/lib/actions", () => ({
 }));
 vi.mock("sonner", () => ({ toast: mocks.toast }));
 
-import Schedule, { buildShiftTimes } from "@/components/Schedule";
+import Schedule, {
+  buildShiftTimes,
+  findTimeOffConflict,
+} from "@/components/Schedule";
 
 let nextId = 1;
 function shift(
@@ -86,6 +89,30 @@ const section = (heading: string) =>
   screen
     .getByRole("heading", { name: heading })
     .closest("[class*='rounded-xl border']") as HTMLElement;
+
+describe("findTimeOffConflict", () => {
+  it("finds the member's approved time off the shift lands on", () => {
+    const request = timeOff();
+    expect(
+      findTimeOffConflict([request], "user_1", "2026-01-08", "09:00", "17:00"),
+    ).toBe(request);
+    expect(
+      findTimeOffConflict([request], "user_2", "2026-01-08", "09:00", "17:00"),
+    ).toBeUndefined();
+  });
+
+  it("ignores a date it can't read", () => {
+    expect(
+      findTimeOffConflict(
+        [timeOff()],
+        "user_1",
+        "not-a-date",
+        "09:00",
+        "17:00",
+      ),
+    ).toBeUndefined();
+  });
+});
 
 describe("buildShiftTimes", () => {
   it("builds a same-day shift from local times", () => {
@@ -215,6 +242,8 @@ describe("Schedule", () => {
       "2026-01-07T22:00:00.000Z",
       "2026-01-08T06:00:00.000Z",
       "Night",
+      // The admin's zone, so the member's notice words the times locally.
+      Intl.DateTimeFormat().resolvedOptions().timeZone,
       { start: "2026-01-07", end: "2026-01-08" },
     );
     expect(screen.getByLabelText("Note (optional)")).toHaveValue("");
@@ -316,7 +345,10 @@ describe("Schedule", () => {
     await waitFor(() =>
       expect(mocks.toast.success).toHaveBeenCalledWith("Shift removed"),
     );
-    expect(mocks.deleteScheduledShiftAction.mock.calls[0][0]).toBe(s.id);
+    expect(mocks.deleteScheduledShiftAction.mock.calls[0]).toEqual([
+      s.id,
+      Intl.DateTimeFormat().resolvedOptions().timeZone,
+    ]);
   });
 
   it("shows the error when removing fails", async () => {

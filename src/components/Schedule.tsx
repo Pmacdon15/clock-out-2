@@ -55,6 +55,9 @@ const inputClass =
   "h-11 w-full rounded-xl border-2 border-zinc-200 bg-white px-3 dark:border-zinc-800 dark:bg-zinc-950";
 
 /** Still to come or under way: shown before the shifts that are over. */
+/** This browser's IANA zone, so the member's notice can word times locally. */
+const browserTimezone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
+
 function isCurrentOrUpcoming(shift: ScheduledShiftWithStatus) {
   if (shift.status === "scheduled" || shift.status === "not_clocked_in") {
     return true;
@@ -89,6 +92,27 @@ export function shiftLocalDays(shiftStart: Date, shiftEnd: Date) {
   };
 }
 
+/**
+ * The member's approved time off that a shift on the form's local date and
+ * times would land on, if any.
+ */
+export function findTimeOffConflict(
+  timeOff: TimeOffRequest[],
+  memberId: string,
+  date: string,
+  start: string,
+  end: string,
+): TimeOffRequest | undefined {
+  const { shiftStart, shiftEnd } = buildShiftTimes(date, start, end);
+  if (Number.isNaN(shiftStart.getTime())) return undefined;
+  const days = shiftLocalDays(shiftStart, shiftEnd);
+  return approvedTimeOffOverlapping(
+    timeOff.filter((request) => request.user_id === memberId),
+    days.start,
+    days.end,
+  )[0];
+}
+
 function ShiftRow({
   shift,
   memberName,
@@ -100,7 +124,8 @@ function ShiftRow({
 }) {
   const [confirming, setConfirming] = useState(false);
   const { mutate, isPending } = useMutation({
-    mutationFn: deleteScheduledShiftAction,
+    mutationFn: (id: number) =>
+      deleteScheduledShiftAction(id, browserTimezone()),
     onSuccess: (res) => {
       if (res.success) {
         toast.success("Shift removed");
@@ -199,6 +224,7 @@ function ShiftForm({
         shiftStart.toISOString(),
         shiftEnd.toISOString(),
         note,
+        browserTimezone(),
         shiftLocalDays(shiftStart, shiftEnd),
       );
     },
@@ -213,18 +239,9 @@ function ShiftForm({
   });
 
   const filled = Boolean(memberId && date && start && end);
-  let conflict: TimeOffRequest | undefined;
-  if (filled) {
-    const { shiftStart, shiftEnd } = buildShiftTimes(date, start, end);
-    if (!Number.isNaN(shiftStart.getTime())) {
-      const days = shiftLocalDays(shiftStart, shiftEnd);
-      conflict = approvedTimeOffOverlapping(
-        timeOff.filter((request) => request.user_id === memberId),
-        days.start,
-        days.end,
-      )[0];
-    }
-  }
+  const conflict = filled
+    ? findTimeOffConflict(timeOff, memberId, date, start, end)
+    : undefined;
   const canSubmit = filled && !conflict && !isPending;
 
   return (
@@ -308,7 +325,7 @@ function ShiftForm({
             className="mb-3 rounded-xl bg-amber-100 p-3 font-medium text-amber-800 text-sm dark:bg-amber-950 dark:text-amber-200"
             role="alert"
           >
-            {members.find((m) => m.id === memberId)?.name ?? "This member"} has
+            {new Map(members.map((m) => [m.id, m.name])).get(memberId)} has
             approved {TIME_OFF_TYPE_LABELS[conflict.request_type].toLowerCase()}{" "}
             on {formatTimeOffDates(conflict)}. Pick another day — they can still
             clock in if they choose to work.

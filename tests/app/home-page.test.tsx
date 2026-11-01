@@ -20,6 +20,8 @@ const mocks = vi.hoisted(() => ({
   getOrgTimeEntries: vi.fn(),
   getSchedule: vi.fn(),
   getTimeEntries: vi.fn(),
+  getOrgAlertSettings: vi.fn(),
+  getMyNotificationSettings: vi.fn(),
   getTimeOffRequests: vi.fn(),
 }));
 
@@ -44,6 +46,10 @@ vi.mock("@/lib/dal", () => ({
   getSchedule: mocks.getSchedule,
   getTimeEntries: mocks.getTimeEntries,
   getTimeOffRequests: mocks.getTimeOffRequests,
+}));
+vi.mock("@/lib/alerts-dal", () => ({
+  getOrgAlertSettings: mocks.getOrgAlertSettings,
+  getMyNotificationSettings: mocks.getMyNotificationSettings,
 }));
 vi.mock("@/components/DashboardTabs", () => ({
   default: (props: DashboardTabsProps) => {
@@ -89,6 +95,10 @@ function renderHome() {
     Promise.resolve("overtime_settings"),
   );
   mocks.getOrgSites.mockReturnValue(Promise.resolve("sites"));
+  mocks.getOrgAlertSettings.mockReturnValue(Promise.resolve("alerts"));
+  mocks.getMyNotificationSettings.mockReturnValue(
+    Promise.resolve("notifications"),
+  );
   mocks.getOrgMembers.mockReturnValue(Promise.resolve(["members"]));
   mocks.getOrgReportingSettings.mockReturnValue(Promise.resolve("settings"));
   mocks.getTimeOffRequests.mockReturnValue(Promise.resolve("time_off"));
@@ -175,6 +185,10 @@ describe("Home page", () => {
     await expect(props.membersPromise).resolves.toEqual(["members"]);
     await expect(props.orgSettingsPromise).resolves.toBe("settings");
     await expect(props.breakSettingsPromise).resolves.toBe("break_settings");
+    await expect(props.alertSettingsPromise).resolves.toBe("alerts");
+    await expect(props.notificationSettingsPromise).resolves.toBe(
+      "notifications",
+    );
     await expect(props.overtimeSettingsPromise).resolves.toBe(
       "overtime_settings",
     );

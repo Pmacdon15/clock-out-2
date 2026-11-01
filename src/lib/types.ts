@@ -48,6 +48,7 @@ export type SerializableResult<T, E> =
   | { value: T; ok: true }
   | { error: E; ok: false };
 
+import type { NotificationSettingsView } from "./alerts-dal";
 import type { EntryAction } from "./reducers/time-entries";
 
 export type ReportingSettingsData = {
@@ -147,6 +148,12 @@ export interface DashboardTabsProps {
     SerializableResult<OvertimeSettingsData | null, { reason: string }>
   >;
   sitesPromise?: Promise<SerializableResult<SiteData[], { reason: string }>>;
+  alertSettingsPromise?: Promise<
+    SerializableResult<AlertSettingsData, { reason: string }>
+  >;
+  notificationSettingsPromise?: Promise<
+    SerializableResult<NotificationSettingsView, { reason: string }>
+  >;
   orgTimeEntriesPromise: Promise<
     SerializableResult<TimeEntry[], { reason: string }>
   >;
@@ -206,6 +213,74 @@ export interface ViewHoursProps {
   endDatePromise?: Promise<string | undefined>;
   currentUserIdPromise?: Promise<string | null | undefined>;
 }
+
+/**
+ * Per-organization "forgot to clock out / forgot to end break" alert rules.
+ * Every rule is off until an admin turns it on.
+ */
+export type AlertSettingsData = {
+  org_id: string;
+  /** Remind members whose shift has been open for `forgot_clock_out_hours`. */
+  forgot_clock_out_enabled: boolean;
+  forgot_clock_out_hours: number;
+  /** Close shifts automatically at clock-in + `auto_clock_out_hours`. */
+  auto_clock_out_enabled: boolean;
+  auto_clock_out_hours: number;
+  /** Remind members still on a break after `break_reminder_minutes`. */
+  break_reminder_enabled: boolean;
+  break_reminder_minutes: number;
+  /** Also send every alert to the org's admins. */
+  notify_admins: boolean;
+  /** Tell members about their weekly schedule and shifts added/removed. */
+  schedule_notifications: boolean;
+  updated_at?: Date;
+};
+
+/** The editable part of {@link AlertSettingsData}. */
+export type AlertSettingsInput = Omit<
+  AlertSettingsData,
+  "org_id" | "updated_at"
+>;
+
+/** How one person wants to be told about alerts (shared across their orgs). */
+export type NotificationPreferencesData = {
+  user_id: string;
+  email_enabled: boolean;
+  push_enabled: boolean;
+  /** Forgot-to-clock-out reminders and automatic clock-out notices. */
+  shift_alerts: boolean;
+  /** Still-on-break reminders. */
+  break_alerts: boolean;
+  /** Admins only: alerts about other members of their org. */
+  admin_alerts: boolean;
+  /** My weekly schedule, and shifts added to or removed from it. */
+  schedule_alerts: boolean;
+  /** IANA zone from the person's browser, for wording shift times. */
+  timezone?: string | null;
+  updated_at?: Date;
+};
+
+/** The editable part of {@link NotificationPreferencesData}. */
+export type NotificationPreferencesInput = Omit<
+  NotificationPreferencesData,
+  "user_id" | "updated_at" | "timezone"
+>;
+
+/** A browser push subscription, as `PushSubscription.toJSON()` gives it. */
+export type PushSubscriptionInput = {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+};
+
+export type PushSubscriptionRow = {
+  id: number;
+  user_id: string;
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  user_agent?: string | null;
+  created_at?: Date;
+};
 
 /** A shift an admin has published for a member. */
 export type ScheduledShift = {

@@ -105,3 +105,117 @@ describe("Service Worker and Offline Page", () => {
     expect(navRespondWith).toHaveBeenCalled();
   });
 });
+
+describe("Service worker push alerts", () => {
+  function loadWorker(windows: { url: string; focus: () => unknown }[] = []) {
+    const swCode = fs.readFileSync(
+      path.resolve(process.cwd(), "public", "sw.js"),
+      "utf-8",
+    );
+    const listeners: Record<string, (event: unknown) => void> = {};
+    const showNotification = vi.fn().mockResolvedValue(undefined);
+    const openWindow = vi.fn().mockResolvedValue(undefined);
+    const matchAll = vi.fn().mockResolvedValue(windows);
+    const sandbox = {
+      self: {
+        addEventListener: (name: string, fn: (event: unknown) => void) => {
+          listeners[name] = fn;
+        },
+        registration: { showNotification },
+        clients: { matchAll, openWindow, claim: vi.fn() },
+        location: { origin: "https://clock.test" },
+      },
+      caches: {},
+      URL,
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(swCode, sandbox);
+    return { listeners, showNotification, openWindow, matchAll };
+  }
+
+  /** Dispatches an event and waits for what it handed to waitUntil. */
+  async function dispatch(
+    listener: (event: unknown) => void,
+    event: Record<string, unknown>,
+  ) {
+    let pending: Promise<unknown> = Promise.resolve();
+    listener({
+      ...event,
+      waitUntil: (p: Promise<unknown>) => {
+        pending = p;
+      },
+    });
+    return await pending;
+  }
+
+  it("shows a pushed alert with the app icon and badge", async () => {
+    const { listeners, showNotification } = loadWorker();
+    await dispatch(listeners.push, {
+      data: {
+        json: () => ({
+          title: "Still clocked in?",
+          body: "10h",
+          url: "/?defaultTab=time-clock",
+          tag: "forgot:1",
+        }),
+      },
+    });
+    const [title, options] = showNotification.mock.calls[0];
+    expect(title).toBe("Still clocked in?");
+    expect(options).toMatchObject({
+      body: "10h",
+      icon: "/icon-192.png",
+      badge: "/notification-badge.png",
+      tag: "forgot:1",
+      renotify: true,
+      data: { url: "/?defaultTab=time-clock" },
+    });
+  });
+
+  it("falls back for empty and plain-text pushes", async () => {
+    const { listeners, showNotification } = loadWorker();
+    await dispatch(listeners.push, { data: null });
+    expect(showNotification.mock.calls[0][0]).toBe("Clock Out");
+    expect(showNotification.mock.calls[0][1]).toMatchObject({
+      renotify: false,
+      data: { url: "/" },
+    });
+
+    await dispatch(listeners.push, {
+      data: {
+        json: () => {
+          throw new Error("not json");
+        },
+        text: () => "hello",
+      },
+    });
+    expect(showNotification.mock.calls[1][1]).toMatchObject({ body: "hello" });
+  });
+
+  it("opens the alert's page, reusing an open window when there is one", async () => {
+    const navigate = vi.fn().mockResolvedValue(undefined);
+    const focused = { navigate };
+    const appWindow = {
+      url: "https://clock.test/",
+      focus: vi.fn().mockResolvedValue(focused),
+    };
+    const other = { url: "https://elsewhere.test/", focus: vi.fn() };
+    const close = vi.fn();
+    const { listeners, openWindow } = loadWorker([other, appWindow]);
+    await dispatch(listeners.notificationclick, {
+      notification: { close, data: { url: "/?defaultTab=view" } },
+    });
+    expect(close).toHaveBeenCalled();
+    expect(other.focus).not.toHaveBeenCalled();
+    expect(navigate).toHaveBeenCalledWith(
+      "https://clock.test/?defaultTab=view",
+    );
+    expect(openWindow).not.toHaveBeenCalled();
+
+    const fresh = loadWorker([]);
+    await dispatch(fresh.listeners.notificationclick, {
+      notification: { close, data: null },
+    });
+    expect(fresh.openWindow).toHaveBeenCalledWith("https://clock.test/");
+  });
+});
