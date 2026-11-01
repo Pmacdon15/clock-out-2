@@ -16,6 +16,7 @@ import {
   getOrgTimeEntries,
   getSchedule,
   getTimeEntries,
+  getTimeOffRequests,
 } from "@/lib/dal";
 import { parseParams } from "@/lib/utils";
 
@@ -69,6 +70,7 @@ export default function Home(props: PageProps<"/">) {
               )}
               recentEntriesPromise={getTimeEntries()}
               schedulePromise={getSchedule()}
+              timeOffPromise={getTimeOffRequests()}
               selectedMonthPromise={props.searchParams.then((p) =>
                 parseParams(p.month),
               )}

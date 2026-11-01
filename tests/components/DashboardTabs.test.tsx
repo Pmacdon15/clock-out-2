@@ -7,6 +7,7 @@ const captured = vi.hoisted(() => ({
   timeClock: [] as Record<string, unknown>[],
   viewHours: [] as Record<string, unknown>[],
   orgSettings: [] as Record<string, unknown>[],
+  timeOff: [] as Record<string, unknown>[],
   schedule: [] as Record<string, unknown>[],
   orgSwitcher: vi.fn(),
 }));
@@ -35,6 +36,12 @@ vi.mock("@/components/Schedule", () => ({
     return <div data-testid="schedule" />;
   },
 }));
+vi.mock("@/components/TimeOff", () => ({
+  default: (props: Record<string, unknown>) => {
+    captured.timeOff.push(props);
+    return <div data-testid="time-off" />;
+  },
+}));
 vi.mock("@/components/OrgSwitcher", () => ({
   useOrgSwitcher: captured.orgSwitcher,
 }));
@@ -55,6 +62,7 @@ function props(
     orgTimeEntriesPromise: ok([]),
     recentEntriesPromise: ok(recent),
     schedulePromise: ok([]),
+    timeOffPromise: ok([]),
     membersPromise: resolved([]),
     endDatePromise: resolved(undefined),
     startDatePromise: resolved(undefined),
@@ -108,6 +116,20 @@ describe("DashboardTabs", () => {
       orgTimeEntriesPromise: p.orgTimeEntriesPromise,
       startDatePromise: p.startDatePromise,
       endDatePromise: p.endDatePromise,
+      timeOffPromise: p.timeOffPromise,
+    });
+  });
+
+  it("shows the time off tab to every member", () => {
+    const p = props();
+    render(<DashboardTabs {...p} />);
+    fireEvent.click(screen.getByRole("button", { name: "Time Off" }));
+    expect(screen.getByTestId("time-off")).toBeInTheDocument();
+    expect(latest(captured.timeOff)).toEqual({
+      currentUserIdPromise: p.userIdPromise,
+      isAdmin: false,
+      membersPromise: p.membersPromise,
+      timeOffPromise: p.timeOffPromise,
     });
   });
 
