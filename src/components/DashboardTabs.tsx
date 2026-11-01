@@ -139,6 +139,7 @@ export default function DashboardTabs({
             isAdmin={isAdmin}
             membersPromise={membersPromise}
             schedulePromise={schedulePromise}
+            timeOffPromise={timeOffPromise}
           />
         </Suspense>
       </TabsContent>

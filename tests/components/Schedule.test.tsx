@@ -1,6 +1,10 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { ScheduledShiftWithStatus, ShiftStatus } from "@/lib/types";
+import type {
+  ScheduledShiftWithStatus,
+  ShiftStatus,
+  TimeOffRequest,
+} from "@/lib/types";
 import { renderWithClient, resolved } from "../utils";
 
 const mocks = vi.hoisted(() => ({
@@ -47,14 +51,35 @@ function renderSchedule(
   shifts: ScheduledShiftWithStatus[],
   isAdmin = true,
   withMembers = true,
+  timeOff: TimeOffRequest[] = [],
 ) {
   renderWithClient(
     <Schedule
       isAdmin={isAdmin}
       membersPromise={withMembers ? resolved(members) : undefined}
       schedulePromise={resolved({ ok: true as const, value: shifts })}
+      timeOffPromise={resolved({ ok: true as const, value: timeOff })}
     />,
   );
+}
+
+function timeOff(overrides: Partial<TimeOffRequest> = {}): TimeOffRequest {
+  return {
+    id: 1,
+    org_id: "org_1",
+    user_id: "user_1",
+    request_type: "vacation",
+    start_date: "2026-01-07",
+    end_date: "2026-01-08",
+    hours_per_day: 8,
+    note: null,
+    status: "approved",
+    reviewed_by: "admin_1",
+    reviewed_at: null,
+    created_at: null,
+    updated_at: null,
+    ...overrides,
+  } as TimeOffRequest;
 }
 
 const section = (heading: string) =>
@@ -190,8 +215,70 @@ describe("Schedule", () => {
       "2026-01-07T22:00:00.000Z",
       "2026-01-08T06:00:00.000Z",
       "Night",
+      { start: "2026-01-07", end: "2026-01-08" },
     );
     expect(screen.getByLabelText("Note (optional)")).toHaveValue("");
+  });
+
+  it("blocks a shift on the member's approved time off", () => {
+    renderSchedule([], true, true, [
+      timeOff(),
+      timeOff({
+        id: 2,
+        user_id: "user_2",
+        start_date: "2026-01-09",
+        end_date: "2026-01-09",
+      }),
+      timeOff({
+        id: 3,
+        user_id: "user_1",
+        status: "pending",
+        start_date: "2026-01-12",
+        end_date: "2026-01-12",
+      }),
+    ]);
+    fireEvent.change(screen.getByLabelText("Member"), {
+      target: { value: "user_1" },
+    });
+    fireEvent.change(screen.getByLabelText("Date"), {
+      target: { value: "2026-01-08" },
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Sam has approved vacation on Jan 7 – Jan 8, 2026",
+    );
+    expect(
+      screen.getByRole("button", { name: "Publish shift" }),
+    ).toBeDisabled();
+
+    // An overnight shift running into the time off is blocked too.
+    fireEvent.change(screen.getByLabelText("Date"), {
+      target: { value: "2026-01-06" },
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Start"), {
+      target: { value: "22:00" },
+    });
+    fireEvent.change(screen.getByLabelText("End"), {
+      target: { value: "06:00" },
+    });
+    expect(screen.getByRole("alert")).toBeVisible();
+
+    // Other members' time off and pending requests don't block.
+    fireEvent.change(screen.getByLabelText("Member"), {
+      target: { value: "user_2" },
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Member"), {
+      target: { value: "user_1" },
+    });
+    fireEvent.change(screen.getByLabelText("Date"), {
+      target: { value: "2026-01-12" },
+    });
+    fireEvent.change(screen.getByLabelText("End"), {
+      target: { value: "23:00" },
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("button", { name: "Publish shift" })).toBeEnabled();
   });
 
   it("shows the error when publishing fails", async () => {

@@ -142,6 +142,7 @@ describe("DashboardTabs", () => {
       isAdmin: false,
       membersPromise: p.membersPromise,
       schedulePromise: p.schedulePromise,
+      timeOffPromise: p.timeOffPromise,
     });
   });
 

@@ -390,12 +390,14 @@ export async function createScheduledShiftAction(
   shiftStart: string,
   shiftEnd: string,
   note?: string | null,
+  localDays?: { start: string; end: string } | null,
 ) {
   const result = await dalCreateScheduledShift(
     memberId,
     new Date(shiftStart),
     new Date(shiftEnd),
     note,
+    localDays,
   );
 
   return result.match(

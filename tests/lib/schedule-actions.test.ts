@@ -39,6 +39,7 @@ describe("createScheduledShiftAction", () => {
       new Date("2026-01-05T09:00:00.000Z"),
       new Date("2026-01-05T17:00:00.000Z"),
       "Desk",
+      undefined,
     );
     expect(mocks.updateTag).toHaveBeenCalledWith("scheduled-shifts-org_1");
   });
