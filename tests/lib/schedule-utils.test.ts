@@ -5,8 +5,13 @@ import {
   invalidShiftReason,
   isFlaggedStatus,
   LATE_GRACE_MINUTES,
+  pickNextShift,
 } from "@/lib/schedule-utils";
-import type { ScheduledShift } from "@/lib/types";
+import type {
+  ScheduledShift,
+  ScheduledShiftWithStatus,
+  ShiftStatus,
+} from "@/lib/types";
 import { makeEntry } from "../utils";
 
 const at = (iso: string) => new Date(`2026-01-05T${iso}:00Z`);
@@ -196,5 +201,68 @@ describe("countShiftStatuses", () => {
       not_clocked_in: 0,
       no_show: 1,
     });
+  });
+});
+
+describe("pickNextShift", () => {
+  const withStatus = (
+    id: number,
+    status: ShiftStatus,
+    overrides: Partial<ScheduledShiftWithStatus> = {},
+  ): ScheduledShiftWithStatus => ({
+    ...shift({ id }),
+    status,
+    actual_clock_in: null,
+    actual_clock_out: null,
+    minutes_late: null,
+    ...overrides,
+  });
+
+  it("returns null when the member has nothing coming up", () => {
+    expect(pickNextShift([], "user_1")).toBeNull();
+    expect(
+      pickNextShift(
+        [
+          withStatus(1, "no_show"),
+          withStatus(2, "on_time", { actual_clock_out: at("17:00") }),
+          withStatus(3, "scheduled", { user_id: "user_2" }),
+        ],
+        "user_1",
+      ),
+    ).toBeNull();
+  });
+
+  it("picks the next scheduled shift", () => {
+    expect(
+      pickNextShift(
+        [withStatus(1, "scheduled"), withStatus(2, "scheduled")],
+        "user_1",
+      ),
+    ).toMatchObject({ kind: "next", shift: { id: 1 } });
+  });
+
+  it("prefers the shift they're working over the next one", () => {
+    expect(
+      pickNextShift(
+        [withStatus(1, "late"), withStatus(2, "scheduled")],
+        "user_1",
+      ),
+    ).toMatchObject({ kind: "on_shift", shift: { id: 1 } });
+    expect(pickNextShift([withStatus(1, "on_time")], "user_1")).toMatchObject({
+      kind: "on_shift",
+    });
+  });
+
+  it("puts a shift they're missing first", () => {
+    expect(
+      pickNextShift(
+        [
+          withStatus(1, "on_time"),
+          withStatus(2, "not_clocked_in"),
+          withStatus(3, "scheduled"),
+        ],
+        "user_1",
+      ),
+    ).toMatchObject({ kind: "late", shift: { id: 2 } });
   });
 });

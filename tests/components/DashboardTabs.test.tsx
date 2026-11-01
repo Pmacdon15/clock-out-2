@@ -8,6 +8,7 @@ const captured = vi.hoisted(() => ({
   viewHours: [] as Record<string, unknown>[],
   orgSettings: [] as Record<string, unknown>[],
   schedule: [] as Record<string, unknown>[],
+  nextShift: [] as Record<string, unknown>[],
   orgSwitcher: vi.fn(),
 }));
 
@@ -27,6 +28,12 @@ vi.mock("@/components/OrgSettings", () => ({
   default: (props: Record<string, unknown>) => {
     captured.orgSettings.push(props);
     return <div data-testid="org-settings" />;
+  },
+}));
+vi.mock("@/components/NextShiftCard", () => ({
+  default: (props: Record<string, unknown>) => {
+    captured.nextShift.push(props);
+    return <div data-testid="next-shift" />;
   },
 }));
 vi.mock("@/components/Schedule", () => ({
@@ -108,6 +115,16 @@ describe("DashboardTabs", () => {
       orgTimeEntriesPromise: p.orgTimeEntriesPromise,
       startDatePromise: p.startDatePromise,
       endDatePromise: p.endDatePromise,
+    });
+  });
+
+  it("shows the next shift above the time clock", () => {
+    const p = props();
+    render(<DashboardTabs {...p} />);
+    expect(screen.getByTestId("next-shift")).toBeInTheDocument();
+    expect(latest(captured.nextShift)).toEqual({
+      schedulePromise: p.schedulePromise,
+      userIdPromise: p.userIdPromise,
     });
   });
 

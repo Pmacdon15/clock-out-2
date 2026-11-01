@@ -140,3 +140,36 @@ export function countShiftStatuses(shifts: { status: ShiftStatus }[]) {
   for (const shift of shifts) counts[shift.status] += 1;
   return counts;
 }
+
+export type NextShift = {
+  /**
+   * - `late`: the shift started past the grace period and they haven't
+   *   clocked in
+   * - `on_shift`: they're clocked in for it
+   * - `next`: the next shift still to come (or just starting)
+   */
+  kind: "late" | "on_shift" | "next";
+  shift: ScheduledShiftWithStatus;
+};
+
+/**
+ * The one shift worth putting in front of a member on the time clock: a shift
+ * they're missing beats the one they're working, which beats the next one.
+ * Expects shifts sorted by start, as `evaluateShifts` returns them.
+ */
+export function pickNextShift(
+  shifts: ScheduledShiftWithStatus[],
+  userId: string | null | undefined,
+): NextShift | null {
+  const mine = shifts.filter((shift) => shift.user_id === userId);
+  const missing = mine.find((shift) => shift.status === "not_clocked_in");
+  if (missing) return { kind: "late", shift: missing };
+  const working = mine.find(
+    (shift) =>
+      (shift.status === "on_time" || shift.status === "late") &&
+      shift.actual_clock_out === null,
+  );
+  if (working) return { kind: "on_shift", shift: working };
+  const upcoming = mine.find((shift) => shift.status === "scheduled");
+  return upcoming ? { kind: "next", shift: upcoming } : null;
+}

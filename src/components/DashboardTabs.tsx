@@ -6,6 +6,7 @@ import { timeEntriesReducer } from "@/lib/reducers/time-entries";
 import type { DashboardTabsProps } from "@/lib/types";
 import { SettingsFallback } from "./fallbacks/settings-fallback";
 import { ViewHoursFallback } from "./fallbacks/view-hours-fallback";
+import NextShiftCard from "./NextShiftCard";
 import OrgSettings from "./OrgSettings";
 import { useOrgSwitcher } from "./OrgSwitcher";
 import Schedule from "./Schedule";
@@ -91,6 +92,13 @@ export default function DashboardTabs({
       </TabsList>
 
       <TabsContent className="mt-0" value="time-clock">
+        {/* Its own boundary, so a slow schedule never holds up the clock. */}
+        <Suspense fallback={null}>
+          <NextShiftCard
+            schedulePromise={schedulePromise}
+            userIdPromise={userIdPromise}
+          />
+        </Suspense>
         <TimeClock
           breakSettings={breakSettings}
           initialEntries={optimisticRecentEntries}
