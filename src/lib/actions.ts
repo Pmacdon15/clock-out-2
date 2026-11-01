@@ -2,17 +2,22 @@
 
 import { auth } from "@clerk/nextjs/server";
 import { startOfDay, subDays } from "date-fns";
+import type { Result } from "neverthrow";
 import { updateTag } from "next/cache";
+import { after } from "next/server";
 import {
+  cancelTimeOffRequestDal as dalCancelTimeOffRequest,
   clockIn as dalClockIn,
   clockOut as dalClockOut,
   createScheduledShiftDal as dalCreateScheduledShift,
   createSiteDal as dalCreateSite,
+  createTimeOffRequestDal as dalCreateTimeOffRequest,
   deleteBreakDal as dalDeleteBreak,
   deleteScheduledShiftDal as dalDeleteScheduledShift,
   deleteSiteDal as dalDeleteSite,
   deleteTimeEntry as dalDeleteTimeEntry,
   endBreak as dalEndBreak,
+  reviewTimeOffRequestDal as dalReviewTimeOffRequest,
   startBreak as dalStartBreak,
   updateBreakDal as dalUpdateBreak,
   updateSiteDal as dalUpdateSite,
@@ -25,7 +30,8 @@ import {
 import type { Coordinates } from "./geo";
 import { reverseGeocode, searchAddress } from "./geoapify";
 import { sendWeeklyReports } from "./reports";
-import type { BreakLimits, BreakType } from "./types";
+import { notifyScheduleChange } from "./schedule-notify";
+import type { BreakLimits, BreakType, TimeOffType } from "./types";
 
 /**
  * `coordinates` is whatever the browser's Geolocation API gave the client, or
@@ -386,6 +392,8 @@ export async function createScheduledShiftAction(
   shiftStart: string,
   shiftEnd: string,
   note?: string | null,
+  /** The admin's browser zone: wording fallback for the member's notice. */
+  timezone?: string | null,
 ) {
   const result = await dalCreateScheduledShift(
     memberId,
@@ -397,6 +405,7 @@ export async function createScheduledShiftAction(
   return result.match(
     (shift) => {
       updateTag(`scheduled-shifts-${shift.org_id}`);
+      after(() => notifyScheduleChange("added", shift, timezone));
       return { success: true as const, data: shift };
     },
     (err) => {
@@ -405,16 +414,56 @@ export async function createScheduledShiftAction(
   );
 }
 
-export async function deleteScheduledShiftAction(id: number) {
+export async function deleteScheduledShiftAction(
+  id: number,
+  timezone?: string | null,
+) {
   const result = await dalDeleteScheduledShift(id);
 
   return result.match(
     (shift) => {
       updateTag(`scheduled-shifts-${shift.org_id}`);
+      after(() => notifyScheduleChange("removed", shift, timezone));
       return { success: true as const };
     },
     (err) => {
       return { success: false as const, error: err.reason };
     },
   );
+}
+
+/** Time off shows in the time off tab, the Hours view and reports. */
+function timeOffResult<T extends { org_id: string }>(
+  result: Result<T, { reason: string }>,
+) {
+  return result.match(
+    (request) => {
+      updateTag(`time-off-${request.org_id}`);
+      return { success: true as const, data: request };
+    },
+    (err) => ({ success: false as const, error: err.reason }),
+  );
+}
+
+export async function createTimeOffRequestAction(
+  type: TimeOffType,
+  startDate: string,
+  endDate: string,
+  hoursPerDay: number,
+  note?: string | null,
+) {
+  return timeOffResult(
+    await dalCreateTimeOffRequest(type, startDate, endDate, hoursPerDay, note),
+  );
+}
+
+export async function reviewTimeOffRequestAction(
+  id: number,
+  decision: "approved" | "denied",
+) {
+  return timeOffResult(await dalReviewTimeOffRequest(id, decision));
+}
+
+export async function cancelTimeOffRequestAction(id: number) {
+  return timeOffResult(await dalCancelTimeOffRequest(id));
 }

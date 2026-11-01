@@ -11,6 +11,7 @@ import {
 } from "./break-utils";
 import { fetchAllPages } from "./clerk-pagination";
 import {
+  dbGetApprovedTimeOffForPeriod,
   dbGetBreakSettings,
   dbGetOvertimeSettings,
   dbGetTimeEntriesForPeriod,
@@ -21,6 +22,12 @@ import {
   isOvertimeEnabled,
   type OvertimeSplit,
 } from "./overtime";
+import {
+  formatTimeOffDates,
+  formatTimeOffHours,
+  TIME_OFF_TYPE_LABELS,
+  timeOffHoursInRange,
+} from "./time-off-utils";
 
 const sesClient = new SESClient({
   region: process.env.AWS_REGION || "us-east-1",
@@ -312,6 +319,30 @@ export async function sendWeeklyReports(
       const customStart = format(startDate, "yyyy-MM-dd");
       const customEnd = format(inclusiveEndDate, "yyyy-MM-dd");
 
+      // Approved time off is reported beside the worked hours, not in them.
+      // A failed lookup leaves it out rather than holding back the report.
+      const timeOff = await Promise.resolve()
+        .then(() =>
+          dbGetApprovedTimeOffForPeriod(userId, orgId, customStart, customEnd),
+        )
+        .catch((error) => {
+          console.error(
+            `[Reports] Error fetching time off for ${userName}:`,
+            error,
+          );
+          return [];
+        });
+      let timeOffHours = 0;
+      const timeOffLines = timeOff.map((request) => {
+        const hours = timeOffHoursInRange(request, customStart, customEnd);
+        timeOffHours += hours;
+        return {
+          type: TIME_OFF_TYPE_LABELS[request.request_type],
+          dates: formatTimeOffDates(request),
+          hours: formatTimeOffHours(hours),
+        };
+      });
+
       // Map startDate to the 1-4 week indexing used in ViewHours UI
       const dayOfMonth = startDate.getDate();
       let weekIndex = 1;
@@ -319,7 +350,7 @@ export async function sendWeeklyReports(
       else if (dayOfMonth >= 15) weekIndex = 3;
       else if (dayOfMonth >= 8) weekIndex = 2;
 
-      if (entries.length > 0) {
+      if (entries.length > 0 || timeOffLines.length > 0) {
         console.log(
           `[Reports] Sending email for ${userName} to admins: ${adminEmails.join(", ")}`,
         );
@@ -354,6 +385,8 @@ export async function sendWeeklyReports(
                   ? { overtime: formatDuration(overtimeMs) }
                   : {}),
               })),
+              timeOff: timeOffLines,
+              totalTimeOff: formatTimeOffHours(timeOffHours),
             }),
           );
 
@@ -391,7 +424,7 @@ export async function sendWeeklyReports(
         }
       } else {
         console.log(
-          `[Reports] No completed entries for ${userName}. Skipping email.`,
+          `[Reports] No completed entries or time off for ${userName}. Skipping email.`,
         );
       }
     }

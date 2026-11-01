@@ -1010,3 +1010,116 @@ describe("scheduled shifts", () => {
     expect(valuesOf(0)).toEqual([3, "o1"]);
   });
 });
+
+describe("time off requests", () => {
+  beforeEach(() => {
+    db.resetTimeOffTableCheck();
+  });
+
+  const ready = async () => {
+    sql.mockResolvedValue([]);
+    await db.ensureTimeOffTable();
+    sql.mockReset();
+  };
+
+  it("ensureTimeOffTable creates the table and its index once", async () => {
+    sql.mockResolvedValue([]);
+    await Promise.all([db.ensureTimeOffTable(), db.ensureTimeOffTable()]);
+    expect(sql).toHaveBeenCalledTimes(2);
+    expect(textOf(0)).toContain("CREATE TABLE IF NOT EXISTS time_off_requests");
+    expect(textOf(0)).toContain("CHECK (end_date >= start_date)");
+    expect(textOf(1)).toContain("idx_time_off_requests_org_dates");
+  });
+
+  it("ensureTimeOffTable retries after a failure", async () => {
+    sql.mockRejectedValueOnce(new Error("db down"));
+    await expect(db.ensureTimeOffTable()).rejects.toThrow("db down");
+    sql.mockReset();
+    sql.mockResolvedValue([]);
+    await db.ensureTimeOffTable();
+    expect(sql).toHaveBeenCalledTimes(2);
+  });
+
+  it("dbGetTimeOffRequests reads dates as text and tags the cache", async () => {
+    await ready();
+    sql.mockResolvedValue([{ id: 1 }]);
+    await expect(
+      db.dbGetTimeOffRequests("o1", null, "2025-01-01"),
+    ).resolves.toEqual([{ id: 1 }]);
+    expect(textOf(0)).toContain("start_date::TEXT AS start_date");
+    expect(textOf(0)).toContain("FROM time_off_requests");
+    expect(valuesOf(0)).toEqual(["o1", null, null, "2025-01-01"]);
+    expect(cacheTag).toHaveBeenCalledWith("time-off-o1");
+  });
+
+  it("dbGetApprovedTimeOffForPeriod reads a member's approved overlap", async () => {
+    await ready();
+    sql.mockResolvedValue([]);
+    await db.dbGetApprovedTimeOffForPeriod(
+      "u1",
+      "o1",
+      "2026-01-01",
+      "2026-01-07",
+    );
+    expect(textOf(0)).toContain("status = 'approved'");
+    expect(valuesOf(0)).toEqual(["u1", "o1", "2026-01-07", "2026-01-01"]);
+  });
+
+  it("dbCreateTimeOffRequest locks, then inserts unless it overlaps", async () => {
+    await ready();
+    sql.mockImplementation((strings: TemplateStringsArray) => strings);
+    sql.transaction.mockResolvedValue([[], [{ id: 5 }]]);
+    await expect(
+      db.dbCreateTimeOffRequest(
+        "o1",
+        "u1",
+        "vacation",
+        "2026-01-05",
+        "2026-01-07",
+        8,
+        null,
+      ),
+    ).resolves.toEqual({ id: 5 });
+    expect(valuesOf(0)).toEqual(["u1:o1:time-off"]);
+    expect(textOf(1)).toContain("INSERT INTO time_off_requests");
+    expect(textOf(1)).toContain("status IN ('pending', 'approved')");
+    expect(valuesOf(1)).toEqual([
+      "o1",
+      "u1",
+      "vacation",
+      "2026-01-05",
+      "2026-01-07",
+      8,
+      null,
+      "u1",
+      "o1",
+      "2026-01-07",
+      "2026-01-05",
+    ]);
+
+    sql.transaction.mockResolvedValue([[], []]);
+    await expect(
+      db.dbCreateTimeOffRequest("o1", "u1", "sick", "a", "b", 8, null),
+    ).resolves.toBeUndefined();
+  });
+
+  it("dbReviewTimeOffRequest only changes pending requests", async () => {
+    await ready();
+    sql.mockResolvedValue([{ id: 5, status: "approved" }]);
+    await expect(
+      db.dbReviewTimeOffRequest(5, "o1", "approved", "a1"),
+    ).resolves.toEqual({ id: 5, status: "approved" });
+    expect(textOf(0)).toContain("status = 'pending'");
+    expect(valuesOf(0)).toEqual(["approved", "a1", 5, "o1"]);
+  });
+
+  it("dbCancelTimeOffRequest limits members to their pending requests", async () => {
+    await ready();
+    sql.mockResolvedValue([]);
+    await expect(
+      db.dbCancelTimeOffRequest(5, "o1", "u1", false),
+    ).resolves.toBeUndefined();
+    expect(textOf(0)).toContain("SET status = 'cancelled'");
+    expect(valuesOf(0)).toEqual([5, "o1", "u1", false]);
+  });
+});

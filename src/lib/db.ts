@@ -12,6 +12,8 @@ import type {
   SiteData,
   TimeEntry,
   TimeEntryBreak,
+  TimeOffRequest,
+  TimeOffType,
 } from "./types";
 
 if (!process.env.DATABASE_URL) {
@@ -950,4 +952,187 @@ export async function dbDeleteScheduledShift(id: number, orgId: string) {
 		RETURNING *
 	`;
   return deleted as unknown as ScheduledShift | undefined;
+}
+
+/* ------------------------------------------------------------ time off -- */
+
+let timeOffTableReady: Promise<void> | null = null;
+
+/**
+ * Production databases that predate `time_off_requests` in schema.sql don't
+ * have it, so create it on first use (same approach as the other optional
+ * tables). Runs once per server instance; a failure is not cached.
+ */
+export function ensureTimeOffTable(): Promise<void> {
+  timeOffTableReady ??= (async () => {
+    await sql`
+		CREATE TABLE IF NOT EXISTS time_off_requests (
+			id SERIAL PRIMARY KEY,
+			org_id TEXT NOT NULL,
+			user_id TEXT NOT NULL,
+			request_type TEXT NOT NULL CHECK (request_type IN ('vacation', 'sick')),
+			start_date DATE NOT NULL,
+			end_date DATE NOT NULL,
+			hours_per_day DOUBLE PRECISION NOT NULL DEFAULT 8,
+			note TEXT,
+			status TEXT NOT NULL DEFAULT 'pending'
+				CHECK (status IN ('pending', 'approved', 'denied', 'cancelled')),
+			reviewed_by TEXT,
+			reviewed_at TIMESTAMP WITH TIME ZONE,
+			CHECK (end_date >= start_date),
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+		)
+	`;
+    await sql`
+		CREATE INDEX IF NOT EXISTS idx_time_off_requests_org_dates
+			ON time_off_requests (org_id, end_date)
+	`;
+  })().catch((error) => {
+    timeOffTableReady = null;
+    throw error;
+  });
+  return timeOffTableReady;
+}
+
+/** Test-only: forget that the table check ran. */
+export function resetTimeOffTableCheck() {
+  timeOffTableReady = null;
+}
+
+// Dates are read back as text so a DATE never turns into a midnight-UTC
+// timestamp that shows up as the previous day west of Greenwich.
+
+/**
+ * Requests ending on or after `since` (`YYYY-MM-DD`), newest first. With a
+ * `userId`, only that member's; with null, every member's.
+ */
+export async function dbGetTimeOffRequests(
+  orgId: string,
+  userId: string | null,
+  since: string,
+) {
+  "use cache";
+  cacheTag(`time-off-${orgId}`);
+  cacheLife("hours");
+  await ensureTimeOffTable();
+  const rows = await sql`
+		SELECT id, org_id, user_id, request_type,
+			start_date::TEXT AS start_date, end_date::TEXT AS end_date,
+			hours_per_day, note, status, reviewed_by, reviewed_at,
+			created_at, updated_at
+		FROM time_off_requests
+		WHERE org_id = ${orgId}
+		AND (${userId}::TEXT IS NULL OR user_id = ${userId})
+		AND end_date >= ${since}::DATE
+		ORDER BY start_date DESC, id DESC
+	`;
+  return rows as unknown as TimeOffRequest[];
+}
+
+/** A member's approved time off overlapping [start, end] (inclusive dates). */
+export async function dbGetApprovedTimeOffForPeriod(
+  userId: string,
+  orgId: string,
+  start: string,
+  end: string,
+) {
+  await ensureTimeOffTable();
+  const rows = await sql`
+		SELECT id, org_id, user_id, request_type,
+			start_date::TEXT AS start_date, end_date::TEXT AS end_date,
+			hours_per_day, note, status, reviewed_by, reviewed_at,
+			created_at, updated_at
+		FROM time_off_requests
+		WHERE user_id = ${userId} AND org_id = ${orgId}
+		AND status = 'approved'
+		AND start_date <= ${end}::DATE AND end_date >= ${start}::DATE
+		ORDER BY start_date ASC, id ASC
+	`;
+  return rows as unknown as TimeOffRequest[];
+}
+
+/**
+ * Files a pending request, unless it overlaps one of the member's pending or
+ * approved requests (returns undefined then). The advisory lock stops two
+ * overlapping requests sent together from both getting in.
+ */
+export async function dbCreateTimeOffRequest(
+  orgId: string,
+  userId: string,
+  type: TimeOffType,
+  startDate: string,
+  endDate: string,
+  hoursPerDay: number,
+  note: string | null,
+) {
+  await ensureTimeOffTable();
+  const [, inserted] = await sql.transaction([
+    sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${userId}:${orgId}:time-off`}::text, 0))`,
+    sql`
+		INSERT INTO time_off_requests
+			(org_id, user_id, request_type, start_date, end_date, hours_per_day, note)
+		SELECT ${orgId}, ${userId}, ${type}, ${startDate}::DATE, ${endDate}::DATE,
+			${hoursPerDay}, ${note}
+		WHERE NOT EXISTS (
+			SELECT 1 FROM time_off_requests
+			WHERE user_id = ${userId} AND org_id = ${orgId}
+			AND status IN ('pending', 'approved')
+			AND start_date <= ${endDate}::DATE AND end_date >= ${startDate}::DATE
+		)
+		RETURNING id, org_id, user_id, request_type,
+			start_date::TEXT AS start_date, end_date::TEXT AS end_date,
+			hours_per_day, note, status, reviewed_by, reviewed_at,
+			created_at, updated_at
+	`,
+  ]);
+  return inserted[0] as unknown as TimeOffRequest | undefined;
+}
+
+/** Approves or denies a pending request. Undefined if none matched. */
+export async function dbReviewTimeOffRequest(
+  id: number,
+  orgId: string,
+  status: "approved" | "denied",
+  reviewerId: string,
+) {
+  await ensureTimeOffTable();
+  const [updated] = await sql`
+		UPDATE time_off_requests
+		SET status = ${status}, reviewed_by = ${reviewerId},
+			reviewed_at = NOW(), updated_at = NOW()
+		WHERE id = ${id} AND org_id = ${orgId} AND status = 'pending'
+		RETURNING id, org_id, user_id, request_type,
+			start_date::TEXT AS start_date, end_date::TEXT AS end_date,
+			hours_per_day, note, status, reviewed_by, reviewed_at,
+			created_at, updated_at
+	`;
+  return updated as unknown as TimeOffRequest | undefined;
+}
+
+/**
+ * Cancels a request. Members can withdraw their own pending requests; admins
+ * can also cancel approved ones. Undefined if nothing was allowed to change.
+ */
+export async function dbCancelTimeOffRequest(
+  id: number,
+  orgId: string,
+  userId: string,
+  isAdmin: boolean,
+) {
+  await ensureTimeOffTable();
+  const [updated] = await sql`
+		UPDATE time_off_requests
+		SET status = 'cancelled', updated_at = NOW()
+		WHERE id = ${id} AND org_id = ${orgId}
+		AND (
+			(user_id = ${userId} AND status = 'pending')
+			OR (${isAdmin} AND status IN ('pending', 'approved'))
+		)
+		RETURNING id, org_id, user_id, request_type,
+			start_date::TEXT AS start_date, end_date::TEXT AS end_date,
+			hours_per_day, note, status, reviewed_by, reviewed_at,
+			created_at, updated_at
+	`;
+  return updated as unknown as TimeOffRequest | undefined;
 }
