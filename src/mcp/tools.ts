@@ -49,9 +49,11 @@ import {
   exportFileName,
   formatHours,
   formatPeriod,
+  hasOvertime,
   toCsv,
   toPdf,
   totalHours,
+  totalOvertime,
   toXlsx,
   XLSX_MIME,
 } from "@/lib/timesheet-export";
@@ -77,6 +79,7 @@ import {
   dbGetLocationSettings,
   dbGetOrgActiveEntries,
   dbGetOrgTimeEntries,
+  dbGetOvertimeSettings,
   dbGetReportingSettings,
   dbGetSites,
   dbGetTimeEntries,
@@ -2483,6 +2486,8 @@ export type GeneratedTimesheetExport = {
   entriesCount: number;
   daysWorked: number;
   totalHours: number;
+  /** Null when the org tracks no overtime. */
+  overtimeHours: number | null;
   downloadUrl: string;
   periodSections: ReturnType<typeof buildPeriodSections>;
   employeeSummaries: ReturnType<typeof buildEmployeeSummary>;
@@ -2629,6 +2634,13 @@ export async function generateTimesheetExport(
     memberParam = memberRes.member.userId;
   }
 
+  // A lookup failure exports without overtime rather than failing the export.
+  const overtimeSettings = await Promise.resolve()
+    .then(() => dbGetOvertimeSettings(org.orgId))
+    .catch((error) => {
+      console.error("Error fetching overtime settings: ", error);
+      return undefined;
+    });
   const rows = buildExportRows(
     entries,
     (userId) =>
@@ -2636,6 +2648,8 @@ export async function generateTimesheetExport(
         ? (memberMap.get(userId)?.name ?? "Unknown member")
         : employeeLabel,
     tz,
+    undefined,
+    overtimeSettings,
   );
   const orgLogo = await loadPdfImage(org.orgImageUrl);
   const meta: ExportMeta = {
@@ -2664,6 +2678,9 @@ export async function generateTimesheetExport(
   } as const;
   const { fileName, bytes, mimeType } = byFormat[exportFormat];
   const hours = Number(totalHours(rows).toFixed(2));
+  const overtimeHours = hasOvertime(rows)
+    ? Number(totalOvertime(rows).toFixed(2))
+    : null;
   const daysWorked = new Set(rows.map((r) => r.date)).size;
   const periodSections = buildPeriodSections(rows, meta);
   const employeeSummaries = buildEmployeeSummary(rows);
@@ -2726,6 +2743,7 @@ export async function generateTimesheetExport(
       entriesCount: rows.length,
       daysWorked,
       totalHours: hours,
+      overtimeHours,
       downloadUrl,
       periodSections,
       employeeSummaries,
@@ -2764,10 +2782,13 @@ export async function exportTimesheetTool(
     entriesCount,
     daysWorked,
     totalHours: hours,
+    overtimeHours,
     downloadUrl,
     periodSections,
     employeeSummaries,
   } = res.value;
+  const withOvertime = (value: number) =>
+    overtimeHours === null ? {} : { overtime_hours: Number(value.toFixed(2)) };
 
   const pdfBase64 = Buffer.from(pdfBytes).toString("base64");
   const xlsxBase64 = Buffer.from(xlsxBytes).toString("base64");
@@ -2785,7 +2806,7 @@ export async function exportTimesheetTool(
   };
 
   return {
-    summary: `Timesheet for ${employeeLabel} (${formattedPeriod}: ${entriesCount} entr${entriesCount === 1 ? "y" : "ies"} across ${daysWorked} day${daysWorked === 1 ? "" : "s"}, ${formatHours(hours)} hrs) is ready in PDF, Excel Spreadsheet and CSV formats. Download (requires Clock Out sign-in): PDF [${pdfFileName}](${pdfDownloadUrl}) | Spreadsheet [${xlsxFileName}](${xlsxDownloadUrl}) | CSV [${csvFileName}](${csvDownloadUrl})`,
+    summary: `Timesheet for ${employeeLabel} (${formattedPeriod}: ${entriesCount} entr${entriesCount === 1 ? "y" : "ies"} across ${daysWorked} day${daysWorked === 1 ? "" : "s"}, ${formatHours(hours)} hrs${overtimeHours ? `, ${formatHours(overtimeHours)} hrs overtime` : ""}) is ready in PDF, Excel Spreadsheet and CSV formats. Download (requires Clock Out sign-in): PDF [${pdfFileName}](${pdfDownloadUrl}) | Spreadsheet [${xlsxFileName}](${xlsxDownloadUrl}) | CSV [${csvFileName}](${csvDownloadUrl})`,
     data: {
       status: "ready",
       organization: { org_id: org.orgId, name: org.orgName },
@@ -2805,6 +2826,7 @@ export async function exportTimesheetTool(
       entries_count: entriesCount,
       days_worked: daysWorked,
       total_hours: hours,
+      ...(overtimeHours === null ? {} : { overtime_hours: overtimeHours }),
       download_url: downloadUrl,
       pdf: {
         file_name: pdfFileName,
@@ -2826,12 +2848,14 @@ export async function exportTimesheetTool(
         days_worked: s.daysWorked,
         shifts_count: s.shiftsCount,
         total_hours: Number(s.totalHours.toFixed(2)),
+        ...withOvertime(s.overtimeHours),
       })),
       employee_breakdown: employeeSummaries.map((e) => ({
         employee: e.employee,
         days_worked: e.daysWorked,
         shifts_count: e.shiftsCount,
         total_hours: Number(e.totalHours.toFixed(2)),
+        ...withOvertime(e.overtimeHours),
       })),
     },
     resource: {

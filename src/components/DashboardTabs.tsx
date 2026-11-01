@@ -9,6 +9,7 @@ import { ViewHoursFallback } from "./fallbacks/view-hours-fallback";
 import NotificationSettings from "./NotificationSettings";
 import OrgSettings from "./OrgSettings";
 import { useOrgSwitcher } from "./OrgSwitcher";
+import Schedule from "./Schedule";
 import { Card } from "./ui";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import ViewHours from "./ViewHours";
@@ -18,12 +19,14 @@ export default function DashboardTabs({
   orgSettingsPromise,
   breakSettingsPromise,
   locationSettingsPromise,
+  overtimeSettingsPromise,
   sitesPromise,
   alertSettingsPromise,
   notificationSettingsPromise,
   entriesPromise,
   orgTimeEntriesPromise,
   recentEntriesPromise,
+  schedulePromise,
   membersPromise,
   selectedUserIdPromise,
   selectedWeekPromise,
@@ -51,6 +54,12 @@ export default function DashboardTabs({
     : null;
   const breakSettings = breakSettingsResult?.ok
     ? breakSettingsResult.value
+    : null;
+  const overtimeSettingsResult = overtimeSettingsPromise
+    ? use(overtimeSettingsPromise)
+    : null;
+  const overtimeSettings = overtimeSettingsResult?.ok
+    ? overtimeSettingsResult.value
     : null;
   const locationSettingsResult = locationSettingsPromise
     ? use(locationSettingsPromise)
@@ -90,6 +99,7 @@ export default function DashboardTabs({
         {notificationSettingsPromise && (
           <TabsTrigger value="notifications">Notifications</TabsTrigger>
         )}
+        <TabsTrigger value="schedule">Schedule</TabsTrigger>
         {isAdmin && <TabsTrigger value="settings">Settings</TabsTrigger>}
       </TabsList>
 
@@ -113,6 +123,7 @@ export default function DashboardTabs({
             isAdmin={isAdmin}
             membersPromise={membersPromise}
             orgTimeEntriesPromise={orgTimeEntriesPromise}
+            overtimeSettings={overtimeSettings}
             selectedMonthPromise={selectedMonthPromise}
             selectedUserIdPromise={selectedUserIdPromise}
             selectedWeekPromise={selectedWeekPromise}
@@ -134,6 +145,15 @@ export default function DashboardTabs({
           </Suspense>
         </TabsContent>
       )}
+      <TabsContent className="mt-0" value="schedule">
+        <Suspense fallback={<ViewHoursFallback />}>
+          <Schedule
+            isAdmin={isAdmin}
+            membersPromise={membersPromise}
+            schedulePromise={schedulePromise}
+          />
+        </Suspense>
+      </TabsContent>
 
       {isAdmin && (
         <TabsContent className="mt-0" value="settings">
@@ -145,6 +165,7 @@ export default function DashboardTabs({
               hasReporting={hasReporting}
               locationSettingsPromise={locationSettingsPromise}
               orgSettingsPromise={orgSettingsPromise}
+              overtimeSettingsPromise={overtimeSettingsPromise}
               sitesPromise={sitesPromise}
             />
           </Suspense>

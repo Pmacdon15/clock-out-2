@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type {
   BreakSettingsData,
   LocationSettingsData,
+  OvertimeSettingsData,
   ReportingSettingsData,
   SiteData,
 } from "@/lib/types";
@@ -26,11 +27,17 @@ type CapturedLocationProps = {
   onUpdateOptimistic: (next: Partial<LocationSettingsData>) => void;
 };
 
+type CapturedOvertimeProps = {
+  initialData: OvertimeSettingsData | null;
+  onUpdateOptimistic: (next: Partial<OvertimeSettingsData>) => void;
+};
+
 const captured = vi.hoisted(() => ({
   props: [] as CapturedProps[],
   breakProps: [] as CapturedBreakProps[],
   locationProps: [] as CapturedLocationProps[],
   alertProps: [] as { initialData: unknown }[],
+  overtimeProps: [] as CapturedOvertimeProps[],
 }));
 
 vi.mock("@/components/AlertSettings", () => ({
@@ -69,12 +76,32 @@ vi.mock("@/components/LocationSettings", () => ({
   },
 }));
 
+vi.mock("@/components/OvertimeSettings", () => ({
+  default: (props: CapturedOvertimeProps) => {
+    captured.overtimeProps.push(props);
+    return (
+      <div data-testid="overtime">{JSON.stringify(props.initialData)}</div>
+    );
+  },
+}));
+
 import OrgSettings from "@/components/OrgSettings";
 
 const latest = () => captured.props[captured.props.length - 1];
 const latestBreak = () => captured.breakProps[captured.breakProps.length - 1];
 const latestLocation = () =>
   captured.locationProps[captured.locationProps.length - 1];
+const latestOvertime = () =>
+  captured.overtimeProps[captured.overtimeProps.length - 1];
+
+function updateOvertimeOptimistically(next: Partial<OvertimeSettingsData>) {
+  act(() => {
+    startTransition(async () => {
+      latestOvertime().onUpdateOptimistic(next);
+      await new Promise(() => {});
+    });
+  });
+}
 
 /** Fires an optimistic update inside a transition that never settles. */
 function updateOptimistically(next: Partial<ReportingSettingsData>) {
@@ -277,5 +304,44 @@ describe("OrgSettings", () => {
       dock_lunch: true,
       lunch_duration_minutes: 45,
     });
+  });
+
+  it("passes the overtime settings down and merges optimistic updates", () => {
+    const overtimeValue: OvertimeSettingsData = {
+      org_id: "org_1",
+      daily_threshold_hours: 8,
+      weekly_threshold_hours: null,
+    };
+    render(
+      <OrgSettings
+        hasReporting={false}
+        orgSettingsPromise={resolved({ ok: true, value: null })}
+        overtimeSettingsPromise={resolved({ ok: true, value: overtimeValue })}
+      />,
+    );
+    expect(latestOvertime().initialData).toEqual(overtimeValue);
+
+    updateOvertimeOptimistically({ weekly_threshold_hours: 40 });
+    expect(latestOvertime().initialData).toEqual({
+      ...overtimeValue,
+      weekly_threshold_hours: 40,
+    });
+  });
+
+  it("passes no overtime settings when they are missing or failed to load", () => {
+    render(
+      <OrgSettings
+        hasReporting={false}
+        orgSettingsPromise={resolved({ ok: true, value: null })}
+        overtimeSettingsPromise={resolved({
+          ok: false,
+          error: { reason: "x" },
+        })}
+      />,
+    );
+    expect(screen.getByTestId("overtime")).toHaveTextContent("null");
+    // Nothing to merge into, so an optimistic update is a no-op.
+    updateOvertimeOptimistically({ daily_threshold_hours: 8 });
+    expect(latestOvertime().initialData).toBeNull();
   });
 });

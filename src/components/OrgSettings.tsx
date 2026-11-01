@@ -6,6 +6,7 @@ import type {
   BreakSettingsData,
   LocationSettingsData,
   OrgSettingsData,
+  OvertimeSettingsData,
   ReportingSettingsData,
   SerializableResult,
   SiteData,
@@ -13,6 +14,7 @@ import type {
 import AlertSettings from "./AlertSettings";
 import BreakSettings from "./BreakSettings";
 import LocationSettings from "./LocationSettings";
+import OvertimeSettings from "./OvertimeSettings";
 import ReportingSettings from "./ReportingSettings";
 
 interface OrgSettingsProps {
@@ -40,6 +42,9 @@ interface OrgSettingsProps {
       }
     >
   >;
+  overtimeSettingsPromise?: Promise<
+    SerializableResult<OvertimeSettingsData | null, { reason: string }>
+  >;
   sitesPromise?: Promise<SerializableResult<SiteData[], { reason: string }>>;
   alertSettingsPromise?: Promise<
     SerializableResult<AlertSettingsData, { reason: string }>
@@ -54,6 +59,7 @@ export default function OrgSettings({
   orgSettingsPromise,
   breakSettingsPromise,
   locationSettingsPromise,
+  overtimeSettingsPromise,
   sitesPromise,
   alertSettingsPromise,
 }: OrgSettingsProps) {
@@ -63,6 +69,9 @@ export default function OrgSettings({
     : null;
   const locationSettingsResult = locationSettingsPromise
     ? use(locationSettingsPromise)
+    : null;
+  const overtimeSettingsResult = overtimeSettingsPromise
+    ? use(overtimeSettingsPromise)
     : null;
   const sitesResult = sitesPromise ? use(sitesPromise) : null;
   const sites = sitesResult?.ok ? sitesResult.value : [];
@@ -96,6 +105,18 @@ export default function OrgSettings({
       },
     );
 
+  const [optimisticOvertimeSettings, setOptimisticOvertimeSettings] =
+    useOptimistic(
+      overtimeSettingsResult?.ok ? overtimeSettingsResult.value : null,
+      (
+        state: OvertimeSettingsData | null,
+        next: Partial<OvertimeSettingsData>,
+      ) => {
+        if (!state) return state;
+        return { ...state, ...next };
+      },
+    );
+
   return (
     <div className="space-y-8">
       <BreakSettings
@@ -109,6 +130,10 @@ export default function OrgSettings({
           }
         />
       )}
+      <OvertimeSettings
+        initialData={optimisticOvertimeSettings}
+        onUpdateOptimistic={(next) => setOptimisticOvertimeSettings(next)}
+      />
       <LocationSettings
         hasGeofencing={hasGeofencing}
         initialData={optimisticLocationSettings}

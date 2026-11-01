@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  applyOvertime,
+  buildEmployeeSummary,
   buildExportRows,
   buildPdf,
   buildPeriodSections,
@@ -7,6 +9,8 @@ import {
   buildZip,
   COLUMNS,
   COLUMNS_WITH_LOCATION,
+  COLUMNS_WITH_LOCATION_AND_OVERTIME,
+  COLUMNS_WITH_OVERTIME,
   CSV_MIME,
   collectBreakRecords,
   crc32,
@@ -23,6 +27,7 @@ import {
   getMonthBounds,
   getPdfColumns,
   getWeekBounds,
+  hasOvertime,
   layoutPdfPages,
   neutralizeCsvValue,
   pdfText,
@@ -31,6 +36,7 @@ import {
   toCsvText,
   toPdf,
   totalHours,
+  totalOvertime,
   toXlsx,
   XLSX_MIME,
   xmlText,
@@ -1384,5 +1390,154 @@ describe("captured location in the export", () => {
       "Record Type,Employee,Date,Day,Clock In,Clock Out,Hours,Daily Total,Period,Days Worked,Shifts,Avg Hours/Day",
     );
     expect(linesWithoutLoc[1]).not.toContain("Location");
+  });
+});
+
+describe("overtime in exports", () => {
+  const dailyOt = {
+    org_id: "org_1",
+    daily_threshold_hours: 8,
+    weekly_threshold_hours: null,
+  };
+  // Ada: 10h Mon (2h OT) and 6h Tue; Grace: 9h Mon (1h OT); an open shift.
+  const rows = () =>
+    applyOvertime(
+      [
+        row({ hours: 10 }),
+        row({ employee: "Grace", hours: 9 }),
+        row({ date: "2026-03-10", dayOfWeek: "Tue", hours: 6 }),
+        row({ date: "2026-03-11", clockOut: "In progress", hours: null }),
+      ],
+      dailyOt,
+    );
+
+  it("leaves rows untouched when the org tracks no overtime", () => {
+    const plain = [row()];
+    expect(applyOvertime(plain, null)).toBe(plain);
+    expect(hasOvertime(plain)).toBe(false);
+    expect(totalOvertime(plain)).toBe(0);
+  });
+
+  it("adds each row's overtime share, per employee", () => {
+    const out = rows();
+    expect(out.map((r) => r.overtimeHours)).toEqual([2, 1, 0, 0]);
+    expect(hasOvertime(out)).toBe(true);
+    expect(totalOvertime(out)).toBe(3);
+    expect(
+      buildEmployeeSummary(out).map((e) => [e.employee, e.overtimeHours]),
+    ).toEqual([
+      ["Ada", 2],
+      ["Grace", 1],
+    ]);
+    expect(buildPeriodSections(out, meta)[0].overtimeHours).toBe(3);
+  });
+
+  it("applies the thresholds when building rows from entries", () => {
+    const out = buildExportRows(
+      [
+        makeEntry({
+          clock_in: new Date("2026-03-09T08:00:00Z"),
+          clock_out: new Date("2026-03-09T18:00:00Z"),
+        }),
+      ],
+      () => "Ada",
+      "UTC",
+      null,
+      dailyOt,
+    );
+    expect(out[0].overtimeHours).toBe(2);
+    expect(
+      buildExportRows([makeEntry()], () => "Ada")[0].overtimeHours,
+    ).toBeUndefined();
+  });
+
+  it("adds an Overtime column, totals and summaries to the sheet", () => {
+    const xml = buildSheetXml(rows(), meta);
+    expect(xml).toContain(
+      '<c r="H5" s="5" t="inlineStr"><is><t xml:space="preserve">Overtime</t></is></c>',
+    );
+    expect(xml).toContain('<c r="H6" s="3"><v>2</v></c>');
+    expect(xml).toContain("<f>SUM(H6:H9)</f><v>3</v>");
+    expect(xml).toContain(
+      '<c r="G12" s="5" t="inlineStr"><is><t xml:space="preserve">Overtime</t></is></c>',
+    );
+    expect(xml).toContain('<c r="G13" s="4"><v>2</v></c>');
+    expect(xml).toContain('<col min="9" max="9" width="34" customWidth="1"/>');
+    expect(buildSheetXml([row()], meta)).not.toContain("Overtime");
+  });
+
+  it("totals overtime per period", () => {
+    const xml = buildSheetXml(rows(), { ...meta, groupBy: "week" });
+    expect(xml).toContain("<f>SUM(H7:H10)</f><v>3</v>");
+    expect(xml).toContain("<f>SUM(H7,H8,H9,H10)</f><v>3</v>");
+    const summary = buildSheetXml(
+      [
+        ...rows(),
+        ...applyOvertime(
+          [row({ date: "2026-03-16", dayOfWeek: "Mon", hours: 9 })],
+          dailyOt,
+        ),
+      ],
+      { ...meta, endDate: "2026-03-20" },
+    );
+    expect(summary).toContain("Summary by Period");
+    expect(summary).toMatch(
+      /Overtime<\/t><\/is><\/c><\/row><row r="\d+">(?:(?!<\/row>).)*Week of Mar 9/,
+    );
+
+    expect(buildSheetXml([], meta)).not.toContain("Overtime");
+  });
+
+  it("adds an OT column to the PDF, with and without location", () => {
+    expect(getPdfColumns(false, true)).toBe(COLUMNS_WITH_OVERTIME);
+    expect(getPdfColumns(true, true)).toBe(COLUMNS_WITH_LOCATION_AND_OVERTIME);
+    const [page] = layoutPdfPages(rows(), { ...meta, groupBy: "week" });
+    expect(page).toContain("(OT) Tj");
+    expect(page).toContain("(2.00) Tj");
+    expect(page).toContain("(3.00) Tj");
+    expect(page).toContain("Summary by Employee");
+
+    const [withLocation] = layoutPdfPages(
+      applyOvertime([row({ hours: 9, location: "Depot" })], dailyOt),
+      meta,
+    );
+    expect(withLocation).toContain("(OT) Tj");
+    expect(withLocation).toContain("(Depot) Tj");
+    expect(layoutPdfPages([row()], meta)[0]).not.toContain("(OT) Tj");
+  });
+
+  it("adds an Overtime Hours column to the CSV before the location", () => {
+    const lines = toCsvText(rows(), { ...meta, groupBy: "week" })
+      .split("\r\n")
+      .filter(Boolean);
+    expect(lines[0]).toBe(
+      "Record Type,Employee,Date,Day,Clock In,Clock Out,Hours,Daily Total,Period,Days Worked,Shifts,Avg Hours/Day,Overtime Hours",
+    );
+    expect(lines[1]).toMatch(/^Shift,Ada,2026-03-09,.*,2\.00$/);
+    expect(lines.find((l) => l.startsWith("Period Subtotal"))).toMatch(
+      /,3\.00$/,
+    );
+    expect(lines.find((l) => l.startsWith("Total"))).toMatch(/,3\.00$/);
+    expect(lines.find((l) => l.startsWith("Employee Summary,Grace"))).toMatch(
+      /,1\.00$/,
+    );
+
+    const located = toCsvText(
+      applyOvertime(
+        [
+          row({ hours: 9, location: "Depot" }),
+          row({ date: "2026-03-16", dayOfWeek: "Mon", hours: 4 }),
+        ],
+        dailyOt,
+      ),
+      { ...meta, endDate: "2026-03-20" },
+    )
+      .split("\r\n")
+      .filter(Boolean);
+    expect(located[0]).toMatch(/Overtime Hours,Location$/);
+    expect(located[1]).toMatch(/,1\.00,Depot$/);
+    expect(located.find((l) => l.startsWith("Period Summary"))).toMatch(
+      /,1\.00,$/,
+    );
   });
 });

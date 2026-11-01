@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   dbGetEntryBreaks: vi.fn(),
   dbGetLocationSettings: vi.fn(),
   dbGetOrgTimeEntries: vi.fn(),
+  dbGetOvertimeSettings: vi.fn(),
   dbGetReportingSettings: vi.fn(),
   dbGetSites: vi.fn(),
   dbGetSitesForEnforcement: vi.fn(),
@@ -26,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   dbUpdateBreak: vi.fn(),
   dbUpdateBreakSettings: vi.fn(),
   dbUpdateLocationSettings: vi.fn(),
+  dbUpdateOvertimeSettings: vi.fn(),
   dbUpdateReportingSettings: vi.fn(),
   dbUpdateSite: vi.fn(),
   dbUpdateTimeEntry: vi.fn(),
@@ -59,6 +61,7 @@ vi.mock("@/lib/db", () => ({
   dbGetEntryBreaks: mocks.dbGetEntryBreaks,
   dbGetLocationSettings: mocks.dbGetLocationSettings,
   dbGetOrgTimeEntries: mocks.dbGetOrgTimeEntries,
+  dbGetOvertimeSettings: mocks.dbGetOvertimeSettings,
   dbGetReportingSettings: mocks.dbGetReportingSettings,
   dbGetSites: mocks.dbGetSites,
   dbGetSitesForEnforcement: mocks.dbGetSitesForEnforcement,
@@ -67,6 +70,7 @@ vi.mock("@/lib/db", () => ({
   dbUpdateBreak: mocks.dbUpdateBreak,
   dbUpdateBreakSettings: mocks.dbUpdateBreakSettings,
   dbUpdateLocationSettings: mocks.dbUpdateLocationSettings,
+  dbUpdateOvertimeSettings: mocks.dbUpdateOvertimeSettings,
   dbUpdateReportingSettings: mocks.dbUpdateReportingSettings,
   dbUpdateSite: mocks.dbUpdateSite,
   dbUpdateTimeEntry: mocks.dbUpdateTimeEntry,
@@ -94,6 +98,7 @@ import {
   getOrgBreakSettings,
   getOrgLocationSettings,
   getOrgMembers,
+  getOrgOvertimeSettings,
   getOrgReportingSettings,
   getOrgSites,
   getOrgTimeEntries,
@@ -102,6 +107,7 @@ import {
   updateBreakDal,
   updateBreakSettingsDal,
   updateLocationSettingsDal,
+  updateOvertimeSettingsDal,
   updateReportingSettingsDal,
   updateSiteDal,
   updateTimeEntry,
@@ -1834,6 +1840,89 @@ describe("deleteSiteDal", () => {
     mocks.dbDeleteSite.mockRejectedValue(new Error("db"));
     expect((await deleteSiteDal(7))._unsafeUnwrapErr()).toEqual({
       reason: "Failed to delete site",
+    });
+  });
+});
+
+describe("updateOvertimeSettingsDal", () => {
+  it.each([
+    ["no user", noUser],
+    ["no org", noOrg],
+    ["a non-admin", member],
+  ])("rejects %s", async (_label, session) => {
+    mocks.protect.mockResolvedValue(session);
+    expect((await updateOvertimeSettingsDal(8, 40))._unsafeUnwrapErr()).toEqual(
+      { reason: "Unauthorized" },
+    );
+    expect(mocks.dbUpdateOvertimeSettings).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a zero daily threshold", 0, 40],
+    ["a daily threshold over 24h", 25, 40],
+    ["a weekly threshold over 168h", 8, 169],
+    ["a NaN weekly threshold", 8, Number.NaN],
+  ])("rejects %s", async (_label, daily, weekly) => {
+    mocks.protect.mockResolvedValue(admin);
+    expect(
+      (await updateOvertimeSettingsDal(daily, weekly))._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Invalid overtime settings" });
+    expect(mocks.dbUpdateOvertimeSettings).not.toHaveBeenCalled();
+  });
+
+  it("lets admins on the free plan save thresholds, or turn them off", async () => {
+    const has = vi.fn(() => false);
+    mocks.protect.mockResolvedValue({ ...admin, has });
+    mocks.dbUpdateOvertimeSettings.mockResolvedValue({ org_id: "org_1" });
+    expect((await updateOvertimeSettingsDal(8, 40))._unsafeUnwrap()).toEqual({
+      org_id: "org_1",
+    });
+    expect(mocks.dbUpdateOvertimeSettings).toHaveBeenCalledWith("org_1", 8, 40);
+    expect((await updateOvertimeSettingsDal(null, null)).isOk()).toBe(true);
+    expect(mocks.dbUpdateOvertimeSettings).toHaveBeenLastCalledWith(
+      "org_1",
+      null,
+      null,
+    );
+    expect(has).not.toHaveBeenCalled();
+  });
+
+  it("returns an error when the save fails", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbUpdateOvertimeSettings.mockRejectedValue(new Error("db"));
+    expect(
+      (await updateOvertimeSettingsDal(8, null))._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Failed to update overtime settings" });
+  });
+});
+
+describe("getOrgOvertimeSettings", () => {
+  it("rejects requests without a user or org", async () => {
+    mocks.protect.mockResolvedValue(noOrg);
+    expect((await getOrgOvertimeSettings()).ok).toBe(false);
+    expect(mocks.dbGetOvertimeSettings).not.toHaveBeenCalled();
+  });
+
+  it("returns the saved settings, or null when there are none", async () => {
+    mocks.protect.mockResolvedValue(member);
+    const saved = {
+      org_id: "org_1",
+      daily_threshold_hours: 8,
+      weekly_threshold_hours: 40,
+    };
+    mocks.dbGetOvertimeSettings.mockResolvedValueOnce(saved);
+    expect(await getOrgOvertimeSettings()).toEqual({ ok: true, value: saved });
+    mocks.dbGetOvertimeSettings.mockResolvedValueOnce(undefined);
+    expect(await getOrgOvertimeSettings()).toEqual({ ok: true, value: null });
+  });
+
+  it("returns an error when the read fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetOvertimeSettings.mockRejectedValue(new Error("db"));
+    expect(await getOrgOvertimeSettings()).toEqual({
+      ok: false,
+      error: { reason: "Error fetching overtime settings." },
     });
   });
 });

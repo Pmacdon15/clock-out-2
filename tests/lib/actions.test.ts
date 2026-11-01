@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   deleteBreakDal: vi.fn(),
   updateBreakSettingsDal: vi.fn(),
   updateLocationSettingsDal: vi.fn(),
+  updateOvertimeSettingsDal: vi.fn(),
   updateReportingSettingsDal: vi.fn(),
   createSiteDal: vi.fn(),
   updateSiteDal: vi.fn(),
@@ -40,6 +41,7 @@ vi.mock("@/lib/dal", () => ({
   deleteBreakDal: mocks.deleteBreakDal,
   updateBreakSettingsDal: mocks.updateBreakSettingsDal,
   updateLocationSettingsDal: mocks.updateLocationSettingsDal,
+  updateOvertimeSettingsDal: mocks.updateOvertimeSettingsDal,
   updateReportingSettingsDal: mocks.updateReportingSettingsDal,
   createSiteDal: mocks.createSiteDal,
   updateSiteDal: mocks.updateSiteDal,
@@ -65,6 +67,7 @@ import {
   updateBreakSettingAction,
   updateLocationSettingsAction,
   updateOrgSettingAction,
+  updateOvertimeSettingsAction,
   updateSiteAction,
   updateTimeEntryAction,
 } from "@/lib/actions";
@@ -80,6 +83,8 @@ describe("clockInAction", () => {
       data: entry,
     });
     expect(mocks.updateTag).toHaveBeenCalledWith("time-entries-user_1-org_1");
+    // The admin schedule reads the org-wide list, so it must refresh too.
+    expect(mocks.updateTag).toHaveBeenCalledWith("org-time-entries-org_1");
   });
 
   it("skips revalidation when no entry comes back", async () => {
@@ -628,5 +633,26 @@ describe("reverseGeocodeAction", () => {
       latitude: 45.4215,
       longitude: -75.6972,
     });
+  });
+});
+
+describe("updateOvertimeSettingsAction", () => {
+  it("saves the thresholds and revalidates overtime settings", async () => {
+    mocks.updateOvertimeSettingsDal.mockResolvedValue(ok({ org_id: "org_1" }));
+    await expect(updateOvertimeSettingsAction(8, 40)).resolves.toEqual({
+      success: true,
+      data: { org_id: "org_1" },
+    });
+    expect(mocks.updateOvertimeSettingsDal).toHaveBeenCalledWith(8, 40);
+    expect(mocks.updateTag).toHaveBeenCalledWith("overtime-settings-org_1");
+  });
+
+  it("returns the failure reason", async () => {
+    mocks.updateOvertimeSettingsDal.mockResolvedValue(failure);
+    await expect(updateOvertimeSettingsAction(null, null)).resolves.toEqual({
+      success: false,
+      error: "nope",
+    });
+    expect(mocks.updateTag).not.toHaveBeenCalled();
   });
 });

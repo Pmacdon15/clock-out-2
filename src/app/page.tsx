@@ -14,9 +14,11 @@ import {
   getOrgBreakSettings,
   getOrgLocationSettings,
   getOrgMembers,
+  getOrgOvertimeSettings,
   getOrgReportingSettings,
   getOrgSites,
   getOrgTimeEntries,
+  getSchedule,
   getTimeEntries,
 } from "@/lib/dal";
 import { parseParams } from "@/lib/utils";
@@ -63,6 +65,7 @@ export default function Home(props: PageProps<"/">) {
               notificationSettingsPromise={getMyNotificationSettings()}
               orgIdPromise={authPromise.then((auth) => auth.orgId)}
               orgSettingsPromise={getOrgReportingSettings()}
+              overtimeSettingsPromise={getOrgOvertimeSettings()}
               orgTimeEntriesPromise={props.searchParams.then((p) =>
                 getOrgTimeEntries({
                   start: parseParams(p.start),
@@ -71,6 +74,7 @@ export default function Home(props: PageProps<"/">) {
                 }),
               )}
               recentEntriesPromise={getTimeEntries()}
+              schedulePromise={getSchedule()}
               selectedMonthPromise={props.searchParams.then((p) =>
                 parseParams(p.month),
               )}

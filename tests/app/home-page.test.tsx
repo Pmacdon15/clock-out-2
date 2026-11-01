@@ -14,9 +14,11 @@ const mocks = vi.hoisted(() => ({
   getOrgBreakSettings: vi.fn(),
   getOrgLocationSettings: vi.fn(),
   getOrgMembers: vi.fn(),
+  getOrgOvertimeSettings: vi.fn(),
   getOrgReportingSettings: vi.fn(),
   getOrgSites: vi.fn(),
   getOrgTimeEntries: vi.fn(),
+  getSchedule: vi.fn(),
   getTimeEntries: vi.fn(),
   getOrgAlertSettings: vi.fn(),
   getMyNotificationSettings: vi.fn(),
@@ -36,9 +38,11 @@ vi.mock("@/lib/dal", () => ({
   getOrgBreakSettings: mocks.getOrgBreakSettings,
   getOrgLocationSettings: mocks.getOrgLocationSettings,
   getOrgMembers: mocks.getOrgMembers,
+  getOrgOvertimeSettings: mocks.getOrgOvertimeSettings,
   getOrgReportingSettings: mocks.getOrgReportingSettings,
   getOrgSites: mocks.getOrgSites,
   getOrgTimeEntries: mocks.getOrgTimeEntries,
+  getSchedule: mocks.getSchedule,
   getTimeEntries: mocks.getTimeEntries,
 }));
 vi.mock("@/lib/alerts-dal", () => ({
@@ -85,6 +89,9 @@ function renderHome() {
   mocks.getOrgLocationSettings.mockReturnValue(
     Promise.resolve("location_settings"),
   );
+  mocks.getOrgOvertimeSettings.mockReturnValue(
+    Promise.resolve("overtime_settings"),
+  );
   mocks.getOrgSites.mockReturnValue(Promise.resolve("sites"));
   mocks.getOrgAlertSettings.mockReturnValue(Promise.resolve("alerts"));
   mocks.getMyNotificationSettings.mockReturnValue(
@@ -92,6 +99,7 @@ function renderHome() {
   );
   mocks.getOrgMembers.mockReturnValue(Promise.resolve(["members"]));
   mocks.getOrgReportingSettings.mockReturnValue(Promise.resolve("settings"));
+  mocks.getSchedule.mockReturnValue(Promise.resolve("schedule"));
   mocks.getOrgTimeEntries.mockImplementation(async (filters) => ({
     org: filters,
   }));
@@ -167,6 +175,7 @@ describe("Home page", () => {
       userId: undefined,
       filters: undefined,
     });
+    await expect(props.schedulePromise).resolves.toBe("schedule");
     await expect(props.hasReportingPromise).resolves.toBe(true);
     await expect(props.isAdminPromise).resolves.toBe(true);
     await expect(props.membersPromise).resolves.toEqual(["members"]);
@@ -175,6 +184,9 @@ describe("Home page", () => {
     await expect(props.alertSettingsPromise).resolves.toBe("alerts");
     await expect(props.notificationSettingsPromise).resolves.toBe(
       "notifications",
+    );
+    await expect(props.overtimeSettingsPromise).resolves.toBe(
+      "overtime_settings",
     );
     await expect(props.orgIdPromise).resolves.toBe("org_1");
     await expect(props.userIdPromise).resolves.toBe("user_1");

@@ -23,6 +23,7 @@ import {
   isPaidBreakType,
 } from "@/lib/break-utils";
 import { formatCoordinates } from "@/lib/geo";
+import type { OvertimeSplit } from "@/lib/overtime";
 import type { EntryAction } from "@/lib/reducers/time-entries";
 import type { BreakSettingsData, TimeEntry, TimeEntryBreak } from "@/lib/types";
 import { DeleteConfirmDialog } from "../DeleteConfirmDialog";
@@ -33,6 +34,8 @@ interface EntryItemProps {
   setOptimisticEntries: (action: EntryAction) => void;
   memberName?: string;
   breakSettings?: BreakSettingsData | null;
+  /** This shift's share of overtime, when the org tracks overtime. */
+  overtime?: OvertimeSplit;
 }
 
 export function EntryItem({
@@ -41,6 +44,7 @@ export function EntryItem({
   setOptimisticEntries,
   memberName,
   breakSettings,
+  overtime,
 }: EntryItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editClockIn, setEditClockIn] = useState(
@@ -199,6 +203,7 @@ export function EntryItem({
   const effectiveHours = getEffectiveHours(entry, breakSettings);
   const breaks = entry.breaks ?? [];
   const unpaidBreakMinutes = Math.round(getUnpaidBreakMs(entry) / 60_000);
+  const overtimeHours = overtime?.overtimeHours ?? 0;
   // Only admins see where a punch happened, and only when the org captured it.
   const punches = isAdmin
     ? [
@@ -232,7 +237,15 @@ export function EntryItem({
           {format(new Date(entry.clock_in), "eeee, MMM d")}
         </span>
         <div className="flex items-center gap-3">
-          <span className="tabular-nums">{effectiveHours.toFixed(2)}h</span>
+          <span
+            className={
+              overtimeHours > 0
+                ? "text-orange-600 tabular-nums dark:text-orange-400"
+                : "tabular-nums"
+            }
+          >
+            {effectiveHours.toFixed(2)}h
+          </span>
           {isAdmin && (
             <div className="flex items-center gap-1 opacity-100 transition-opacity lg:opacity-0 lg:group-hover:opacity-100">
               <button
@@ -284,6 +297,14 @@ export function EntryItem({
               -{dockedMinutes}m break
             </span>
           )
+        )}
+        {overtimeHours > 0 && (
+          <span
+            className="ml-1.5 rounded-full bg-orange-100 px-2 py-0.5 font-bold text-[10px] text-orange-700 dark:bg-orange-900/30 dark:text-orange-400"
+            data-testid={`overtime-${entry.id}`}
+          >
+            +{overtimeHours.toFixed(2)}h overtime
+          </span>
         )}
         {memberName && (
           <span className="ml-1.5 rounded-full bg-zinc-100 px-2 py-0.5 font-bold text-[10px] text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
