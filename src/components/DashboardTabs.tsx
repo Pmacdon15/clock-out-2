@@ -6,6 +6,7 @@ import { timeEntriesReducer } from "@/lib/reducers/time-entries";
 import type { DashboardTabsProps } from "@/lib/types";
 import { SettingsFallback } from "./fallbacks/settings-fallback";
 import { ViewHoursFallback } from "./fallbacks/view-hours-fallback";
+import NotificationSettings from "./NotificationSettings";
 import OrgSettings from "./OrgSettings";
 import { useOrgSwitcher } from "./OrgSwitcher";
 import { Card } from "./ui";
@@ -18,6 +19,8 @@ export default function DashboardTabs({
   breakSettingsPromise,
   locationSettingsPromise,
   sitesPromise,
+  alertSettingsPromise,
+  notificationSettingsPromise,
   entriesPromise,
   orgTimeEntriesPromise,
   recentEntriesPromise,
@@ -84,6 +87,9 @@ export default function DashboardTabs({
       <TabsList>
         <TabsTrigger value="time-clock">Time Clock</TabsTrigger>
         <TabsTrigger value="view">Hours</TabsTrigger>
+        {notificationSettingsPromise && (
+          <TabsTrigger value="notifications">Notifications</TabsTrigger>
+        )}
         {isAdmin && <TabsTrigger value="settings">Settings</TabsTrigger>}
       </TabsList>
 
@@ -118,10 +124,22 @@ export default function DashboardTabs({
         </Suspense>
       </TabsContent>
 
+      {notificationSettingsPromise && (
+        <TabsContent className="mt-0" value="notifications">
+          <Suspense fallback={<SettingsFallback />}>
+            <NotificationSettings
+              isAdmin={isAdmin}
+              settingsPromise={notificationSettingsPromise}
+            />
+          </Suspense>
+        </TabsContent>
+      )}
+
       {isAdmin && (
         <TabsContent className="mt-0" value="settings">
           <Suspense fallback={<SettingsFallback />}>
             <OrgSettings
+              alertSettingsPromise={alertSettingsPromise}
               breakSettingsPromise={breakSettingsPromise}
               hasGeofencing={hasGeofencing}
               hasReporting={hasReporting}

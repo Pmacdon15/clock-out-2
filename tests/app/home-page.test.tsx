@@ -18,6 +18,8 @@ const mocks = vi.hoisted(() => ({
   getOrgSites: vi.fn(),
   getOrgTimeEntries: vi.fn(),
   getTimeEntries: vi.fn(),
+  getOrgAlertSettings: vi.fn(),
+  getMyNotificationSettings: vi.fn(),
 }));
 
 vi.mock("@clerk/nextjs", () => ({
@@ -38,6 +40,10 @@ vi.mock("@/lib/dal", () => ({
   getOrgSites: mocks.getOrgSites,
   getOrgTimeEntries: mocks.getOrgTimeEntries,
   getTimeEntries: mocks.getTimeEntries,
+}));
+vi.mock("@/lib/alerts-dal", () => ({
+  getOrgAlertSettings: mocks.getOrgAlertSettings,
+  getMyNotificationSettings: mocks.getMyNotificationSettings,
 }));
 vi.mock("@/components/DashboardTabs", () => ({
   default: (props: DashboardTabsProps) => {
@@ -80,6 +86,10 @@ function renderHome() {
     Promise.resolve("location_settings"),
   );
   mocks.getOrgSites.mockReturnValue(Promise.resolve("sites"));
+  mocks.getOrgAlertSettings.mockReturnValue(Promise.resolve("alerts"));
+  mocks.getMyNotificationSettings.mockReturnValue(
+    Promise.resolve("notifications"),
+  );
   mocks.getOrgMembers.mockReturnValue(Promise.resolve(["members"]));
   mocks.getOrgReportingSettings.mockReturnValue(Promise.resolve("settings"));
   mocks.getOrgTimeEntries.mockImplementation(async (filters) => ({
@@ -162,6 +172,10 @@ describe("Home page", () => {
     await expect(props.membersPromise).resolves.toEqual(["members"]);
     await expect(props.orgSettingsPromise).resolves.toBe("settings");
     await expect(props.breakSettingsPromise).resolves.toBe("break_settings");
+    await expect(props.alertSettingsPromise).resolves.toBe("alerts");
+    await expect(props.notificationSettingsPromise).resolves.toBe(
+      "notifications",
+    );
     await expect(props.orgIdPromise).resolves.toBe("org_1");
     await expect(props.userIdPromise).resolves.toBe("user_1");
 

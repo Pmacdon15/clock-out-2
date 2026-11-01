@@ -30,6 +30,14 @@ const captured = vi.hoisted(() => ({
   props: [] as CapturedProps[],
   breakProps: [] as CapturedBreakProps[],
   locationProps: [] as CapturedLocationProps[],
+  alertProps: [] as { initialData: unknown }[],
+}));
+
+vi.mock("@/components/AlertSettings", () => ({
+  default: (props: { initialData: unknown }) => {
+    captured.alertProps.push(props);
+    return <div data-testid="alerts">{JSON.stringify(props.initialData)}</div>;
+  },
 }));
 
 vi.mock("@/components/ReportingSettings", () => ({
@@ -112,6 +120,47 @@ const site: SiteData = {
 };
 
 describe("OrgSettings", () => {
+  it("shows the shift alert rules only when they were requested", () => {
+    const alerts = {
+      org_id: "org_1",
+      forgot_clock_out_enabled: true,
+      forgot_clock_out_hours: 10,
+      auto_clock_out_enabled: false,
+      auto_clock_out_hours: 16,
+      break_reminder_enabled: false,
+      break_reminder_minutes: 45,
+      notify_admins: true,
+    };
+    const { unmount } = render(
+      <OrgSettings
+        alertSettingsPromise={resolved({ ok: true, value: alerts })}
+        hasReporting={false}
+        orgSettingsPromise={resolved({ ok: true, value: null })}
+      />,
+    );
+    expect(captured.alertProps.at(-1)?.initialData).toEqual(alerts);
+    unmount();
+
+    render(
+      <OrgSettings
+        alertSettingsPromise={resolved({ ok: false, error: { reason: "x" } })}
+        hasReporting={false}
+        orgSettingsPromise={resolved({ ok: true, value: null })}
+      />,
+    );
+    expect(screen.getByTestId("alerts")).toHaveTextContent("null");
+  });
+
+  it("leaves the shift alert rules out without a promise", () => {
+    render(
+      <OrgSettings
+        hasReporting={false}
+        orgSettingsPromise={resolved({ ok: true, value: null })}
+      />,
+    );
+    expect(screen.queryByTestId("alerts")).not.toBeInTheDocument();
+  });
+
   it("passes no initial data when the settings failed to load", () => {
     render(
       <OrgSettings

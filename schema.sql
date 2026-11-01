@@ -99,3 +99,48 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_time_entry_breaks_one_open
     ON time_entry_breaks (time_entry_id)
     WHERE break_end IS NULL;
 CREATE INDEX IF NOT EXISTS idx_sites_org ON sites (org_id);
+
+-- Shift alerts: per-org rules for "forgot to clock out" / "forgot to end
+-- break" reminders and automatic clock-out. Every rule is off by default.
+CREATE TABLE IF NOT EXISTS alert_settings (
+    org_id TEXT PRIMARY KEY REFERENCES settings(org_id) ON DELETE CASCADE,
+    forgot_clock_out_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    forgot_clock_out_hours DOUBLE PRECISION NOT NULL DEFAULT 10,
+    auto_clock_out_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    auto_clock_out_hours DOUBLE PRECISION NOT NULL DEFAULT 16,
+    break_reminder_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    break_reminder_minutes INTEGER NOT NULL DEFAULT 45,
+    notify_admins BOOLEAN NOT NULL DEFAULT TRUE,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- How each person wants alerts delivered (email, push or both), per topic.
+CREATE TABLE IF NOT EXISTS notification_preferences (
+    user_id TEXT PRIMARY KEY,
+    email_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    push_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    shift_alerts BOOLEAN NOT NULL DEFAULT TRUE,
+    break_alerts BOOLEAN NOT NULL DEFAULT TRUE,
+    admin_alerts BOOLEAN NOT NULL DEFAULT TRUE,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- One row per browser/device that turned on Web Push.
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id SERIAL PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    endpoint TEXT NOT NULL UNIQUE,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    user_agent TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions (user_id);
+
+-- Every alert sent, keyed e.g. 'forgot:<entry id>' or 'break:<break id>', so
+-- each alert goes out once however often the cron runs.
+CREATE TABLE IF NOT EXISTS sent_alerts (
+    alert_key TEXT PRIMARY KEY,
+    org_id TEXT NOT NULL,
+    sent_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);

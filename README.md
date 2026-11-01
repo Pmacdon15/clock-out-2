@@ -12,6 +12,7 @@ Live app: https://clockout.patmac.ca
 - **Geolocation & geofenced clock-in** — each organization can set location capture to off, optional, or required, define named job **sites** (latitude/longitude with a radius, 150 m by default), and optionally restrict clock-in to punches inside a site. Every punch stores its coordinates, accuracy, and the matched site's name, and the allow/deny decision is made server-side.
 - **Weekly timecards** — per-member totals, days worked, and day-by-day breakdowns, with charts.
 - **Timesheet export** — server-generated PDF and Excel (.xlsx) timesheets for any period, grouped by week or month.
+- **Shift alerts & auto clock-out** — "forgot to clock out" reminders after N hours, an optional automatic clock-out at an org-set limit (the shift is closed at exactly clock-in + limit), and "forgot to end break" reminders. Each member picks email, push or both (and which alerts) under **Notifications**; admins can get a copy of every alert. Push works on Android, desktop, and iPhone/iPad once the app is added to the Home Screen. See [Shift alerts & notifications](#shift-alerts--notifications).
 - **Emailed hours reports** — organizations on a plan with the Reporting feature can schedule automatic report emails (weekly, bi-weekly, twice-monthly/pay-period, or a custom weekday every 1–2 weeks) and run ad-hoc reports for any date range.
 - **MCP server** — 18 tools over Streamable HTTP with Clerk OAuth sign-in (see below).
 
@@ -52,11 +53,13 @@ bun run format       # biome format --write
 | `NEXT_PUBLIC_APP_URL` | Public origin of the deployment (e.g. `https://clockout.patmac.ca`); used as the MCP server's website/icon origin. |
 | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` | Amazon SES credentials for report email. |
 | `SES_FROM_EMAIL` | From address for report email. |
-| `CRON_SECRET` | Bearer secret guarding `/api/cron/weekly-report` (called daily by Vercel Cron). |
+| `CRON_SECRET` | Bearer secret guarding `/api/cron/weekly-report` (called daily by Vercel Cron) and `/api/cron/shift-alerts`. |
+| `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | Web Push (VAPID) key pair for push notifications. Push is off until both are set. |
+| `VAPID_SUBJECT` | Optional contact for push services, e.g. `mailto:you@example.com`. Defaults to `NEXT_PUBLIC_APP_URL`. |
 
 ### Database
 
-The schema lives in `schema.sql` and is applied to Neon Postgres. Tables: `time_entries` (including clock-in/out location columns), `time_entry_breaks`, `settings`, `reporting_settings`, `break_settings`, `location_settings`, `sites`. Users, organizations, memberships, and subscriptions live in Clerk, not in this database.
+The schema lives in `schema.sql` and is applied to Neon Postgres. Tables: `time_entries` (including clock-in/out location columns), `time_entry_breaks`, `settings`, `reporting_settings`, `break_settings`, `location_settings`, `sites`, `alert_settings`, `notification_preferences`, `push_subscriptions`, `sent_alerts`. Users, organizations, memberships, and subscriptions live in Clerk, not in this database.
 
 ## MCP server
 
@@ -150,6 +153,58 @@ App-side, Clerk is wired in through `src/proxy.ts` (`clerkMiddleware`, protectin
 ## Deployment
 
 Deployed on Vercel. `vercel.json` registers a daily cron (`0 6 * * *`) hitting `/api/cron/weekly-report`, which sends any scheduled report emails that are due; the route requires the `CRON_SECRET` bearer token. Email goes out through Amazon SES using React Email templates.
+
+## Shift alerts & notifications
+
+Long-running entries used to inflate totals silently. Admins now set rules under **Settings → Shift Alerts** (all off by default):
+
+| Rule | What happens |
+| --- | --- |
+| Forgot to clock out | After *N* hours on the clock (default 10), the member gets one reminder. |
+| Automatic clock-out | After *N* hours (default 16), the shift is closed at exactly clock-in + *N*. Breaks are trimmed to the new end (a running break is also capped at its type's limit) and the member is told. Must be later than the reminder. |
+| Forgot to end break | When a break has run *N* minutes (default 45) — or reaches its type's time limit, if that's sooner — the member is reminded they're still on break / back on the clock. |
+| Notify admins too | Every alert is also sent to the org's admins (an admin's own shift isn't sent to them twice). |
+
+Every person picks **email, push or both** — and which alerts they want — on the **Notifications** tab, where they can also turn push on/off per device and send themselves a test. Each alert is sent once (tracked in `sent_alerts`), however often the cron runs.
+
+### How it runs
+
+`GET /api/cron/shift-alerts` (bearer `CRON_SECRET`) checks every org with a rule on, closes over-limit shifts, and sends what's due. It needs to run every 5–15 minutes:
+
+- **Vercel Hobby** only allows daily crons, so `.github/workflows/shift-alerts.yml` calls it every 10 minutes. Add repository secrets **`APP_URL`** (e.g. `https://clockout.patmac.ca`) and **`CRON_SECRET`** (same value as the app's). Run it once by hand from the Actions tab to check. GitHub may delay scheduled runs by a few minutes at busy times.
+- **Vercel Pro**: you can instead add `{ "path": "/api/cron/shift-alerts", "schedule": "*/10 * * * *" }` to `vercel.json` and delete the workflow.
+
+### Email (Amazon SES)
+
+Uses the SES setup the reports already use (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `SES_FROM_EMAIL`). Alerts go to the address on the member's Clerk account. If SES is still in sandbox mode, recipients must be verified, so request production access in the SES console before rolling out.
+
+### Push notifications (Web Push — no Firebase needed)
+
+Push uses the standard Web Push protocol with VAPID keys, sent straight from the server with the [`web-push`](https://github.com/web-push-libs/web-push) package. This is what Firebase Cloud Messaging uses under the hood for web apps anyway, so there's no Firebase project, SDK or account to manage, and it is the only way to reach iPhones from a web app.
+
+1. Generate a key pair once:
+   ```bash
+   bunx web-push generate-vapid-keys
+   ```
+2. In Vercel → Project → Settings → Environment Variables (Production and Preview) add:
+   - `NEXT_PUBLIC_VAPID_PUBLIC_KEY` = the **Public Key**
+   - `VAPID_PRIVATE_KEY` = the **Private Key** (keep secret)
+   - `VAPID_SUBJECT` = `mailto:you@yourdomain.com` (optional)
+3. Redeploy. The Notifications tab then shows **Turn on for this device**.
+
+Keep the same keys forever: changing them invalidates every device's subscription (people would have to turn push on again).
+
+**iPhone / iPad (iOS 16.4+):** Apple only allows push for web apps installed to the Home Screen. In Safari tap **Share → Add to Home Screen**, open Clock Out from the new icon, go to **Notifications → Turn on for this device**, and allow notifications. The Notifications tab walks people through this.
+
+**Android / desktop:** Chrome, Edge, Firefox and desktop Safari work straight from the browser.
+
+### Icons
+
+- **Notification avatar:** `public/icon-192.png` (the app icon) is shown beside each push on Android/desktop and as the logo at the top of alert emails.
+- **Status-bar badge:** `public/notification-badge.png` is a white-on-transparent clock that Android shows in the status bar.
+- **iPhone:** iOS always shows the Home Screen icon (`public/apple-touch-icon.png`) on notifications; web apps can't override it.
+
+Replace those PNGs to rebrand. Tapping a push opens the time clock (members) or that member's hours (admins).
 
 ## Credits
 
