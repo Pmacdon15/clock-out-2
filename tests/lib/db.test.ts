@@ -862,6 +862,155 @@ describe("clock in and out store location when given one", () => {
   });
 });
 
+describe("overtime settings", () => {
+  beforeEach(() => {
+    db.resetOvertimeSettingsTableCheck();
+  });
+
+  it("ensureOvertimeSettingsTable creates settings then overtime_settings", async () => {
+    sql.mockResolvedValue([]);
+    await db.ensureOvertimeSettingsTable();
+    expect(sql).toHaveBeenCalledTimes(2);
+    expect(textOf(0)).toContain("CREATE TABLE IF NOT EXISTS settings");
+    expect(textOf(1)).toContain("CREATE TABLE IF NOT EXISTS overtime_settings");
+    expect(textOf(1)).toContain("REFERENCES settings(org_id)");
+    expect(textOf(1)).toContain("daily_threshold_hours DOUBLE PRECISION");
+    expect(textOf(1)).toContain("weekly_threshold_hours DOUBLE PRECISION");
+  });
+
+  it("ensureOvertimeSettingsTable only runs once per instance", async () => {
+    sql.mockResolvedValue([]);
+    await Promise.all([
+      db.ensureOvertimeSettingsTable(),
+      db.ensureOvertimeSettingsTable(),
+    ]);
+    await db.ensureOvertimeSettingsTable();
+    expect(sql).toHaveBeenCalledTimes(2);
+  });
+
+  it("ensureOvertimeSettingsTable retries after a failure", async () => {
+    sql.mockRejectedValueOnce(new Error("db down"));
+    await expect(db.ensureOvertimeSettingsTable()).rejects.toThrow("db down");
+    sql.mockReset();
+    sql.mockResolvedValue([]);
+    await db.ensureOvertimeSettingsTable();
+    expect(sql).toHaveBeenCalledTimes(2);
+  });
+
+  it("dbGetOvertimeSettings creates the table, then reads and tags the cache", async () => {
+    sql
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ org_id: "o1", daily_threshold_hours: 8 }]);
+    await expect(db.dbGetOvertimeSettings("o1")).resolves.toEqual({
+      org_id: "o1",
+      daily_threshold_hours: 8,
+    });
+    expect(textOf(2)).toContain("SELECT * FROM overtime_settings");
+    expect(valuesOf(2)).toEqual(["o1"]);
+    expect(cacheTag).toHaveBeenCalledWith("overtime-settings-o1");
+    expect(cacheLife).toHaveBeenCalledWith("hours");
+  });
+
+  it("dbGetOvertimeSettings returns undefined for an org with no saved settings", async () => {
+    sql.mockResolvedValue([]);
+    await expect(db.dbGetOvertimeSettings("o2")).resolves.toBeUndefined();
+  });
+
+  it("dbUpdateOvertimeSettings upserts settings and the thresholds", async () => {
+    sql
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ org_id: "o1", daily_threshold_hours: 8 }]);
+    await expect(db.dbUpdateOvertimeSettings("o1", 8, null)).resolves.toEqual({
+      org_id: "o1",
+      daily_threshold_hours: 8,
+    });
+    expect(textOf(2)).toContain("INSERT INTO settings");
+    expect(valuesOf(2)).toEqual(["o1"]);
+    expect(textOf(3)).toContain("INSERT INTO overtime_settings");
+    expect(textOf(3)).toContain("ON CONFLICT (org_id)");
+    expect(valuesOf(3)).toEqual(["o1", 8, null, 8, null]);
+  });
+});
+
+describe("scheduled shifts", () => {
+  beforeEach(() => {
+    db.resetScheduledShiftsTableCheck();
+  });
+
+  const shiftStart = new Date("2026-01-05T09:00:00Z");
+  const shiftEnd = new Date("2026-01-05T17:00:00Z");
+
+  it("ensureScheduledShiftsTable creates the table and its index once", async () => {
+    sql.mockResolvedValue([]);
+    await Promise.all([
+      db.ensureScheduledShiftsTable(),
+      db.ensureScheduledShiftsTable(),
+    ]);
+    expect(sql).toHaveBeenCalledTimes(2);
+    expect(textOf(0)).toContain("CREATE TABLE IF NOT EXISTS scheduled_shifts");
+    expect(textOf(0)).toContain("CHECK (shift_end > shift_start)");
+    expect(textOf(1)).toContain("idx_scheduled_shifts_org_start");
+  });
+
+  it("ensureScheduledShiftsTable retries after a failure", async () => {
+    sql.mockRejectedValueOnce(new Error("db down"));
+    await expect(db.ensureScheduledShiftsTable()).rejects.toThrow("db down");
+    sql.mockReset();
+    sql.mockResolvedValue([]);
+    await db.ensureScheduledShiftsTable();
+    expect(sql).toHaveBeenCalledTimes(2);
+  });
+
+  it("dbGetScheduledShifts reads the range, optionally for one member, and tags the cache", async () => {
+    sql.mockResolvedValue([]);
+    await db.ensureScheduledShiftsTable();
+    sql.mockReset();
+    sql.mockResolvedValue([{ id: 1 }]);
+    await expect(
+      db.dbGetScheduledShifts("o1", "u1", start, end),
+    ).resolves.toEqual([{ id: 1 }]);
+    expect(textOf(0)).toContain("SELECT * FROM scheduled_shifts");
+    expect(textOf(0)).toContain("ORDER BY shift_start ASC");
+    expect(valuesOf(0)).toEqual(["o1", "u1", "u1", start, end]);
+    expect(cacheTag).toHaveBeenCalledWith("scheduled-shifts-o1");
+
+    await db.dbGetScheduledShifts("o1", null, start, end);
+    expect(valuesOf(1)).toEqual(["o1", null, null, start, end]);
+  });
+
+  it("dbCreateScheduledShift inserts the shift", async () => {
+    sql.mockResolvedValue([]);
+    await db.ensureScheduledShiftsTable();
+    sql.mockReset();
+    sql.mockResolvedValue([{ id: 3 }]);
+    await expect(
+      db.dbCreateScheduledShift("o1", "u1", shiftStart, shiftEnd, "Desk", "a1"),
+    ).resolves.toEqual({ id: 3 });
+    expect(textOf(0)).toContain("INSERT INTO scheduled_shifts");
+    expect(valuesOf(0)).toEqual([
+      "o1",
+      "u1",
+      shiftStart,
+      shiftEnd,
+      "Desk",
+      "a1",
+    ]);
+  });
+
+  it("dbDeleteScheduledShift deletes within the org", async () => {
+    sql.mockResolvedValue([]);
+    await db.ensureScheduledShiftsTable();
+    sql.mockReset();
+    sql.mockResolvedValue([]);
+    await expect(db.dbDeleteScheduledShift(3, "o1")).resolves.toBeUndefined();
+    expect(textOf(0)).toContain("DELETE FROM scheduled_shifts");
+    expect(valuesOf(0)).toEqual([3, "o1"]);
+  });
+});
+
 describe("time off requests", () => {
   beforeEach(() => {
     db.resetTimeOffTableCheck();

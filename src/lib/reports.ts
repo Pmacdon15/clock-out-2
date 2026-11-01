@@ -13,8 +13,15 @@ import { fetchAllPages } from "./clerk-pagination";
 import {
   dbGetApprovedTimeOffForPeriod,
   dbGetBreakSettings,
+  dbGetOvertimeSettings,
   dbGetTimeEntriesForPeriod,
 } from "./db";
+import {
+  computeEntryOvertime,
+  describeOvertime,
+  isOvertimeEnabled,
+  type OvertimeSplit,
+} from "./overtime";
 import {
   formatTimeOffDates,
   formatTimeOffHours,
@@ -141,6 +148,17 @@ export async function sendWeeklyReports(
     }
 
     const breakSettings = await dbGetBreakSettings(orgId);
+    // A lookup failure sends the report without overtime rather than none.
+    const overtimeSettings = await Promise.resolve()
+      .then(() => dbGetOvertimeSettings(orgId))
+      .catch((error) => {
+        console.error(
+          `[Reports] Error fetching overtime settings for ${orgId}:`,
+          error,
+        );
+        return undefined;
+      });
+    const overtimeEnabled = isOvertimeEnabled(overtimeSettings);
 
     // Generate report for each member, even non-admins
     for (const member of members) {
@@ -164,17 +182,26 @@ export async function sendWeeklyReports(
         endDate,
       );
 
+      const overtimeByEntry = computeEntryOvertime(
+        entries.filter((entry) => entry.clock_out),
+        overtimeSettings,
+        breakSettings,
+      );
+
       let totalMs = 0;
+      let overtimeMs = 0;
       const dailyBreakdownMap = new Map<
         string,
         {
           date: string;
           rawMs: number;
+          overtimeMs: number;
           shifts: {
             start: string;
             end: string;
             duration: string;
             breaks?: string;
+            overtime?: string;
           }[];
         }
       >();
@@ -185,13 +212,19 @@ export async function sendWeeklyReports(
         const inDate = new Date(entry.clock_in);
         const outDate = new Date(entry.clock_out);
         const durationMs = getEffectiveDurationMs(entry, breakSettings);
+        // Every completed entry has a split (all zero without thresholds).
+        const shiftOvertimeMs = Math.round(
+          (overtimeByEntry.get(entry) as OvertimeSplit).overtimeHours *
+            3_600_000,
+        );
 
         totalMs += durationMs;
+        overtimeMs += shiftOvertimeMs;
 
         const dateKey = format(inDate, "MMM d, yyyy");
         let dayData = dailyBreakdownMap.get(dateKey);
         if (!dayData) {
-          dayData = { date: dateKey, rawMs: 0, shifts: [] };
+          dayData = { date: dateKey, rawMs: 0, overtimeMs: 0, shifts: [] };
           dailyBreakdownMap.set(dateKey, dayData);
         }
 
@@ -209,11 +242,15 @@ export async function sendWeeklyReports(
         });
 
         dayData.rawMs += durationMs;
+        dayData.overtimeMs += shiftOvertimeMs;
         dayData.shifts.push({
           start: format(inDate, "h:mm a"),
           end: format(outDate, "h:mm a"),
           duration: formatDuration(durationMs),
           ...(breakLines.length > 0 ? { breaks: breakLines.join("; ") } : {}),
+          ...(shiftOvertimeMs > 0
+            ? { overtime: formatDuration(shiftOvertimeMs) }
+            : {}),
         });
       }
 
@@ -225,27 +262,42 @@ export async function sendWeeklyReports(
       const breakdown = Array.from(dailyBreakdownMap.values());
 
       const totalHoursString = formatDuration(totalMs);
+      const toHours = (ms: number) => parseFloat((ms / 3_600_000).toFixed(2));
 
-      // Generate Chart URL
+      // Generate Chart URL. With overtime tracked, each day's bar is split
+      // into stacked regular and overtime segments.
       const chartConfig = {
         type: "bar",
         data: {
           labels: breakdown.map((b) => b.date.split(",")[0]), // "Apr 5"
-          datasets: [
-            {
-              label: "Hours Logged",
-              data: breakdown.map((b) =>
-                parseFloat((b.rawMs / (1000 * 60 * 60)).toFixed(2)),
-              ),
-              backgroundColor: "rgba(59, 130, 246, 0.7)",
-            },
-          ],
+          datasets: overtimeEnabled
+            ? [
+                {
+                  label: "Regular",
+                  data: breakdown.map((b) => toHours(b.rawMs - b.overtimeMs)),
+                  backgroundColor: "rgba(59, 130, 246, 0.7)",
+                },
+                {
+                  label: "Overtime",
+                  data: breakdown.map((b) => toHours(b.overtimeMs)),
+                  backgroundColor: "rgba(234, 88, 12, 0.8)",
+                },
+              ]
+            : [
+                {
+                  label: "Hours Logged",
+                  data: breakdown.map((b) => toHours(b.rawMs)),
+                  backgroundColor: "rgba(59, 130, 246, 0.7)",
+                },
+              ],
         },
         options: {
-          plugins: { legend: { display: false } },
+          plugins: { legend: { display: overtimeEnabled } },
           scales: {
-            yAxes: [{ ticks: { beginAtZero: true, min: 0 } }], // v2
-            y: { beginAtZero: true, min: 0 }, // v3
+            xAxes: [{ stacked: true }], // v2
+            yAxes: [{ stacked: true, ticks: { beginAtZero: true, min: 0 } }], // v2
+            x: { stacked: true }, // v3
+            y: { stacked: true, beginAtZero: true, min: 0 }, // v3
           },
         },
       };
@@ -307,6 +359,13 @@ export async function sendWeeklyReports(
             WeeklyReportEmail({
               userName,
               totalHours: totalHoursString,
+              ...(overtimeEnabled
+                ? {
+                    regularHours: formatDuration(totalMs - overtimeMs),
+                    overtimeHours: formatDuration(overtimeMs),
+                    overtimePolicy: describeOvertime(overtimeSettings),
+                  }
+                : {}),
               periodStart: periodStartStr,
               periodEnd: periodEndStr,
               chartUrl,
@@ -320,7 +379,12 @@ export async function sendWeeklyReports(
               timeframe,
               customStart,
               customEnd,
-              breakdown: breakdown,
+              breakdown: breakdown.map(({ overtimeMs, ...day }) => ({
+                ...day,
+                ...(overtimeMs > 0
+                  ? { overtime: formatDuration(overtimeMs) }
+                  : {}),
+              })),
               timeOff: timeOffLines,
               totalTimeOff: formatTimeOffHours(timeOffHours),
             }),

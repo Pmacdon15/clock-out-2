@@ -11,9 +11,15 @@ import {
   exportTimesheet,
   formatHours,
   formatPeriod,
+  hasOvertime,
   totalHours,
+  totalOvertime,
 } from "@/lib/timesheet-export";
-import type { BreakSettingsData, TimeEntry } from "@/lib/types";
+import type {
+  BreakSettingsData,
+  OvertimeSettingsData,
+  TimeEntry,
+} from "@/lib/types";
 import { Button, Card } from "../ui";
 
 interface TimesheetExportProps {
@@ -24,6 +30,7 @@ interface TimesheetExportProps {
   isViewingAll?: boolean;
   members?: { id: string; name: string }[];
   breakSettings?: BreakSettingsData | null;
+  overtimeSettings?: OvertimeSettingsData | null;
 }
 
 export function TimesheetExport({
@@ -34,6 +41,7 @@ export function TimesheetExport({
   isViewingAll = false,
   members = [],
   breakSettings,
+  overtimeSettings,
 }: TimesheetExportProps) {
   const { organization } = useOrganization();
   const [isExporting, setIsExporting] = useState(false);
@@ -48,8 +56,16 @@ export function TimesheetExport({
             : employeeName,
         undefined,
         breakSettings,
+        overtimeSettings,
       ),
-    [entries, isViewingAll, members, employeeName, breakSettings],
+    [
+      entries,
+      isViewingAll,
+      members,
+      employeeName,
+      breakSettings,
+      overtimeSettings,
+    ],
   );
 
   const meta: ExportMeta = { employee: employeeName, startDate, endDate };
@@ -84,6 +100,15 @@ export function TimesheetExport({
           {formatPeriod(meta)} · {rows.length}{" "}
           {rows.length === 1 ? "entry" : "entries"} ·{" "}
           {formatHours(totalHours(rows))} hrs
+          {hasOvertime(rows) && (
+            <>
+              {" "}
+              ·{" "}
+              <span className="font-bold text-orange-600 dark:text-orange-400">
+                {formatHours(totalOvertime(rows))} hrs overtime
+              </span>
+            </>
+          )}
         </p>
       </div>
       <div className="flex gap-2">

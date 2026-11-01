@@ -131,6 +131,52 @@ describe("WeeklyReportEmail", () => {
     );
   });
 
+  it("leaves overtime out when the org tracks none", async () => {
+    const doc = await renderEmail(base);
+    expect(doc.body.textContent).not.toMatch(/overtime/i);
+  });
+
+  it("splits out regular and overtime hours, per day and per shift", async () => {
+    const doc = await renderEmail({
+      ...base,
+      totalHours: "10h 0m",
+      regularHours: "8h 0m",
+      overtimeHours: "2h 0m",
+      overtimePolicy: "over 8h/day",
+      breakdown: [
+        {
+          date: "Jan 2, 2026",
+          overtime: "2h 0m",
+          shifts: [
+            { start: "8:00 AM", end: "2:00 PM", duration: "6h 0m" },
+            {
+              start: "3:00 PM",
+              end: "7:00 PM",
+              duration: "4h 0m",
+              overtime: "2h 0m",
+            },
+          ],
+        },
+      ],
+    });
+    const text = doc.body.textContent ?? "";
+    expect(text).toContain("Regular: 8h 0m · Overtime: 2h 0m");
+    expect(text).toContain("(hours over 8h/day)");
+    expect(text).toContain("Jan 2, 2026 · 2h 0m overtime");
+    expect(text).toContain("4h 0m (+2h 0m OT)");
+    expect(text).not.toContain("6h 0m (+");
+  });
+
+  it("omits the policy note when none is given", async () => {
+    const doc = await renderEmail({
+      ...base,
+      regularHours: "5h 0m",
+      overtimeHours: "0m",
+    });
+    const text = doc.body.textContent ?? "";
+    expect(text).toContain("Overtime: 0m");
+    expect(text).not.toContain("(hours ");
+  });
   it("shows approved time off when there is some", async () => {
     const doc = await renderEmail({
       ...base,

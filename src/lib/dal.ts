@@ -1,5 +1,5 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
-import { format, subDays } from "date-fns";
+import { addDays, format, startOfDay, subDays } from "date-fns";
 import { fromZonedTime } from "date-fns-tz";
 import { errAsync, okAsync, type ResultAsync } from "neverthrow";
 import {
@@ -16,9 +16,11 @@ import {
   dbCheckActiveEntry,
   dbClockIn,
   dbClockOut,
+  dbCreateScheduledShift,
   dbCreateSite,
   dbCreateTimeOffRequest,
   dbDeleteBreak,
+  dbDeleteScheduledShift,
   dbDeleteSite,
   dbDeleteTimeEntry,
   dbEndOpenBreak,
@@ -29,7 +31,9 @@ import {
   dbGetEntryBreaks,
   dbGetLocationSettings,
   dbGetOrgTimeEntries,
+  dbGetOvertimeSettings,
   dbGetReportingSettings,
+  dbGetScheduledShifts,
   dbGetSites,
   dbGetSitesForEnforcement,
   dbGetTimeEntries,
@@ -39,6 +43,7 @@ import {
   dbUpdateBreak,
   dbUpdateBreakSettings,
   dbUpdateLocationSettings,
+  dbUpdateOvertimeSettings,
   dbUpdateReportingSettings,
   dbUpdateSite,
   dbUpdateTimeEntry,
@@ -51,6 +56,17 @@ import {
 } from "./geo";
 import { reverseGeocode } from "./geoapify";
 import {
+  isValidOvertimeThreshold,
+  MAX_DAILY_OVERTIME_HOURS,
+  MAX_WEEKLY_OVERTIME_HOURS,
+} from "./overtime";
+import {
+  evaluateShifts,
+  invalidShiftReason,
+  SCHEDULE_FUTURE_DAYS,
+  SCHEDULE_PAST_DAYS,
+} from "./schedule-utils";
+import {
   invalidTimeOffReason,
   MAX_TIME_OFF_NOTE_LENGTH,
 } from "./time-off-utils";
@@ -59,7 +75,10 @@ import type {
   BreakSettingsData,
   BreakType,
   LocationSettingsData,
+  OvertimeSettingsData,
   ReportingSettingsData,
+  ScheduledShift,
+  ScheduledShiftWithStatus,
   SerializableResult,
   SiteData,
   TimeEntry,
@@ -598,6 +617,65 @@ export async function getOrgBreakSettings(): Promise<
     });
 }
 
+/* ------------------------------------------------------------ overtime -- */
+
+export async function updateOvertimeSettingsDal(
+  dailyThresholdHours: number | null,
+  weeklyThresholdHours: number | null,
+) {
+  const authUser = await auth.protect();
+  if (!authUser.userId || !authUser.orgId || authUser.orgRole !== "org:admin") {
+    return errAsync({ reason: "Unauthorized" } as const);
+  }
+  if (
+    !isValidOvertimeThreshold(dailyThresholdHours, MAX_DAILY_OVERTIME_HOURS) ||
+    !isValidOvertimeThreshold(weeklyThresholdHours, MAX_WEEKLY_OVERTIME_HOURS)
+  ) {
+    return errAsync({ reason: "Invalid overtime settings" } as const);
+  }
+  return await dbUpdateOvertimeSettings(
+    authUser.orgId,
+    dailyThresholdHours,
+    weeklyThresholdHours,
+  )
+    .then((updated) => {
+      return okAsync(updated);
+    })
+    .catch((e) => {
+      console.error("Update overtime settings error: ", e);
+      return errAsync({
+        reason: "Failed to update overtime settings",
+      } as const);
+    });
+}
+
+export async function getOrgOvertimeSettings(): Promise<
+  SerializableResult<OvertimeSettingsData | null, { reason: string }>
+> {
+  const { userId, orgId } = await auth.protect();
+  if (!userId || !orgId) {
+    return {
+      error: { reason: "Unauthorized or no organization selected" },
+      ok: false,
+    };
+  }
+
+  return await dbGetOvertimeSettings(orgId)
+    .then((settings) => {
+      return {
+        value: settings || null,
+        ok: true as const,
+      };
+    })
+    .catch((e) => {
+      console.error("Error fetching overtime settings.: ", e);
+      return {
+        error: { reason: "Error fetching overtime settings." },
+        ok: false,
+      };
+    });
+}
+
 /* -------------------------------------------------------------- breaks -- */
 
 /** A break plus the ids the server actions need for cache invalidation. */
@@ -1112,6 +1190,119 @@ export async function deleteSiteDal(id: number) {
     .catch((e) => {
       console.error("Delete site error: ", e);
       return errAsync({ reason: "Failed to delete site" } as const);
+    });
+}
+
+/* ---------------------------------------------------- scheduled shifts -- */
+
+/** Longest note an admin can attach to a shift. */
+const MAX_SHIFT_NOTE_LENGTH = 500;
+
+/**
+ * The schedule from two weeks back to four weeks ahead, each shift compared
+ * with the member's actual clock times. Admins see every member's shifts;
+ * members see their own.
+ */
+export async function getSchedule(): Promise<
+  SerializableResult<ScheduledShiftWithStatus[], { reason: string }>
+> {
+  const { userId, orgId, orgRole } = await auth.protect();
+  if (!userId || !orgId) {
+    return {
+      error: { reason: "Unauthorized or no organization selected" },
+      ok: false,
+    };
+  }
+
+  const isAdmin = orgRole === "org:admin";
+  const now = new Date();
+  // Whole days keep the cache keys stable across requests.
+  const rangeStart = startOfDay(subDays(now, SCHEDULE_PAST_DAYS));
+  const rangeEnd = startOfDay(addDays(now, SCHEDULE_FUTURE_DAYS + 1));
+  // A day of slack before the range catches clock-ins made ahead of the
+  // first shift (or a shift still running when it began).
+  const entriesStart = subDays(rangeStart, 1);
+
+  return await Promise.all([
+    dbGetScheduledShifts(orgId, isAdmin ? null : userId, rangeStart, rangeEnd),
+    isAdmin
+      ? dbGetOrgTimeEntries(orgId, entriesStart, rangeEnd)
+      : dbGetTimeEntries(userId, orgId, entriesStart, rangeEnd),
+  ])
+    .then(([shifts, entries]) => ({
+      value: evaluateShifts(shifts, entries, now),
+      ok: true as const,
+    }))
+    .catch((e) => {
+      console.error("Error fetching schedule: ", e);
+      return { error: { reason: "Error fetching schedule" }, ok: false };
+    });
+}
+
+/** Publishes a shift for a member of the admin's organization. */
+export async function createScheduledShiftDal(
+  memberId: string,
+  shiftStart: Date,
+  shiftEnd: Date,
+  note?: string | null,
+) {
+  const { userId, orgId, orgRole } = await auth.protect();
+  if (!userId || !orgId || orgRole !== "org:admin") {
+    return errAsync({ reason: "Unauthorized" } as const);
+  }
+
+  const invalid = invalidShiftReason(shiftStart, shiftEnd);
+  if (invalid) {
+    return errAsync({ reason: invalid } as const);
+  }
+  const trimmedNote = note?.trim() || null;
+  if (trimmedNote && trimmedNote.length > MAX_SHIFT_NOTE_LENGTH) {
+    return errAsync({ reason: "Note is too long" } as const);
+  }
+
+  const members = await getOrgMembers();
+  if (!members.some((member) => member.id === memberId)) {
+    return errAsync({ reason: "Member not found" } as const);
+  }
+
+  return await dbCreateScheduledShift(
+    orgId,
+    memberId,
+    shiftStart,
+    shiftEnd,
+    trimmedNote,
+    userId,
+  )
+    .then((created) => okAsync(created))
+    .catch((e) => {
+      console.error("Error creating shift: ", e);
+      return errAsync({ reason: "Failed to create shift" } as const);
+    });
+}
+
+export async function deleteScheduledShiftDal(id: number) {
+  const { userId, orgId, orgRole } = await auth.protect();
+  if (!userId || !orgId || orgRole !== "org:admin") {
+    return errAsync({ reason: "Unauthorized" } as const);
+  }
+
+  return await dbDeleteScheduledShift(id, orgId)
+    .then(
+      (
+        deleted,
+      ): ResultAsync<
+        ScheduledShift,
+        { readonly reason: "Shift not found" }
+      > => {
+        if (!deleted) {
+          return errAsync({ reason: "Shift not found" } as const);
+        }
+        return okAsync(deleted);
+      },
+    )
+    .catch((e) => {
+      console.error("Error deleting shift: ", e);
+      return errAsync({ reason: "Failed to delete shift" } as const);
     });
 }
 

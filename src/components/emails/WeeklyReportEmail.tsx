@@ -17,6 +17,11 @@ import { Tailwind } from "@react-email/tailwind";
 interface WeeklyReportEmailProps {
   userName: string;
   totalHours: string;
+  /** Present only when the org tracks overtime. */
+  regularHours?: string;
+  overtimeHours?: string;
+  /** e.g. "over 8h/day or 40h/week". */
+  overtimePolicy?: string;
   periodStart: string;
   periodEnd: string;
   chartUrl: string;
@@ -31,12 +36,16 @@ interface WeeklyReportEmailProps {
   customEnd?: string;
   breakdown: {
     date: string;
+    /** The day's overtime, when it has any. */
+    overtime?: string;
     shifts: {
       start: string;
       end: string;
       duration: string;
       /** Break records for the shift, already formatted for display. */
       breaks?: string;
+      /** This shift's overtime, when it has any. */
+      overtime?: string;
     }[];
   }[];
   /** Approved time off in the period, already formatted for display. */
@@ -47,6 +56,9 @@ interface WeeklyReportEmailProps {
 export const WeeklyReportEmail = ({
   userName = "User",
   totalHours = "0h 0m",
+  regularHours,
+  overtimeHours,
+  overtimePolicy,
   periodStart = "Jan 1, 2024",
   periodEnd = "Jan 7, 2024",
   chartUrl = "",
@@ -103,6 +115,19 @@ export const WeeklyReportEmail = ({
             <Text className="text-[14px] text-black leading-[24px]">
               <strong>Total Hours Logged:</strong> {totalHours}
             </Text>
+            {overtimeHours && (
+              <Text className="text-[14px] text-black leading-[24px]">
+                <strong>Regular:</strong> {regularHours} ·{" "}
+                <strong style={{ color: "#c2410c" }}>Overtime:</strong>{" "}
+                <span style={{ color: "#c2410c" }}>{overtimeHours}</span>
+                {overtimePolicy && (
+                  <span className="text-[12px] text-gray-500">
+                    {" "}
+                    (hours {overtimePolicy})
+                  </span>
+                )}
+              </Text>
+            )}
             {timeOff.length > 0 && (
               <Text className="text-[14px] text-black leading-[24px]">
                 <strong>Approved Time Off:</strong> {totalTimeOff}
@@ -132,6 +157,12 @@ export const WeeklyReportEmail = ({
                   <div key={day.date} style={{ marginBottom: "24px" }}>
                     <Text className="m-0 mb-2 border-gray-200 border-b pb-1 font-bold text-[14px] text-black">
                       {day.date}
+                      {day.overtime && (
+                        <span style={{ color: "#c2410c", fontWeight: 600 }}>
+                          {" "}
+                          · {day.overtime} overtime
+                        </span>
+                      )}
                     </Text>
                     {day.shifts.map((shift) => (
                       <div key={shift.start}>
@@ -154,6 +185,12 @@ export const WeeklyReportEmail = ({
                             style={{ margin: 0 }}
                           >
                             {shift.duration}
+                            {shift.overtime && (
+                              <span style={{ color: "#c2410c" }}>
+                                {" "}
+                                (+{shift.overtime} OT)
+                              </span>
+                            )}
                           </Text>
                         </div>
                         {shift.breaks && (

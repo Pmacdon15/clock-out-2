@@ -1,5 +1,6 @@
 "use client";
 
+import type { OvertimeSplit } from "@/lib/overtime";
 import type { EntryAction } from "@/lib/reducers/time-entries";
 import type { BreakSettingsData, TimeEntry } from "@/lib/types";
 import { Card } from "../ui";
@@ -12,6 +13,8 @@ interface EntryListProps {
   isViewingAll?: boolean;
   members?: { id: string; name: string }[];
   breakSettings?: BreakSettingsData | null;
+  /** Each entry's overtime share, keyed by the entry. */
+  overtimeByEntry?: Map<TimeEntry, OvertimeSplit>;
 }
 
 export function EntryList({
@@ -21,6 +24,7 @@ export function EntryList({
   isViewingAll = false,
   members = [],
   breakSettings,
+  overtimeByEntry,
 }: EntryListProps) {
   return (
     <Card className="scrollbar-thin scrollbar-track-transparent scrollbar-thumb-zinc-300 hover:scrollbar-thumb-zinc-400 relative flex min-h-[100px] flex-col justify-between overflow-y-auto p-6 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-300 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar]:w-1.5">
@@ -53,6 +57,7 @@ export function EntryList({
                   isAdmin={isAdmin}
                   key={entry.id}
                   memberName={memberName}
+                  overtime={overtimeByEntry?.get(entry)}
                   setOptimisticEntries={setOptimisticEntries}
                 />
               );

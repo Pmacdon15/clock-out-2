@@ -8,6 +8,7 @@ const captured = vi.hoisted(() => ({
   viewHours: [] as Record<string, unknown>[],
   orgSettings: [] as Record<string, unknown>[],
   timeOff: [] as Record<string, unknown>[],
+  schedule: [] as Record<string, unknown>[],
   orgSwitcher: vi.fn(),
 }));
 
@@ -27,6 +28,12 @@ vi.mock("@/components/OrgSettings", () => ({
   default: (props: Record<string, unknown>) => {
     captured.orgSettings.push(props);
     return <div data-testid="org-settings" />;
+  },
+}));
+vi.mock("@/components/Schedule", () => ({
+  default: (props: Record<string, unknown>) => {
+    captured.schedule.push(props);
+    return <div data-testid="schedule" />;
   },
 }));
 vi.mock("@/components/TimeOff", () => ({
@@ -54,6 +61,7 @@ function props(
     orgSettingsPromise: ok(null),
     orgTimeEntriesPromise: ok([]),
     recentEntriesPromise: ok(recent),
+    schedulePromise: ok([]),
     timeOffPromise: ok([]),
     membersPromise: resolved([]),
     endDatePromise: resolved(undefined),
@@ -122,6 +130,18 @@ describe("DashboardTabs", () => {
       isAdmin: false,
       membersPromise: p.membersPromise,
       timeOffPromise: p.timeOffPromise,
+    });
+  });
+
+  it("shows the schedule tab to every member", () => {
+    const p = props();
+    render(<DashboardTabs {...p} />);
+    fireEvent.click(screen.getByRole("button", { name: "Schedule" }));
+    expect(screen.getByTestId("schedule")).toBeInTheDocument();
+    expect(latest(captured.schedule)).toEqual({
+      isAdmin: false,
+      membersPromise: p.membersPromise,
+      schedulePromise: p.schedulePromise,
     });
   });
 
@@ -229,6 +249,59 @@ describe("DashboardTabs", () => {
       />,
     );
     expect(latest(captured.timeClock).breakSettings).toBeNull();
+  });
+
+  it("passes overtime settings to the hours view and the settings tab", () => {
+    const overtimeSettings = {
+      org_id: "org_1",
+      daily_threshold_hours: 8,
+      weekly_threshold_hours: 40,
+    };
+    const overtimeSettingsPromise = ok(overtimeSettings);
+    render(
+      <DashboardTabs
+        {...props({
+          defaultTabPromise: resolved("view"),
+          overtimeSettingsPromise,
+        })}
+      />,
+    );
+    expect(latest(captured.viewHours).overtimeSettings).toEqual(
+      overtimeSettings,
+    );
+
+    render(
+      <DashboardTabs
+        {...props({
+          defaultTabPromise: resolved("settings"),
+          isAdminPromise: resolved(true),
+          overtimeSettingsPromise,
+        })}
+      />,
+    );
+    expect(latest(captured.orgSettings).overtimeSettingsPromise).toBe(
+      overtimeSettingsPromise,
+    );
+
+    render(
+      <DashboardTabs
+        {...props({
+          defaultTabPromise: resolved("view"),
+          overtimeSettingsPromise: resolved({
+            ok: false,
+            error: { reason: "err" },
+          }),
+        })}
+      />,
+    );
+    expect(latest(captured.viewHours).overtimeSettings).toBeNull();
+  });
+
+  it("gives the hours view no overtime settings without the promise", () => {
+    render(
+      <DashboardTabs {...props({ defaultTabPromise: resolved("view") })} />,
+    );
+    expect(latest(captured.viewHours).overtimeSettings).toBeNull();
   });
 
   it("shows settings to admins without reporting so they can set lunch breaks", () => {

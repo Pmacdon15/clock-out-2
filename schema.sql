@@ -37,6 +37,16 @@ ALTER TABLE break_settings ADD COLUMN IF NOT EXISTS max_meal_break_minutes INTEG
 ALTER TABLE break_settings ADD COLUMN IF NOT EXISTS max_unpaid_rest_break_minutes INTEGER;
 ALTER TABLE break_settings ADD COLUMN IF NOT EXISTS max_paid_break_minutes INTEGER;
 
+-- Overtime thresholds in hours. NULL turns that threshold off. Daily
+-- overtime is hours past the daily threshold on one day; weekly overtime is
+-- the remaining hours past the weekly threshold in a Monday-Sunday week.
+CREATE TABLE IF NOT EXISTS overtime_settings (
+    org_id TEXT PRIMARY KEY REFERENCES settings(org_id) ON DELETE CASCADE,
+    daily_threshold_hours DOUBLE PRECISION,
+    weekly_threshold_hours DOUBLE PRECISION,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS location_settings (
     org_id TEXT PRIMARY KEY REFERENCES settings(org_id) ON DELETE CASCADE,
     -- 'off' | 'optional' | 'required'
@@ -99,6 +109,23 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_time_entry_breaks_one_open
     ON time_entry_breaks (time_entry_id)
     WHERE break_end IS NULL;
 CREATE INDEX IF NOT EXISTS idx_sites_org ON sites (org_id);
+
+-- Shifts an admin publishes for a member. Compared with time_entries to flag
+-- late arrivals and no-shows; nothing here changes worked hours.
+CREATE TABLE IF NOT EXISTS scheduled_shifts (
+    id SERIAL PRIMARY KEY,
+    org_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    shift_start TIMESTAMP WITH TIME ZONE NOT NULL,
+    shift_end TIMESTAMP WITH TIME ZONE NOT NULL,
+    note TEXT,
+    created_by TEXT NOT NULL,
+    CHECK (shift_end > shift_start),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_scheduled_shifts_org_start
+    ON scheduled_shifts (org_id, shift_start);
 
 -- Paid time off requested by members and approved by admins. Dates are
 -- whole calendar days (inclusive). Approved time off is shown alongside

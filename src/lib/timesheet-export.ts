@@ -10,8 +10,9 @@ import {
   isPaidBreakType,
 } from "./break-utils";
 import { formatCoordinates } from "./geo";
+import { allocateOvertime, isOvertimeEnabled } from "./overtime";
 import type { PdfImage } from "./pdf-image";
-import type { BreakSettingsData } from "./types";
+import type { BreakSettingsData, OvertimeSettingsData } from "./types";
 
 /**
  * Timesheet export: turns time entries into a downloadable Excel spreadsheet
@@ -70,6 +71,11 @@ export type ExportRow = {
    * exports when punch locations are captured.
    */
   location?: string;
+  /**
+   * This shift's overtime hours (part of `hours`, not on top of it). Present
+   * on every row when the org tracks overtime, absent when it doesn't.
+   */
+  overtimeHours?: number;
 };
 
 export type ExportMeta = {
@@ -92,6 +98,7 @@ export type EmployeeSummaryRow = {
   shiftsCount: number;
   daysWorked: number;
   totalHours: number;
+  overtimeHours: number;
 };
 
 export type PeriodSection = {
@@ -99,6 +106,7 @@ export type PeriodSection = {
   label: string;
   rows: ExportRow[];
   totalHours: number;
+  overtimeHours: number;
   shiftsCount: number;
   daysWorked: number;
 };
@@ -191,8 +199,9 @@ export function buildExportRows(
   getEmployeeName: (userId: string) => string,
   timezone?: string,
   breakSettings?: BreakSettingsData | null,
+  overtimeSettings?: Partial<OvertimeSettingsData> | null,
 ): ExportRow[] {
-  return entries
+  const rows = entries
     .map((entry) => ({
       entry,
       clockIn: new Date(entry.clock_in),
@@ -250,7 +259,41 @@ export function buildExportRows(
         ...(location ? { location } : {}),
       };
     });
+  return applyOvertime(rows, overtimeSettings);
 }
+
+/**
+ * Adds each row's overtime share. Rows must be in the order the shifts were
+ * worked (as `buildExportRows` sorts them); thresholds apply per employee.
+ * Rows come back untouched when the org has no overtime thresholds.
+ */
+export function applyOvertime(
+  rows: ExportRow[],
+  overtimeSettings?: Partial<OvertimeSettingsData> | null,
+): ExportRow[] {
+  if (!isOvertimeEnabled(overtimeSettings)) return rows;
+  const splits = allocateOvertime(
+    rows.map((row, index) => ({
+      key: index,
+      worker: row.employee,
+      day: row.date,
+      hours: row.hours ?? 0,
+    })),
+    overtimeSettings,
+  );
+  return rows.map((row, index) => ({
+    ...row,
+    overtimeHours: (splits.get(index) as { overtimeHours: number })
+      .overtimeHours,
+  }));
+}
+
+/** Whether the rows carry overtime (the org tracks it). */
+export const hasOvertime = (rows: ExportRow[]) =>
+  rows.some((row) => row.overtimeHours !== undefined);
+
+export const totalOvertime = (rows: ExportRow[]) =>
+  rows.reduce((sum, row) => sum + (row.overtimeHours ?? 0), 0);
 
 /** Every break record in the report, flattened for the listing sections. */
 export function collectBreakRecords(
@@ -336,6 +379,7 @@ export function buildPeriodSections(
         label: formatPeriod(meta),
         rows,
         totalHours: totalHours(rows),
+        overtimeHours: totalOvertime(rows),
         shiftsCount: rows.length,
         daysWorked: days.size,
       },
@@ -363,6 +407,7 @@ export function buildPeriodSections(
         label: group.label,
         rows: group.rows,
         totalHours: totalHours(group.rows),
+        overtimeHours: totalOvertime(group.rows),
         shiftsCount: group.rows.length,
         daysWorked: days.size,
       };
@@ -372,17 +417,24 @@ export function buildPeriodSections(
 export function buildEmployeeSummary(rows: ExportRow[]): EmployeeSummaryRow[] {
   const map = new Map<
     string,
-    { shiftsCount: number; days: Set<string>; totalHours: number }
+    {
+      shiftsCount: number;
+      days: Set<string>;
+      totalHours: number;
+      overtimeHours: number;
+    }
   >();
   for (const row of rows) {
     const existing = map.get(row.employee) ?? {
       shiftsCount: 0,
       days: new Set<string>(),
       totalHours: 0,
+      overtimeHours: 0,
     };
     existing.shiftsCount += 1;
     existing.days.add(row.date);
     existing.totalHours += row.hours ?? 0;
+    existing.overtimeHours += row.overtimeHours ?? 0;
     map.set(row.employee, existing);
   }
   return Array.from(map.entries()).map(([employee, data]) => ({
@@ -390,6 +442,7 @@ export function buildEmployeeSummary(rows: ExportRow[]): EmployeeSummaryRow[] {
     shiftsCount: data.shiftsCount,
     daysWorked: data.days.size,
     totalHours: data.totalHours,
+    overtimeHours: data.overtimeHours,
   }));
 }
 
@@ -524,7 +577,7 @@ type Cell =
   | { formula: string; cached: number; style?: number }
   | null;
 
-const COLUMN_LETTERS = "ABCDEFGH";
+const COLUMN_LETTERS = "ABCDEFGHI";
 
 const cellXml = (cell: Cell, ref: string) => {
   if (!cell) return "";
@@ -548,6 +601,9 @@ export function buildSheetXml(rows: ExportRow[], meta: ExportMeta): string {
     sections.length > 1 || meta.groupBy === "week" || meta.groupBy === "month";
   const employeeSummaries = buildEmployeeSummary(rows);
   const showLocation = rows.some((r) => Boolean(r.location));
+  const showOvertime = hasOvertime(rows);
+  // Overtime sits in column H, right after the daily total, on shift rows
+  // and their totals; the summary tables carry it in column G.
 
   const grid: Cell[][] = [
     [{ text: "Timesheet", style: STYLE.title }],
@@ -562,6 +618,7 @@ export function buildSheetXml(rows: ExportRow[], meta: ExportMeta): string {
       "Clock Out",
       "Hours",
       "Daily Total",
+      ...(showOvertime ? ["Overtime"] : []),
       ...(showLocation ? ["Location"] : []),
     ].map((text) => ({
       text,
@@ -613,6 +670,9 @@ export function buildSheetXml(rows: ExportRow[], meta: ExportMeta): string {
         { text: r.clockOut },
         r.hours === null ? null : { number: r.hours, style: STYLE.hours },
         isLastOfDay ? { number: dayTotal, style: STYLE.boldHours } : null,
+        ...(showOvertime
+          ? [{ number: r.overtimeHours as number, style: STYLE.hours }]
+          : []),
         ...(showLocation ? [{ text: r.location ?? "" }] : []),
       ]);
       globalRowIdx += 1;
@@ -640,17 +700,27 @@ export function buildSheetXml(rows: ExportRow[], meta: ExportMeta): string {
           style: STYLE.boldHours,
         },
         null,
+        ...(showOvertime
+          ? [
+              {
+                formula: `SUM(H${firstSecRow}:H${lastSecRow})`,
+                cached: section.overtimeHours,
+                style: STYLE.boldHours,
+              },
+            ]
+          : []),
       ]);
     }
   }
 
   // Grand total row
-  const grandTotalFormula =
+  const totalFormula = (col: string) =>
     rows.length === 0
       ? null
       : showSections
-        ? `SUM(${shiftRowIndices.map((idx) => `F${idx}`).join(",")})`
-        : `SUM(F${firstData}:F${firstData + rows.length - 1})`;
+        ? `SUM(${shiftRowIndices.map((idx) => `${col}${idx}`).join(",")})`
+        : `SUM(${col}${firstData}:${col}${firstData + rows.length - 1})`;
+  const grandTotalFormula = totalFormula("F");
 
   grid.push([
     { text: "Total hours", style: STYLE.bold },
@@ -676,6 +746,16 @@ export function buildSheetXml(rows: ExportRow[], meta: ExportMeta): string {
         }
       : { number: 0, style: STYLE.boldHours },
     null,
+    // Only rows carry overtime, so with the column there is always a row.
+    ...(showOvertime
+      ? [
+          {
+            formula: totalFormula("H") as string,
+            cached: totalOvertime(rows),
+            style: STYLE.boldHours,
+          },
+        ]
+      : []),
   ]);
 
   // Summary breakdown section (by employee and/or by week/month)
@@ -688,7 +768,7 @@ export function buildSheetXml(rows: ExportRow[], meta: ExportMeta): string {
       { text: "Avg Hrs/Day", style: STYLE.header },
       null,
       { text: "Total Hours", style: STYLE.header },
-      null,
+      showOvertime ? { text: "Overtime", style: STYLE.header } : null,
     ]);
     for (const emp of employeeSummaries) {
       const avg = emp.totalHours / emp.daysWorked;
@@ -699,7 +779,9 @@ export function buildSheetXml(rows: ExportRow[], meta: ExportMeta): string {
         { number: avg, style: STYLE.hours },
         null,
         { number: emp.totalHours, style: STYLE.boldHours },
-        null,
+        showOvertime
+          ? { number: emp.overtimeHours, style: STYLE.boldHours }
+          : null,
       ]);
     }
 
@@ -737,7 +819,7 @@ export function buildSheetXml(rows: ExportRow[], meta: ExportMeta): string {
         null,
         null,
         { text: "Total Hours", style: STYLE.header },
-        null,
+        showOvertime ? { text: "Overtime", style: STYLE.header } : null,
       ]);
       for (const sec of sections) {
         grid.push([
@@ -747,7 +829,9 @@ export function buildSheetXml(rows: ExportRow[], meta: ExportMeta): string {
           null,
           null,
           { number: sec.totalHours, style: STYLE.boldHours },
-          null,
+          showOvertime
+            ? { number: sec.overtimeHours, style: STYLE.boldHours }
+            : null,
         ]);
       }
     }
@@ -764,7 +848,11 @@ export function buildSheetXml(rows: ExportRow[], meta: ExportMeta): string {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
 <sheetViews><sheetView workbookViewId="0"><pane ySplit="${HEADER_ROW}" topLeftCell="A${firstData}" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
-<cols><col min="1" max="1" width="26" customWidth="1"/><col min="2" max="2" width="13" customWidth="1"/><col min="3" max="3" width="8" customWidth="1"/><col min="4" max="5" width="12" customWidth="1"/><col min="6" max="7" width="12" customWidth="1"/><col min="8" max="8" width="34" customWidth="1"/></cols>
+<cols><col min="1" max="1" width="26" customWidth="1"/><col min="2" max="2" width="13" customWidth="1"/><col min="3" max="3" width="8" customWidth="1"/><col min="4" max="5" width="12" customWidth="1"/><col min="6" max="7" width="12" customWidth="1"/>${
+    showOvertime
+      ? '<col min="8" max="8" width="12" customWidth="1"/><col min="9" max="9" width="34" customWidth="1"/>'
+      : '<col min="8" max="8" width="34" customWidth="1"/>'
+  }</cols>
 <sheetData>${sheetRows}</sheetData>
 </worksheet>`;
 }
@@ -831,8 +919,41 @@ export const COLUMNS_WITH_LOCATION: PdfColumn[] = [
   { title: "Day Total", x: PAGE_WIDTH - MARGIN, width: 0, alignRight: true },
 ];
 
-export const getPdfColumns = (showLocation: boolean): PdfColumn[] =>
-  showLocation ? COLUMNS_WITH_LOCATION : COLUMNS;
+/** Shift columns with an overtime ("OT") column before the day total. */
+export const COLUMNS_WITH_OVERTIME: PdfColumn[] = [
+  { title: "Employee", x: MARGIN, width: 120 },
+  { title: "Date", x: 172, width: 64 },
+  { title: "Day", x: 240, width: 30 },
+  { title: "Clock In", x: 274, width: 60 },
+  { title: "Clock Out", x: 338, width: 66 },
+  { title: "Hours", x: 452, width: 0, alignRight: true },
+  { title: "OT", x: 508, width: 0, alignRight: true },
+  { title: "Day Total", x: PAGE_WIDTH - MARGIN, width: 0, alignRight: true },
+];
+
+export const COLUMNS_WITH_LOCATION_AND_OVERTIME: PdfColumn[] = [
+  { title: "Employee", x: MARGIN, width: 84 },
+  { title: "Date", x: 136, width: 54 },
+  { title: "Day", x: 194, width: 22 },
+  { title: "Clock In", x: 220, width: 46 },
+  { title: "Clock Out", x: 270, width: 48 },
+  { title: "Location", x: 322, width: 110 },
+  { title: "Hours", x: 470, width: 0, alignRight: true },
+  { title: "OT", x: 517, width: 0, alignRight: true },
+  { title: "Day Total", x: PAGE_WIDTH - MARGIN, width: 0, alignRight: true },
+];
+
+export const getPdfColumns = (
+  showLocation: boolean,
+  showOvertime = false,
+): PdfColumn[] => {
+  if (showOvertime) {
+    return showLocation
+      ? COLUMNS_WITH_LOCATION_AND_OVERTIME
+      : COLUMNS_WITH_OVERTIME;
+  }
+  return showLocation ? COLUMNS_WITH_LOCATION : COLUMNS;
+};
 
 /**
  * The break-records table at the end of the report: its own columns, so a
@@ -939,15 +1060,24 @@ export function layoutPdfPages(rows: ExportRow[], meta: ExportMeta): string[] {
   let y = 0;
 
   const showLocation = rows.some((r) => Boolean(r.location));
-  const columns = getPdfColumns(showLocation);
-  const colEmp = columns[0];
-  const colDate = columns[1];
-  const colDay = columns[2];
-  const colClockIn = columns[3];
-  const colClockOut = columns[4];
-  const colLocation = showLocation ? columns[5] : undefined;
-  const colHours = showLocation ? columns[6] : columns[5];
-  const colDayTotal = showLocation ? columns[7] : columns[6];
+  const showOvertime = hasOvertime(rows);
+  const columns = getPdfColumns(showLocation, showOvertime);
+  const column = (title: string) => columns.find((c) => c.title === title);
+  const colEmp = column("Employee") as PdfColumn;
+  const colDate = column("Date") as PdfColumn;
+  const colDay = column("Day") as PdfColumn;
+  const colClockIn = column("Clock In") as PdfColumn;
+  const colClockOut = column("Clock Out") as PdfColumn;
+  const colLocation = column("Location");
+  const colHours = column("Hours") as PdfColumn;
+  const colOvertime = column("OT");
+  const colDayTotal = column("Day Total") as PdfColumn;
+  /** Writes an overtime figure, when the report has the column. */
+  const writeOvertime = (hours: number, atY: number, bold = false) => {
+    if (colOvertime) {
+      writeCell(pen, colOvertime, formatHours(hours), atY, bold);
+    }
+  };
 
   const ensureSpace = (neededRows: number) => {
     if (y < MARGIN + ROW_HEIGHT * neededRows) startPage(false);
@@ -1028,6 +1158,7 @@ export function layoutPdfPages(rows: ExportRow[], meta: ExportMeta): string[] {
         row.hours === null ? "-" : formatHours(row.hours),
         y,
       );
+      writeOvertime(row.overtimeHours ?? 0, y);
       writeCell(
         pen,
         colDayTotal,
@@ -1051,6 +1182,7 @@ export function layoutPdfPages(rows: ExportRow[], meta: ExportMeta): string[] {
         true,
       );
       writeCell(pen, colHours, formatHours(section.totalHours), y, true);
+      writeOvertime(section.overtimeHours, y, true);
       writeCell(pen, colDayTotal, formatHours(section.totalHours), y, true);
       line(pen, y - 6, 0.4);
       y -= ROW_HEIGHT + 4;
@@ -1064,6 +1196,7 @@ export function layoutPdfPages(rows: ExportRow[], meta: ExportMeta): string[] {
     writeCell(pen, colClockIn, `${uniqueDays}d / ${rows.length}s`, y - 4, true);
   }
   writeCell(pen, colHours, formatHours(totalHours(rows)), y - 4, true);
+  writeOvertime(totalOvertime(rows), y - 4, true);
   writeCell(pen, colDayTotal, formatHours(totalHours(rows)), y - 4, true);
   y -= ROW_HEIGHT + 10;
 
@@ -1080,6 +1213,7 @@ export function layoutPdfPages(rows: ExportRow[], meta: ExportMeta): string[] {
       writeCell(pen, colDate, `${emp.daysWorked} days`, y);
       writeCell(pen, colClockIn, `${emp.shiftsCount} shifts`, y);
       writeCell(pen, colHours, formatHours(emp.totalHours), y, true);
+      writeOvertime(emp.overtimeHours, y, true);
       line(pen, y - 6);
       y -= ROW_HEIGHT;
     }
@@ -1277,10 +1411,18 @@ export function buildCsvRows(rows: ExportRow[], meta: ExportMeta): CsvCell[][] {
   });
 
   const showLocation = rows.some((r) => Boolean(r.location));
-  const headers: CsvCell[] = showLocation
-    ? [...CSV_COLUMNS, "Location"]
-    : [...CSV_COLUMNS];
+  const showOvertime = hasOvertime(rows);
+  const headers: CsvCell[] = [
+    ...CSV_COLUMNS,
+    ...(showOvertime ? ["Overtime Hours"] : []),
+    ...(showLocation ? ["Location"] : []),
+  ];
   const out: CsvCell[][] = [headers];
+  /** The optional trailing columns: overtime, then location. */
+  const extra = (overtime: number, location: string | null = null) => [
+    ...(showOvertime ? [formatHours(overtime)] : []),
+    ...(showLocation ? [location] : []),
+  ];
   let globalRowIdx = 0;
 
   for (const section of sections) {
@@ -1302,7 +1444,7 @@ export function buildCsvRows(rows: ExportRow[], meta: ExportMeta): CsvCell[][] {
         null,
         null,
         null,
-        ...(showLocation ? [r.location ?? ""] : []),
+        ...extra(r.overtimeHours ?? 0, r.location ?? ""),
       ]);
       globalRowIdx += 1;
     }
@@ -1321,7 +1463,7 @@ export function buildCsvRows(rows: ExportRow[], meta: ExportMeta): CsvCell[][] {
         section.daysWorked,
         section.shiftsCount,
         null,
-        ...(showLocation ? [null] : []),
+        ...extra(section.overtimeHours),
       ]);
     }
   }
@@ -1339,7 +1481,7 @@ export function buildCsvRows(rows: ExportRow[], meta: ExportMeta): CsvCell[][] {
     new Set(rows.map((r) => r.date)).size,
     rows.length,
     null,
-    ...(showLocation ? [null] : []),
+    ...extra(totalOvertime(rows)),
   ]);
 
   for (const emp of buildEmployeeSummary(rows)) {
@@ -1356,7 +1498,7 @@ export function buildCsvRows(rows: ExportRow[], meta: ExportMeta): CsvCell[][] {
       emp.daysWorked,
       emp.shiftsCount,
       formatHours(emp.totalHours / emp.daysWorked),
-      ...(showLocation ? [null] : []),
+      ...extra(emp.overtimeHours),
     ]);
   }
 
@@ -1375,7 +1517,7 @@ export function buildCsvRows(rows: ExportRow[], meta: ExportMeta): CsvCell[][] {
         sec.daysWorked,
         sec.shiftsCount,
         null,
-        ...(showLocation ? [null] : []),
+        ...extra(sec.overtimeHours),
       ]);
     }
   }

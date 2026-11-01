@@ -39,6 +39,16 @@ const mockDbGetEntryBreaks = vi.fn(async () => []);
 const mockInvalidateTimeEntryCache = vi.fn();
 const mockInvalidateReportingSettingsCache = vi.fn();
 const mockDbGetBreakSettings = vi.fn(async () => undefined);
+const mockDbGetOvertimeSettings = vi.fn(
+  async (): Promise<
+    | {
+        org_id: string;
+        daily_threshold_hours: number | null;
+        weekly_threshold_hours: number | null;
+      }
+    | undefined
+  > => undefined,
+);
 const mockDbGetReportingSettings = vi.fn(async () => undefined);
 const mockDbGetSites = vi.fn(async () => []);
 const mockDbGetLocationSettings = vi.fn(async () => ({
@@ -67,6 +77,7 @@ vi.mock("@/mcp/db", () => ({
     mockDbGetLocationSettings(...args),
   dbGetOrgActiveEntries: vi.fn(async () => []),
   dbGetOrgTimeEntries: (...args: unknown[]) => mockDbGetOrgTimeEntries(...args),
+  dbGetOvertimeSettings: () => mockDbGetOvertimeSettings(),
   dbGetReportingSettings: (...args: unknown[]) =>
     mockDbGetReportingSettings(...args),
   dbGetSites: (...args: unknown[]) => mockDbGetSites(...args),
@@ -417,6 +428,7 @@ describe("Double / overlapping time prevention & cache invalidation", () => {
       "timesheet-entire-organization-2026-10-26-to-2026-10-28.pdf",
     );
     expect(res.data.total_hours).toBe(8);
+    expect(res.data.overtime_hours).toBeUndefined();
     expect(res.data.download_url).toContain(
       "/api/export/timesheet?org_id=org_1&member=all&start_date=2026-10-26&end_date=2026-10-28&format=pdf&timezone=America%2FEdmonton",
     );
@@ -438,6 +450,49 @@ describe("Double / overlapping time prevention & cache invalidation", () => {
     );
     expect(pdfContent.startsWith("%PDF-1.4\n")).toBe(true);
     expect(pdfContent).toContain("(Alex Smith) Tj");
+  });
+
+  it("splits out overtime when the org tracks it, and exports without it if the lookup fails", async () => {
+    const shift = {
+      id: 1,
+      user_id: "user_worker",
+      org_id: "org_1",
+      clock_in: new Date("2026-10-26T15:00:00.000Z"),
+      clock_out: new Date("2026-10-27T01:00:00.000Z"),
+      created_at: new Date(),
+      updated_at: new Date(),
+    };
+    const input = {
+      start_date: "2026-10-26",
+      end_date: "2026-10-28",
+      format: "csv" as const,
+      timezone: "America/Edmonton",
+    };
+    mockDbGetOrgTimeEntries.mockResolvedValueOnce([shift]);
+    mockDbGetOvertimeSettings.mockResolvedValueOnce({
+      org_id: "org_1",
+      daily_threshold_hours: 8,
+      weekly_threshold_hours: null,
+    });
+    const res = await exportTimesheetTool(
+      { userId: "user_admin", client: "Claude" },
+      input,
+    );
+    expect(res.data.total_hours).toBe(10);
+    expect(res.data.overtime_hours).toBe(2);
+    expect(res.summary).toContain("10.00 hrs, 2.00 hrs overtime");
+    expect(res.data.employee_breakdown[0].overtime_hours).toBe(2);
+    expect(res.data.period_breakdown[0].overtime_hours).toBe(2);
+
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mockDbGetOrgTimeEntries.mockResolvedValueOnce([shift]);
+    mockDbGetOvertimeSettings.mockRejectedValueOnce(new Error("db down"));
+    const fallback = await exportTimesheetTool(
+      { userId: "user_admin", client: "Claude" },
+      input,
+    );
+    expect(fallback.data.status).toBe("ready");
+    expect(fallback.data.overtime_hours).toBeUndefined();
   });
 
   it("exports a CSV timesheet as the primary file while still linking the PDF and spreadsheet", async () => {

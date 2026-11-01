@@ -8,9 +8,11 @@ import {
   cancelTimeOffRequestDal as dalCancelTimeOffRequest,
   clockIn as dalClockIn,
   clockOut as dalClockOut,
+  createScheduledShiftDal as dalCreateScheduledShift,
   createSiteDal as dalCreateSite,
   createTimeOffRequestDal as dalCreateTimeOffRequest,
   deleteBreakDal as dalDeleteBreak,
+  deleteScheduledShiftDal as dalDeleteScheduledShift,
   deleteSiteDal as dalDeleteSite,
   deleteTimeEntry as dalDeleteTimeEntry,
   endBreak as dalEndBreak,
@@ -21,6 +23,7 @@ import {
   updateTimeEntry as dalUpdateTimeEntry,
   updateBreakSettingsDal,
   updateLocationSettingsDal,
+  updateOvertimeSettingsDal,
   updateReportingSettingsDal,
 } from "./dal";
 import type { Coordinates } from "./geo";
@@ -38,7 +41,12 @@ export async function clockInAction(coordinates?: Coordinates | null) {
 
   return result.match(
     (entry) => {
-      if (entry) updateTag(`time-entries-${entry.user_id}-${entry.org_id}`);
+      if (entry) {
+        updateTag(`time-entries-${entry.user_id}-${entry.org_id}`);
+        // The admin schedule compares shifts with the org-wide list, so a
+        // clock-in has to show there right away, not only at clock-out.
+        updateTag(`org-time-entries-${entry.org_id}`);
+      }
       return { success: true, data: entry };
     },
     (err) => {
@@ -160,6 +168,26 @@ export async function updateBreakSettingAction(
   return result.match(
     (entry) => {
       updateTag(`break-settings-${entry.org_id}`);
+      return { success: true, data: entry };
+    },
+    (err) => {
+      return { success: false, error: err.reason };
+    },
+  );
+}
+
+export async function updateOvertimeSettingsAction(
+  dailyThresholdHours: number | null,
+  weeklyThresholdHours: number | null,
+) {
+  const result = await updateOvertimeSettingsDal(
+    dailyThresholdHours,
+    weeklyThresholdHours,
+  );
+
+  return result.match(
+    (entry) => {
+      updateTag(`overtime-settings-${entry.org_id}`);
       return { success: true, data: entry };
     },
     (err) => {
@@ -353,6 +381,44 @@ export async function deleteSiteAction(id: number) {
     },
     (err) => {
       return { success: false, error: err.reason };
+    },
+  );
+}
+
+export async function createScheduledShiftAction(
+  memberId: string,
+  shiftStart: string,
+  shiftEnd: string,
+  note?: string | null,
+) {
+  const result = await dalCreateScheduledShift(
+    memberId,
+    new Date(shiftStart),
+    new Date(shiftEnd),
+    note,
+  );
+
+  return result.match(
+    (shift) => {
+      updateTag(`scheduled-shifts-${shift.org_id}`);
+      return { success: true as const, data: shift };
+    },
+    (err) => {
+      return { success: false as const, error: err.reason };
+    },
+  );
+}
+
+export async function deleteScheduledShiftAction(id: number) {
+  const result = await dalDeleteScheduledShift(id);
+
+  return result.match(
+    (shift) => {
+      updateTag(`scheduled-shifts-${shift.org_id}`);
+      return { success: true as const };
+    },
+    (err) => {
+      return { success: false as const, error: err.reason };
     },
   );
 }

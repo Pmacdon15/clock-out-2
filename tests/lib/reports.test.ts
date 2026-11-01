@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => {
     render: vi.fn(async () => "<html>report</html>"),
     WeeklyReportEmail: vi.fn((props: unknown) => props),
     dbGetBreakSettings: vi.fn(),
+    dbGetOvertimeSettings: vi.fn(),
     dbGetTimeEntriesForPeriod: vi.fn(),
     dbGetApprovedTimeOffForPeriod: vi.fn(),
   };
@@ -50,6 +51,7 @@ vi.mock("@/components/emails/WeeklyReportEmail", () => ({
 }));
 vi.mock("@/lib/db", () => ({
   dbGetBreakSettings: mocks.dbGetBreakSettings,
+  dbGetOvertimeSettings: mocks.dbGetOvertimeSettings,
   dbGetTimeEntriesForPeriod: mocks.dbGetTimeEntriesForPeriod,
   dbGetApprovedTimeOffForPeriod: mocks.dbGetApprovedTimeOffForPeriod,
 }));
@@ -116,6 +118,7 @@ beforeEach(() => {
   mocks.getOrganizationBillingSubscription.mockResolvedValue(withReporting);
   mocks.getOrganizationMembershipList.mockResolvedValue({ data: [admin] });
   mocks.dbGetBreakSettings.mockResolvedValue(undefined);
+  mocks.dbGetOvertimeSettings.mockResolvedValue(undefined);
   mocks.dbGetTimeEntriesForPeriod.mockResolvedValue([]);
   mocks.dbGetApprovedTimeOffForPeriod.mockResolvedValue([]);
   mocks.send.mockResolvedValue({ MessageId: "m1" });
@@ -548,6 +551,88 @@ describe("sendWeeklyReports break records", () => {
     await sendWeeklyReports(start, end, "org_1");
     // 8h shift, 30m unpaid break recorded: the automatic 30m dock stands down.
     expect(emailProps().totalHours).toBe("7h 30m");
+  });
+});
+
+describe("sendWeeklyReports overtime", () => {
+  const shiftOn = (day: string, startHour: number, hours: number) => ({
+    clock_in: `2026-01-${day}T${String(startHour).padStart(2, "0")}:00:00Z`,
+    clock_out: `2026-01-${day}T${String(startHour + hours).padStart(2, "0")}:00:00Z`,
+  });
+
+  it("leaves overtime out of the email when the org tracks none", async () => {
+    mocks.dbGetTimeEntriesForPeriod.mockResolvedValue([shiftOn("05", 8, 10)]);
+    await sendWeeklyReports(start, end, "org_1");
+    const props = emailProps();
+    expect(props.overtimeHours).toBeUndefined();
+    expect(props.regularHours).toBeUndefined();
+    const breakdown = props.breakdown as Record<string, unknown>[];
+    expect(breakdown[0].overtime).toBeUndefined();
+    const chart = JSON.parse(
+      decodeURIComponent(
+        new URL(props.chartUrl as string).searchParams.get("c") as string,
+      ),
+    );
+    expect(chart.data.datasets).toHaveLength(1);
+    expect(chart.options.plugins.legend.display).toBe(false);
+  });
+
+  it("splits regular and overtime hours per shift, day and period", async () => {
+    mocks.dbGetOvertimeSettings.mockResolvedValue({
+      org_id: "org_1",
+      daily_threshold_hours: 8,
+      weekly_threshold_hours: null,
+    });
+    mocks.dbGetTimeEntriesForPeriod.mockResolvedValue([
+      // Mon: 6h + 4h = 10h -> 2h daily overtime, all on the second shift.
+      shiftOn("05", 6, 6),
+      shiftOn("05", 13, 4),
+      // Tue: 7h, no overtime.
+      shiftOn("06", 9, 7),
+      // Still running: skipped like every other report line.
+      { clock_in: "2026-01-07T09:00:00Z", clock_out: null },
+    ]);
+    await sendWeeklyReports(start, end, "org_1");
+    const props = emailProps();
+    expect(props).toMatchObject({
+      totalHours: "17h 0m",
+      regularHours: "15h 0m",
+      overtimeHours: "2h 0m",
+      overtimePolicy: "over 8h/day",
+    });
+    const breakdown = props.breakdown as {
+      overtime?: string;
+      shifts: { overtime?: string }[];
+    }[];
+    expect(breakdown[0].overtime).toBe("2h 0m");
+    expect(breakdown[0].shifts[0].overtime).toBeUndefined();
+    expect(breakdown[0].shifts[1].overtime).toBe("2h 0m");
+    expect(breakdown[1].overtime).toBeUndefined();
+
+    const chart = JSON.parse(
+      decodeURIComponent(
+        new URL(props.chartUrl as string).searchParams.get("c") as string,
+      ),
+    );
+    expect(chart.data.datasets.map((d: { label: string }) => d.label)).toEqual([
+      "Regular",
+      "Overtime",
+    ]);
+    expect(chart.data.datasets[0].data).toEqual([8, 7]);
+    expect(chart.data.datasets[1].data).toEqual([2, 0]);
+    expect(chart.options.plugins.legend.display).toBe(true);
+  });
+
+  it("still sends the report when the overtime lookup fails", async () => {
+    mocks.dbGetOvertimeSettings.mockRejectedValue(new Error("db down"));
+    mocks.dbGetTimeEntriesForPeriod.mockResolvedValue([shiftOn("05", 8, 10)]);
+    await sendWeeklyReports(start, end, "org_1");
+    expect(mocks.send).toHaveBeenCalledTimes(1);
+    expect(emailProps().overtimeHours).toBeUndefined();
+    expect(console.error).toHaveBeenCalledWith(
+      "[Reports] Error fetching overtime settings for org_1:",
+      expect.any(Error),
+    );
   });
 });
 
