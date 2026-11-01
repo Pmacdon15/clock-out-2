@@ -307,4 +307,18 @@ describe("deliver", () => {
     expect(counts).toEqual({ email: 0, push: 0 });
     expect(mocks.dbGetPushSubscriptionsFor).not.toHaveBeenCalled();
   });
+
+  it("puts detail lines in the plain-text email", async () => {
+    configureEmail();
+    await sendAlertEmail("a@b.c", {
+      ...message,
+      lines: ["Mon 9-5", "Tue 9-5"],
+    });
+    const { input } = mocks.send.mock.calls[0][0] as {
+      input: { Message: { Body: { Text: { Data: string } } } };
+    };
+    expect(input.Message.Body.Text.Data).toBe(
+      `${message.body}\nMon 9-5\nTue 9-5\n\n${DEFAULT_APP_URL}${message.url}`,
+    );
+  });
 });

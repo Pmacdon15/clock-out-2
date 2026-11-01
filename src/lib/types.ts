@@ -163,6 +163,9 @@ export interface DashboardTabsProps {
   schedulePromise: Promise<
     SerializableResult<ScheduledShiftWithStatus[], { reason: string }>
   >;
+  timeOffPromise: Promise<
+    SerializableResult<TimeOffRequest[], { reason: string }>
+  >;
   membersPromise?: Promise<
     {
       id: string;
@@ -196,6 +199,10 @@ export interface ViewHoursProps {
   >;
   orgTimeEntriesPromise: Promise<
     SerializableResult<TimeEntry[], { reason: string }>
+  >;
+  /** Approved requests in range are listed beside the worked hours. */
+  timeOffPromise?: Promise<
+    SerializableResult<TimeOffRequest[], { reason: string }>
   >;
   selectedUserIdPromise?: Promise<string | undefined>;
   selectedWeekPromise?: Promise<string | undefined>;
@@ -310,4 +317,28 @@ export type ScheduledShiftWithStatus = ScheduledShift & {
   actual_clock_out: Date | null;
   /** Minutes after the scheduled start the member clocked in (0 if early). */
   minutes_late: number | null;
+};
+
+export type TimeOffType = "vacation" | "sick";
+export type TimeOffStatus = "pending" | "approved" | "denied" | "cancelled";
+
+/**
+ * A member's request for paid time off. Dates are whole calendar days as
+ * `YYYY-MM-DD` strings (inclusive on both ends), so they mean the same day in
+ * every time zone.
+ */
+export type TimeOffRequest = {
+  id: number;
+  org_id: string;
+  user_id: string;
+  request_type: TimeOffType;
+  start_date: string;
+  end_date: string;
+  hours_per_day: number;
+  note: string | null;
+  status: TimeOffStatus;
+  reviewed_by: string | null;
+  reviewed_at: Date | null;
+  created_at?: Date;
+  updated_at?: Date;
 };

@@ -8,9 +8,10 @@ import { SettingsFallback } from "./fallbacks/settings-fallback";
 import { ViewHoursFallback } from "./fallbacks/view-hours-fallback";
 import NotificationSettings from "./NotificationSettings";
 import OrgSettings from "./OrgSettings";
-import TimezoneSync from "./TimezoneSync";
 import { useOrgSwitcher } from "./OrgSwitcher";
 import Schedule from "./Schedule";
+import TimeOff from "./TimeOff";
+import TimezoneSync from "./TimezoneSync";
 import { Card } from "./ui";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import ViewHours from "./ViewHours";
@@ -28,6 +29,7 @@ export default function DashboardTabs({
   orgTimeEntriesPromise,
   recentEntriesPromise,
   schedulePromise,
+  timeOffPromise,
   membersPromise,
   selectedUserIdPromise,
   selectedWeekPromise,
@@ -106,6 +108,7 @@ export default function DashboardTabs({
           <TabsTrigger value="notifications">Notifications</TabsTrigger>
         )}
         <TabsTrigger value="schedule">Schedule</TabsTrigger>
+        <TabsTrigger value="time-off">Time Off</TabsTrigger>
         {isAdmin && <TabsTrigger value="settings">Settings</TabsTrigger>}
       </TabsList>
 
@@ -136,6 +139,7 @@ export default function DashboardTabs({
             selectedYearPromise={selectedYearPromise}
             setOptimisticEntries={setOptimisticEntries}
             startDatePromise={startDatePromise}
+            timeOffPromise={timeOffPromise}
             timeframePromise={timeframePromise}
           />
         </Suspense>
@@ -157,6 +161,17 @@ export default function DashboardTabs({
             isAdmin={isAdmin}
             membersPromise={membersPromise}
             schedulePromise={schedulePromise}
+          />
+        </Suspense>
+      </TabsContent>
+
+      <TabsContent className="mt-0" value="time-off">
+        <Suspense fallback={<ViewHoursFallback />}>
+          <TimeOff
+            currentUserIdPromise={userIdPromise}
+            isAdmin={isAdmin}
+            membersPromise={membersPromise}
+            timeOffPromise={timeOffPromise}
           />
         </Suspense>
       </TabsContent>

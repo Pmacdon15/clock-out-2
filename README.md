@@ -167,9 +167,18 @@ Long-running entries used to inflate totals silently. Admins now set rules under
 
 Every person picks **email, push or both** — and which alerts they want — on the **Notifications** tab, where they can also turn push on/off per device and send themselves a test. Each alert is sent once (tracked in `sent_alerts`), however often the cron runs.
 
+### Schedule notifications
+
+Members also hear about their published schedule (admins can switch this off under **Settings → Shift Alerts → Schedule notifications**; members can opt out with the **My schedule** topic, using the same email/push choice):
+
+- **Weekly schedule:** on Sunday from 5 PM in the member's own time zone, they get the coming Monday–Sunday — one line per shift, plus the total hours. Sent once per week, and only if they have shifts.
+- **Changes:** when an admin adds or removes one of their upcoming shifts, the member is told straight away (sent with `after()` once the admin's save is answered — not on the cron). Shifts in the past, and admins scheduling themselves, don't notify.
+
+Times are written in each person's own time zone, which the app remembers from their browser when they open the dashboard. Until it knows, the admin's zone is used for change notices and UTC (labelled) for the weekly schedule.
+
 ### How it runs
 
-`GET /api/cron/shift-alerts` (bearer `CRON_SECRET`) checks every org with a rule on, closes over-limit shifts, and sends what's due. It needs to run every 5–15 minutes:
+`GET /api/cron/shift-alerts` (bearer `CRON_SECRET`) checks every org with a rule on, closes over-limit shifts, sends what's due, and sends any weekly schedules that are due (the two jobs run independently). It needs to run every 5–15 minutes:
 
 - **Vercel Hobby** only allows daily crons, so `.github/workflows/shift-alerts.yml` calls it every 10 minutes. Add repository secrets **`APP_URL`** (e.g. `https://clockout.patmac.ca`) and **`CRON_SECRET`** (same value as the app's). Run it once by hand from the Actions tab to check. GitHub may delay scheduled runs by a few minutes at busy times.
 - **Vercel Pro**: you can instead add `{ "path": "/api/cron/shift-alerts", "schedule": "*/10 * * * *" }` to `vercel.json` and delete the workflow.

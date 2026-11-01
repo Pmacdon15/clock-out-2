@@ -44,6 +44,7 @@ describe("AlertSettings", () => {
     toggle(/Forgot to end break/);
     setNumber(/Remind after \(minutes\)/, "40");
     toggle(/Notify admins too/);
+    toggle(/Schedule notifications/);
 
     expect(save()).toBeEnabled();
     fireEvent.click(save());
@@ -61,7 +62,7 @@ describe("AlertSettings", () => {
       break_reminder_enabled: true,
       break_reminder_minutes: 40,
       notify_admins: false,
-      schedule_notifications: true,
+      schedule_notifications: false,
     });
     // What was saved is now the baseline.
     await waitFor(() => expect(save()).toBeDisabled());

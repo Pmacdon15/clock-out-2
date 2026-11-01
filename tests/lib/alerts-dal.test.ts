@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   dbGetAlertSettings: vi.fn(),
   dbGetNotificationPreferences: vi.fn(),
   dbSavePushSubscription: vi.fn(),
+  dbSetUserTimezone: vi.fn(),
   dbUpdateAlertSettings: vi.fn(),
   dbUpdateNotificationPreferences: vi.fn(),
   deliver: vi.fn(),
@@ -24,6 +25,7 @@ vi.mock("@/lib/alerts-db", () => ({
   dbGetAlertSettings: mocks.dbGetAlertSettings,
   dbGetNotificationPreferences: mocks.dbGetNotificationPreferences,
   dbSavePushSubscription: mocks.dbSavePushSubscription,
+  dbSetUserTimezone: mocks.dbSetUserTimezone,
   dbUpdateAlertSettings: mocks.dbUpdateAlertSettings,
   dbUpdateNotificationPreferences: mocks.dbUpdateNotificationPreferences,
 }));
@@ -43,6 +45,7 @@ import {
   getOrgAlertSettings,
   savePushSubscriptionDal,
   sendTestNotificationDal,
+  setMyTimezoneDal,
   updateAlertSettingsDal,
   updateNotificationPreferencesDal,
 } from "@/lib/alerts-dal";
@@ -296,6 +299,34 @@ describe("sendTestNotificationDal", () => {
     mocks.deliver.mockRejectedValueOnce(new Error("boom"));
     expect((await sendTestNotificationDal())._unsafeUnwrapErr()).toEqual({
       reason: "Failed to send test notification",
+    });
+  });
+});
+
+describe("setMyTimezoneDal", () => {
+  it("requires a user and a real time zone", async () => {
+    mocks.protect.mockResolvedValueOnce({ userId: null });
+    expect((await setMyTimezoneDal("UTC"))._unsafeUnwrapErr()).toEqual({
+      reason: "Unauthorized",
+    });
+    expect((await setMyTimezoneDal("Mars/Olympus"))._unsafeUnwrapErr()).toEqual(
+      { reason: "Invalid time zone" },
+    );
+    expect(mocks.dbSetUserTimezone).not.toHaveBeenCalled();
+  });
+
+  it("saves the caller's zone and reports failures", async () => {
+    mocks.dbSetUserTimezone.mockResolvedValueOnce(undefined);
+    expect((await setMyTimezoneDal("America/Regina"))._unsafeUnwrap()).toEqual({
+      user_id: "u1",
+    });
+    expect(mocks.dbSetUserTimezone).toHaveBeenCalledWith(
+      "u1",
+      "America/Regina",
+    );
+    mocks.dbSetUserTimezone.mockRejectedValueOnce(new Error("db"));
+    expect((await setMyTimezoneDal("UTC"))._unsafeUnwrapErr()).toEqual({
+      reason: "Failed to save time zone",
     });
   });
 });

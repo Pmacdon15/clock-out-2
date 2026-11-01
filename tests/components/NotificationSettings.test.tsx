@@ -63,6 +63,9 @@ const fakeSub = (endpoint = "https://push.example/1") => ({
   unsubscribe: vi.fn().mockResolvedValue(true),
 });
 
+/** Headroom for multi-step flows when the whole suite runs under coverage. */
+const SLOW = { timeout: 5000 };
+
 const button = (name: RegExp | string) => screen.getByRole("button", { name });
 
 beforeEach(() => {
@@ -229,21 +232,29 @@ describe("NotificationSettings", () => {
     mocks.getCurrentSubscription.mockResolvedValue(sub);
     mocks.deletePushSubscriptionAction.mockResolvedValue({ success: true });
     renderSettings();
-    fireEvent.click(await screen.findByRole("button", { name: /Turn off/ }));
-    await waitFor(() =>
-      expect(mocks.deletePushSubscriptionAction).toHaveBeenCalledWith(
-        sub.endpoint,
-      ),
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Turn off/ }, SLOW),
     );
-    expect(await screen.findByText(/off for this device/)).toBeInTheDocument();
+    await waitFor(
+      () =>
+        expect(mocks.deletePushSubscriptionAction).toHaveBeenCalledWith(
+          sub.endpoint,
+        ),
+      SLOW,
+    );
+    expect(
+      await screen.findByText(/off for this device/, {}, SLOW),
+    ).toBeInTheDocument();
 
     // A clean unsubscribe works too.
     const second = fakeSub("https://push.example/2");
     mocks.subscribeThisDevice.mockResolvedValue(second);
     mocks.savePushSubscriptionAction.mockResolvedValue({ success: true });
     fireEvent.click(button(/Turn on/));
-    fireEvent.click(await screen.findByRole("button", { name: /Turn off/ }));
-    await waitFor(() => expect(second.unsubscribe).toHaveBeenCalled());
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Turn off/ }, SLOW),
+    );
+    await waitFor(() => expect(second.unsubscribe).toHaveBeenCalled(), SLOW);
   });
 
   it("sends a test notification and summarises what went out", async () => {

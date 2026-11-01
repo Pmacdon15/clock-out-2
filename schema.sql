@@ -171,3 +171,26 @@ CREATE TABLE IF NOT EXISTS scheduled_shifts (
 );
 CREATE INDEX IF NOT EXISTS idx_scheduled_shifts_org_start
     ON scheduled_shifts (org_id, shift_start);
+
+-- Paid time off requested by members and approved by admins. Dates are
+-- whole calendar days (inclusive). Approved time off is shown alongside
+-- worked hours; it never creates or changes time_entries.
+CREATE TABLE IF NOT EXISTS time_off_requests (
+    id SERIAL PRIMARY KEY,
+    org_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    request_type TEXT NOT NULL CHECK (request_type IN ('vacation', 'sick')),
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    hours_per_day DOUBLE PRECISION NOT NULL DEFAULT 8,
+    note TEXT,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'approved', 'denied', 'cancelled')),
+    reviewed_by TEXT,
+    reviewed_at TIMESTAMP WITH TIME ZONE,
+    CHECK (end_date >= start_date),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_time_off_requests_org_dates
+    ON time_off_requests (org_id, end_date);

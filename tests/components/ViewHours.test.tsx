@@ -39,6 +39,9 @@ vi.mock("@/components/ViewHours/EntryList", () => ({
 vi.mock("@/components/ViewHours/OvertimeSummary", () => ({
   OvertimeSummary: (p: Captured) => capture("OvertimeSummary")(p),
 }));
+vi.mock("@/components/ViewHours/TimeOffSummary", () => ({
+  TimeOffSummary: (p: Captured) => capture("TimeOffSummary")(p),
+}));
 vi.mock("@/components/ViewHours/TimesheetExport", () => ({
   TimesheetExport: (p: Captured) => capture("TimesheetExport")(p),
 }));
@@ -338,5 +341,58 @@ describe("ViewHours overtime", () => {
     const summary = latest("OvertimeSummary");
     expect(summary.entries).toBe(orgEntries);
     expect(summary.isViewingAll).toBe(true);
+  });
+});
+
+describe("ViewHours time off", () => {
+  const approved = {
+    id: 1,
+    org_id: "org_1",
+    user_id: "me",
+    request_type: "vacation" as const,
+    start_date: "2026-03-09",
+    end_date: "2026-03-10",
+    hours_per_day: 8,
+    note: null,
+    status: "approved" as const,
+    reviewed_by: "a",
+    reviewed_at: null,
+  };
+
+  it("shows the viewer's time off in the selected range", () => {
+    renderView({
+      timeOffPromise: resolved({ ok: true as const, value: [approved] }),
+    });
+    expect(latest("TimeOffSummary")).toEqual({
+      requests: [approved],
+      startDate: "2026-03-08",
+      endDate: "2026-03-14",
+      userId: "me",
+      members,
+    });
+  });
+
+  it("follows the selected member, or everyone in the org view", () => {
+    renderView({ selectedUserIdPromise: resolved("u2") });
+    expect(latest("TimeOffSummary")).toMatchObject({
+      userId: "u2",
+      requests: [],
+    });
+    renderView({ selectedUserIdPromise: resolved("all") });
+    expect(latest("TimeOffSummary")).toMatchObject({ userId: null });
+  });
+
+  it("falls back to an empty user id and no requests when loading fails", () => {
+    renderView({
+      currentUserIdPromise: resolved(null),
+      timeOffPromise: resolved({
+        ok: false as const,
+        error: { reason: "boom" },
+      }),
+    });
+    expect(latest("TimeOffSummary")).toMatchObject({
+      userId: "",
+      requests: [],
+    });
   });
 });

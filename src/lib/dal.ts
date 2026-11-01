@@ -1,5 +1,5 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
-import { addDays, startOfDay, subDays } from "date-fns";
+import { addDays, format, startOfDay, subDays } from "date-fns";
 import { fromZonedTime } from "date-fns-tz";
 import { errAsync, okAsync, type ResultAsync } from "neverthrow";
 import {
@@ -12,11 +12,13 @@ import {
 } from "./break-utils";
 import { fetchAllPages } from "./clerk-pagination";
 import {
+  dbCancelTimeOffRequest,
   dbCheckActiveEntry,
   dbClockIn,
   dbClockOut,
   dbCreateScheduledShift,
   dbCreateSite,
+  dbCreateTimeOffRequest,
   dbDeleteBreak,
   dbDeleteScheduledShift,
   dbDeleteSite,
@@ -35,6 +37,8 @@ import {
   dbGetSites,
   dbGetSitesForEnforcement,
   dbGetTimeEntries,
+  dbGetTimeOffRequests,
+  dbReviewTimeOffRequest,
   dbStartBreak,
   dbUpdateBreak,
   dbUpdateBreakSettings,
@@ -62,6 +66,10 @@ import {
   SCHEDULE_FUTURE_DAYS,
   SCHEDULE_PAST_DAYS,
 } from "./schedule-utils";
+import {
+  invalidTimeOffReason,
+  MAX_TIME_OFF_NOTE_LENGTH,
+} from "./time-off-utils";
 import type {
   BreakLimits,
   BreakSettingsData,
@@ -75,6 +83,8 @@ import type {
   SiteData,
   TimeEntry,
   TimeEntryBreak,
+  TimeOffRequest,
+  TimeOffType,
 } from "./types";
 import { getProcessedMembers, isOverMemberShipLimit } from "./utils-clerk";
 
@@ -1293,5 +1303,170 @@ export async function deleteScheduledShiftDal(id: number) {
     .catch((e) => {
       console.error("Error deleting shift: ", e);
       return errAsync({ reason: "Failed to delete shift" } as const);
+    });
+}
+
+/* ------------------------------------------------------------ time off -- */
+
+/** How far back the time off list (and the Hours view) can see. */
+const TIME_OFF_LOOKBACK_DAYS = 400;
+
+/**
+ * Time off requests ending in the last ~13 months or later. Admins see every
+ * member's; members see their own.
+ */
+export async function getTimeOffRequests(): Promise<
+  SerializableResult<TimeOffRequest[], { reason: string }>
+> {
+  const { userId, orgId, orgRole } = await auth.protect();
+  if (!userId || !orgId) {
+    return {
+      error: { reason: "Unauthorized or no organization selected" },
+      ok: false,
+    };
+  }
+
+  const since = format(
+    subDays(new Date(), TIME_OFF_LOOKBACK_DAYS),
+    "yyyy-MM-dd",
+  );
+  return await dbGetTimeOffRequests(
+    orgId,
+    orgRole === "org:admin" ? null : userId,
+    since,
+  )
+    .then((requests) => ({ value: requests, ok: true as const }))
+    .catch((e) => {
+      console.error("Error fetching time off: ", e);
+      return { error: { reason: "Error fetching time off" }, ok: false };
+    });
+}
+
+/** Any member can ask for time off for themselves. */
+export async function createTimeOffRequestDal(
+  type: TimeOffType,
+  startDate: string,
+  endDate: string,
+  hoursPerDay: number,
+  note?: string | null,
+) {
+  const { userId, orgId } = await auth.protect();
+  if (!userId || !orgId) {
+    return errAsync({ reason: "Unauthorized" } as const);
+  }
+
+  const invalid = invalidTimeOffReason({
+    type,
+    startDate,
+    endDate,
+    hoursPerDay,
+  });
+  if (invalid) {
+    return errAsync({ reason: invalid } as const);
+  }
+  const trimmedNote = note?.trim() || null;
+  if (trimmedNote && trimmedNote.length > MAX_TIME_OFF_NOTE_LENGTH) {
+    return errAsync({ reason: "Note is too long" } as const);
+  }
+
+  return await dbCreateTimeOffRequest(
+    orgId,
+    userId,
+    type,
+    startDate,
+    endDate,
+    hoursPerDay,
+    trimmedNote,
+  )
+    .then(
+      (
+        created,
+      ): ResultAsync<
+        TimeOffRequest,
+        { readonly reason: "You already have time off on those dates" }
+      > => {
+        if (!created) {
+          return errAsync({
+            reason: "You already have time off on those dates",
+          } as const);
+        }
+        return okAsync(created);
+      },
+    )
+    .catch((e) => {
+      console.error("Error requesting time off: ", e);
+      return errAsync({ reason: "Failed to request time off" } as const);
+    });
+}
+
+/** Admins approve or deny pending requests. */
+export async function reviewTimeOffRequestDal(
+  id: number,
+  decision: "approved" | "denied",
+) {
+  const { userId, orgId, orgRole } = await auth.protect();
+  if (!userId || !orgId || orgRole !== "org:admin") {
+    return errAsync({ reason: "Unauthorized" } as const);
+  }
+  if (decision !== "approved" && decision !== "denied") {
+    return errAsync({ reason: "Invalid decision" } as const);
+  }
+
+  return await dbReviewTimeOffRequest(id, orgId, decision, userId)
+    .then(
+      (
+        updated,
+      ): ResultAsync<
+        TimeOffRequest,
+        { readonly reason: "Request not found or already reviewed" }
+      > => {
+        if (!updated) {
+          return errAsync({
+            reason: "Request not found or already reviewed",
+          } as const);
+        }
+        return okAsync(updated);
+      },
+    )
+    .catch((e) => {
+      console.error("Error reviewing time off: ", e);
+      return errAsync({ reason: "Failed to review request" } as const);
+    });
+}
+
+/**
+ * Members withdraw their own pending requests; admins can also cancel
+ * approved time off.
+ */
+export async function cancelTimeOffRequestDal(id: number) {
+  const { userId, orgId, orgRole } = await auth.protect();
+  if (!userId || !orgId) {
+    return errAsync({ reason: "Unauthorized" } as const);
+  }
+
+  return await dbCancelTimeOffRequest(
+    id,
+    orgId,
+    userId,
+    orgRole === "org:admin",
+  )
+    .then(
+      (
+        updated,
+      ): ResultAsync<
+        TimeOffRequest,
+        { readonly reason: "Request not found or can't be cancelled" }
+      > => {
+        if (!updated) {
+          return errAsync({
+            reason: "Request not found or can't be cancelled",
+          } as const);
+        }
+        return okAsync(updated);
+      },
+    )
+    .catch((e) => {
+      console.error("Error cancelling time off: ", e);
+      return errAsync({ reason: "Failed to cancel request" } as const);
     });
 }

@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => {
     dbGetBreakSettings: vi.fn(),
     dbGetOvertimeSettings: vi.fn(),
     dbGetTimeEntriesForPeriod: vi.fn(),
+    dbGetApprovedTimeOffForPeriod: vi.fn(),
   };
 });
 
@@ -52,6 +53,7 @@ vi.mock("@/lib/db", () => ({
   dbGetBreakSettings: mocks.dbGetBreakSettings,
   dbGetOvertimeSettings: mocks.dbGetOvertimeSettings,
   dbGetTimeEntriesForPeriod: mocks.dbGetTimeEntriesForPeriod,
+  dbGetApprovedTimeOffForPeriod: mocks.dbGetApprovedTimeOffForPeriod,
 }));
 
 import { orgHasReportingFeature, sendWeeklyReports } from "@/lib/reports";
@@ -118,6 +120,7 @@ beforeEach(() => {
   mocks.dbGetBreakSettings.mockResolvedValue(undefined);
   mocks.dbGetOvertimeSettings.mockResolvedValue(undefined);
   mocks.dbGetTimeEntriesForPeriod.mockResolvedValue([]);
+  mocks.dbGetApprovedTimeOffForPeriod.mockResolvedValue([]);
   mocks.send.mockResolvedValue({ MessageId: "m1" });
 });
 
@@ -628,6 +631,68 @@ describe("sendWeeklyReports overtime", () => {
     expect(emailProps().overtimeHours).toBeUndefined();
     expect(console.error).toHaveBeenCalledWith(
       "[Reports] Error fetching overtime settings for org_1:",
+      expect.any(Error),
+    );
+  });
+});
+
+describe("time off in reports", () => {
+  const vacation = {
+    id: 1,
+    request_type: "vacation",
+    // Starts before the period: only Jan 1–2 count.
+    start_date: "2025-12-30",
+    end_date: "2026-01-02",
+    hours_per_day: 8,
+  };
+  const sick = {
+    id: 2,
+    request_type: "sick",
+    start_date: "2026-01-05",
+    end_date: "2026-01-05",
+    hours_per_day: 7.5,
+  };
+
+  it("lists approved time off in the period and its hours", async () => {
+    mocks.dbGetTimeEntriesForPeriod.mockResolvedValue([
+      shift("2026-01-06T09:00:00Z", "2026-01-06T10:00:00Z"),
+    ]);
+    mocks.dbGetApprovedTimeOffForPeriod.mockResolvedValue([vacation, sick]);
+    await sendWeeklyReports(start, end, "org_1");
+
+    expect(mocks.dbGetApprovedTimeOffForPeriod).toHaveBeenCalledWith(
+      "admin_1",
+      "org_1",
+      "2026-01-01",
+      "2026-01-07",
+    );
+    expect(emailProps()).toMatchObject({
+      totalHours: "1h 0m",
+      totalTimeOff: "23.5h",
+      timeOff: [
+        { type: "Vacation", dates: "Dec 30, 2025 – Jan 2, 2026", hours: "16h" },
+        { type: "Sick day", dates: "Jan 5, 2026", hours: "7.5h" },
+      ],
+    });
+  });
+
+  it("still sends a report for a member who only had time off", async () => {
+    mocks.dbGetApprovedTimeOffForPeriod.mockResolvedValue([sick]);
+    await sendWeeklyReports(start, end, "org_1");
+    expect(mocks.send).toHaveBeenCalledTimes(1);
+    expect(emailProps()).toMatchObject({ totalHours: "0m", breakdown: [] });
+  });
+
+  it("sends the hours without time off when the lookup fails", async () => {
+    mocks.dbGetTimeEntriesForPeriod.mockResolvedValue([
+      shift("2026-01-06T09:00:00Z", "2026-01-06T10:00:00Z"),
+    ]);
+    mocks.dbGetApprovedTimeOffForPeriod.mockRejectedValue(new Error("db"));
+    await sendWeeklyReports(start, end, "org_1");
+    expect(mocks.send).toHaveBeenCalledTimes(1);
+    expect(emailProps()).toMatchObject({ timeOff: [], totalTimeOff: "0h" });
+    expect(console.error).toHaveBeenCalledWith(
+      "[Reports] Error fetching time off for Ada Lovelace:",
       expect.any(Error),
     );
   });

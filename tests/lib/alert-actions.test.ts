@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   deletePushSubscriptionDal: vi.fn(),
   savePushSubscriptionDal: vi.fn(),
   sendTestNotificationDal: vi.fn(),
+  setMyTimezoneDal: vi.fn(),
   updateAlertSettingsDal: vi.fn(),
   updateNotificationPreferencesDal: vi.fn(),
 }));
@@ -16,6 +17,7 @@ vi.mock("@/lib/alerts-dal", () => ({
   deletePushSubscriptionDal: mocks.deletePushSubscriptionDal,
   savePushSubscriptionDal: mocks.savePushSubscriptionDal,
   sendTestNotificationDal: mocks.sendTestNotificationDal,
+  setMyTimezoneDal: mocks.setMyTimezoneDal,
   updateAlertSettingsDal: mocks.updateAlertSettingsDal,
   updateNotificationPreferencesDal: mocks.updateNotificationPreferencesDal,
 }));
@@ -24,6 +26,7 @@ import {
   deletePushSubscriptionAction,
   savePushSubscriptionAction,
   sendTestNotificationAction,
+  setMyTimezoneAction,
   updateAlertSettingsAction,
   updateNotificationPreferencesAction,
 } from "@/lib/alert-actions";
@@ -97,6 +100,19 @@ describe("alert actions", () => {
     });
     mocks.sendTestNotificationDal.mockResolvedValueOnce(failure);
     await expect(sendTestNotificationAction()).resolves.toEqual({
+      success: false,
+      error: "nope",
+    });
+  });
+
+  it("remembers my time zone and refreshes my preferences", async () => {
+    mocks.setMyTimezoneDal.mockResolvedValueOnce(ok({ user_id: "u1" }));
+    await expect(setMyTimezoneAction("UTC")).resolves.toEqual({
+      success: true,
+    });
+    expect(mocks.updateTag).toHaveBeenCalledWith("notification-prefs-u1");
+    mocks.setMyTimezoneDal.mockResolvedValueOnce(failure);
+    await expect(setMyTimezoneAction("x")).resolves.toEqual({
       success: false,
       error: "nope",
     });

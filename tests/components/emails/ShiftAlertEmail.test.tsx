@@ -32,4 +32,21 @@ describe("ShiftAlertEmail", () => {
     expect(links).toContain("https://clock.test/?defaultTab=time-clock");
     expect(links).toContain("https://clock.test/?defaultTab=notifications");
   });
+
+  it("lists detail lines when given", async () => {
+    const html = await render(
+      ShiftAlertEmail({
+        title: "Your schedule for Nov 2 – Nov 8",
+        body: "2 shifts",
+        actionUrl: "https://clock.test/?defaultTab=schedule",
+        appUrl: "https://clock.test",
+        lines: [
+          "Mon, Nov 2, 9:00 AM – 5:00 PM",
+          "Tue, Nov 3, 9:00 AM – 4:30 PM",
+        ],
+      }),
+    );
+    expect(html).toContain("Mon, Nov 2, 9:00 AM – 5:00 PM");
+    expect(html).toContain("Tue, Nov 3, 9:00 AM – 4:30 PM");
+  });
 });
