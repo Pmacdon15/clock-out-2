@@ -394,12 +394,15 @@ export async function createScheduledShiftAction(
   note?: string | null,
   /** The admin's browser zone: wording fallback for the member's notice. */
   timezone?: string | null,
+  /** The shift's days on the admin's calendar, for the time off check. */
+  localDays?: { start: string; end: string } | null,
 ) {
   const result = await dalCreateScheduledShift(
     memberId,
     new Date(shiftStart),
     new Date(shiftEnd),
     note,
+    localDays,
   );
 
   return result.match(

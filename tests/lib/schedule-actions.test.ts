@@ -40,6 +40,7 @@ describe("createScheduledShiftAction", () => {
         "2026-01-05T17:00:00.000Z",
         "Desk",
         "America/Regina",
+        { start: "2026-01-05", end: "2026-01-05" },
       ),
     ).resolves.toEqual({ success: true, data: shift });
     // The member is told after the response, in the admin's zone as a fallback.
@@ -54,6 +55,7 @@ describe("createScheduledShiftAction", () => {
       new Date("2026-01-05T09:00:00.000Z"),
       new Date("2026-01-05T17:00:00.000Z"),
       "Desk",
+      { start: "2026-01-05", end: "2026-01-05" },
     );
     expect(mocks.updateTag).toHaveBeenCalledWith("scheduled-shifts-org_1");
   });

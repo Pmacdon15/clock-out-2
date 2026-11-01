@@ -15,10 +15,16 @@ import {
   LATE_GRACE_MINUTES,
   SHIFT_STATUS_LABELS,
 } from "@/lib/schedule-utils";
+import {
+  approvedTimeOffOverlapping,
+  formatTimeOffDates,
+  TIME_OFF_TYPE_LABELS,
+} from "@/lib/time-off-utils";
 import type {
   ScheduledShiftWithStatus,
   SerializableResult,
   ShiftStatus,
+  TimeOffRequest,
 } from "@/lib/types";
 import { Button, Card } from "./ui";
 
@@ -29,6 +35,9 @@ interface ScheduleProps {
     SerializableResult<ScheduledShiftWithStatus[], { reason: string }>
   >;
   membersPromise?: Promise<Member[]>;
+  timeOffPromise?: Promise<
+    SerializableResult<TimeOffRequest[], { reason: string }>
+  >;
   isAdmin: boolean;
 }
 
@@ -70,6 +79,38 @@ export function buildShiftTimes(date: string, start: string, end: string) {
     shiftEnd.setDate(shiftEnd.getDate() + 1);
   }
   return { shiftStart, shiftEnd };
+}
+
+/**
+ * The local calendar days a shift covers, for checking it against time off.
+ * A shift ending exactly at midnight doesn't touch the next day.
+ */
+export function shiftLocalDays(shiftStart: Date, shiftEnd: Date) {
+  return {
+    start: format(shiftStart, "yyyy-MM-dd"),
+    end: format(new Date(shiftEnd.getTime() - 1), "yyyy-MM-dd"),
+  };
+}
+
+/**
+ * The member's approved time off that a shift on the form's local date and
+ * times would land on, if any.
+ */
+export function findTimeOffConflict(
+  timeOff: TimeOffRequest[],
+  memberId: string,
+  date: string,
+  start: string,
+  end: string,
+): TimeOffRequest | undefined {
+  const { shiftStart, shiftEnd } = buildShiftTimes(date, start, end);
+  if (Number.isNaN(shiftStart.getTime())) return undefined;
+  const days = shiftLocalDays(shiftStart, shiftEnd);
+  return approvedTimeOffOverlapping(
+    timeOff.filter((request) => request.user_id === memberId),
+    days.start,
+    days.end,
+  )[0];
 }
 
 function ShiftRow({
@@ -162,7 +203,13 @@ function ShiftRow({
   );
 }
 
-function ShiftForm({ members }: { members: Member[] }) {
+function ShiftForm({
+  members,
+  timeOff,
+}: {
+  members: Member[];
+  timeOff: TimeOffRequest[];
+}) {
   const [memberId, setMemberId] = useState("");
   const [date, setDate] = useState("");
   const [start, setStart] = useState("09:00");
@@ -178,6 +225,7 @@ function ShiftForm({ members }: { members: Member[] }) {
         shiftEnd.toISOString(),
         note,
         browserTimezone(),
+        shiftLocalDays(shiftStart, shiftEnd),
       );
     },
     onSuccess: (res) => {
@@ -190,7 +238,11 @@ function ShiftForm({ members }: { members: Member[] }) {
     },
   });
 
-  const canSubmit = Boolean(memberId && date && start && end) && !isPending;
+  const filled = Boolean(memberId && date && start && end);
+  const conflict = filled
+    ? findTimeOffConflict(timeOff, memberId, date, start, end)
+    : undefined;
+  const canSubmit = filled && !conflict && !isPending;
 
   return (
     <form
@@ -268,6 +320,17 @@ function ShiftForm({ members }: { members: Member[] }) {
         />
       </div>
       <div className="sm:col-span-2 lg:col-span-4">
+        {conflict && (
+          <p
+            className="mb-3 rounded-xl bg-amber-100 p-3 font-medium text-amber-800 text-sm dark:bg-amber-950 dark:text-amber-200"
+            role="alert"
+          >
+            {new Map(members.map((m) => [m.id, m.name])).get(memberId)} has
+            approved {TIME_OFF_TYPE_LABELS[conflict.request_type].toLowerCase()}{" "}
+            on {formatTimeOffDates(conflict)}. Pick another day — they can still
+            clock in if they choose to work.
+          </p>
+        )}
         <Button
           className="w-full sm:w-auto"
           disabled={!canSubmit}
@@ -289,10 +352,13 @@ function ShiftForm({ members }: { members: Member[] }) {
 export default function Schedule({
   schedulePromise,
   membersPromise,
+  timeOffPromise,
   isAdmin,
 }: ScheduleProps) {
   const result = use(schedulePromise);
   const members = membersPromise ? use(membersPromise) : [];
+  const timeOffResult = timeOffPromise ? use(timeOffPromise) : null;
+  const timeOff = timeOffResult?.ok ? timeOffResult.value : [];
   const [flaggedOnly, setFlaggedOnly] = useState(false);
 
   if (!result.ok) {
@@ -369,7 +435,7 @@ export default function Schedule({
           </div>
         )}
 
-        {isAdmin && <ShiftForm members={members} />}
+        {isAdmin && <ShiftForm members={members} timeOff={timeOff} />}
       </Card>
 
       <Card className="p-6 sm:p-8">
