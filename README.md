@@ -177,6 +177,7 @@ Every person picks **email, push or both** — and which alerts they want — on
 Members also hear about their published schedule (admins can switch this off under **Settings → Shift Alerts → Schedule notifications**; members can opt out with the **My schedule** topic, using the same email/push choice):
 
 - **Weekly schedule:** on Sunday from 5 PM in the member's own time zone, they get the coming Monday–Sunday — one line per shift, plus the total hours. Sent once per week, and only if they have shifts.
+- **Upcoming shift:** an hour before each scheduled shift, the member gets a reminder with its start time (sent by the cron, so it lands 45–60 minutes ahead with a 10-minute schedule). Sent once per shift, and skipped if they've already clocked in.
 - **Changes:** when an admin adds or removes one of their upcoming shifts, the member is told straight away (sent with `after()` once the admin's save is answered — not on the cron). Shifts in the past, and admins scheduling themselves, don't notify.
 
 Times are written in each person's own time zone, which the app remembers from their browser when they open the dashboard. Until it knows, the admin's zone is used for change notices and UTC (labelled) for the weekly schedule.

@@ -8,6 +8,7 @@ import {
   dbClaimAlert,
   dbGetAlertSettingsFor,
   dbGetNotificationPreferencesFor,
+  dbGetOpenShifts,
   dbGetScheduledShiftsBetween,
 } from "./alerts-db";
 import { loadOrgMembers, type OrgMember } from "./alerts-runner";
@@ -16,6 +17,10 @@ import type { ScheduledShift } from "./types";
 
 const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
+const MINUTE_MS = 60_000;
+
+/** How long before a scheduled shift its member is reminded. */
+export const SHIFT_REMINDER_MINUTES = 60;
 
 /** The weekly schedule goes out on Sunday from this local hour (5 PM). */
 export const DIGEST_HOUR = 17;
@@ -280,6 +285,123 @@ export async function runWeeklyScheduleDigests(
       }
     } catch (error) {
       console.error(`[Schedule] Weekly digests failed for ${orgId}:`, error);
+    }
+  }
+  return result;
+}
+
+/* -------------------------------------------- upcoming shift reminder -- */
+
+/** The key that makes each reminder go out once (per start time). */
+export const upcomingShiftKey = (
+  shift: Pick<ScheduledShift, "id" | "shift_start">,
+) => `upcoming:${shift.id}:${new Date(shift.shift_start).getTime()}`;
+
+/**
+ * Which shifts are due their reminder: they start within the next
+ * {@link SHIFT_REMINDER_MINUTES} and haven't started yet. Pure.
+ */
+export function planUpcomingShiftReminders(
+  shifts: ScheduledShift[],
+  now: Date,
+): ScheduledShift[] {
+  const nowMs = now.getTime();
+  const horizon = nowMs + SHIFT_REMINDER_MINUTES * MINUTE_MS;
+  return shifts.filter((s) => {
+    const t = new Date(s.shift_start).getTime();
+    return t > nowMs && t <= horizon;
+  });
+}
+
+export function describeUpcomingShift(
+  shift: Pick<ScheduledShift, "id" | "shift_start" | "shift_end" | "note">,
+  zone: { tz: string; known: boolean },
+  now: Date,
+): NotificationMessage {
+  const start = new Date(shift.shift_start);
+  const end = new Date(shift.shift_end);
+  const minutes = Math.max(
+    1,
+    Math.round((start.getTime() - now.getTime()) / MINUTE_MS),
+  );
+  const startsIn =
+    minutes >= 60 && minutes % 60 === 0
+      ? `${minutes / 60} hour${minutes === 60 ? "" : "s"}`
+      : `${minutes} minute${minutes === 1 ? "" : "s"}`;
+  const time = `${formatInTimeZone(start, zone.tz, "h:mm a")}${zone.known ? "" : ` ${zone.tz}`}`;
+  const range = formatShiftRange(start, end, zone);
+  const note = shift.note ? ` Note: ${shift.note}` : "";
+  return {
+    title: `Your shift starts at ${time}`,
+    body: `Heads up: you're scheduled ${range}, starting in ${startsIn}.${note}`,
+    url: "/?defaultTab=time-clock",
+    tag: `upcoming:${shift.id}`,
+  };
+}
+
+export type ReminderRunResult = {
+  reminders: number;
+  emails: number;
+  pushes: number;
+};
+
+/**
+ * Reminds members an hour before each scheduled shift. Safe to run every few
+ * minutes: each shift is reminded once (`sent_alerts`). Skipped for orgs
+ * that switched schedule notices off and for members already clocked in; a
+ * failing org never stops the others.
+ */
+export async function runUpcomingShiftReminders(
+  now: Date = new Date(),
+): Promise<ReminderRunResult> {
+  const result: ReminderRunResult = { reminders: 0, emails: 0, pushes: 0 };
+  const shifts = await dbGetScheduledShiftsBetween(
+    now,
+    new Date(now.getTime() + SHIFT_REMINDER_MINUTES * MINUTE_MS + 1),
+  );
+  const due = planUpcomingShiftReminders(shifts, now);
+  if (due.length === 0) return result;
+
+  const orgIds = [...new Set(due.map((s) => s.org_id))];
+  const userIds = [...new Set(due.map((s) => s.user_id))];
+  const [settingsRows, prefs] = await Promise.all([
+    dbGetAlertSettingsFor(orgIds),
+    dbGetNotificationPreferencesFor(userIds),
+  ]);
+  const settingsByOrg = new Map(settingsRows.map((r) => [r.org_id, r]));
+  const timezones = new Map(prefs.map((p) => [p.user_id, p.timezone]));
+
+  for (const orgId of orgIds) {
+    if (
+      !normalizeAlertSettings(settingsByOrg.get(orgId)).schedule_notifications
+    ) {
+      continue;
+    }
+    try {
+      const [members, open] = await Promise.all([
+        loadOrgMembers(orgId),
+        dbGetOpenShifts(orgId),
+      ]);
+      const clockedIn = new Set(open.map((o) => o.user_id));
+      for (const shift of due.filter((s) => s.org_id === orgId)) {
+        if (clockedIn.has(shift.user_id)) continue;
+        const member = members.find((m) => m.userId === shift.user_id);
+        if (!member) continue;
+        if (!(await dbClaimAlert(upcomingShiftKey(shift), orgId))) continue;
+        const zone = resolveTimezone(timezones.get(shift.user_id));
+        const counts = await deliver([
+          {
+            recipient: { userId: member.userId, email: member.email },
+            category: "schedule_alerts",
+            message: describeUpcomingShift(shift, zone, now),
+          },
+        ]);
+        result.reminders += 1;
+        result.emails += counts.email;
+        result.pushes += counts.push;
+      }
+    } catch (error) {
+      console.error(`[Schedule] Shift reminders failed for ${orgId}:`, error);
     }
   }
   return result;

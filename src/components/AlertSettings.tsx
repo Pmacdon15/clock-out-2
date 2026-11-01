@@ -198,7 +198,7 @@ export default function AlertSettings({ initialData }: AlertSettingsProps) {
 
         <Rule
           checked={form.schedule_notifications}
-          description="Send members their schedule for the coming week on Sunday evening, and tell them when a shift is added or removed."
+          description="Send members their schedule for the coming week on Sunday evening, remind them an hour before each shift, and tell them when a shift is added or removed."
           icon={CalendarDays}
           id="alert-schedule"
           onToggle={(v) => set("schedule_notifications", v)}

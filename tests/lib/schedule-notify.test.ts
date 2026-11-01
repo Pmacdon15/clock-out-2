@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   dbGetAlertSettingsFor: vi.fn(),
   dbGetNotificationPreferencesFor: vi.fn(),
   dbGetScheduledShiftsBetween: vi.fn(),
+  dbGetOpenShifts: vi.fn(),
   loadOrgMembers: vi.fn(),
   deliver: vi.fn(),
 }));
@@ -15,6 +16,7 @@ vi.mock("@/lib/alerts-db", () => ({
   dbGetAlertSettingsFor: mocks.dbGetAlertSettingsFor,
   dbGetNotificationPreferencesFor: mocks.dbGetNotificationPreferencesFor,
   dbGetScheduledShiftsBetween: mocks.dbGetScheduledShiftsBetween,
+  dbGetOpenShifts: mocks.dbGetOpenShifts,
 }));
 vi.mock("@/lib/alerts-runner", () => ({
   loadOrgMembers: mocks.loadOrgMembers,
@@ -24,14 +26,19 @@ vi.mock("@/lib/notify", () => ({ deliver: mocks.deliver }));
 import {
   DIGEST_HOUR,
   describeShiftChange,
+  describeUpcomingShift,
   describeWeeklyDigest,
   FALLBACK_TIMEZONE,
   formatHours,
   formatShiftRange,
   notifyScheduleChange,
+  planUpcomingShiftReminders,
   planWeeklyDigests,
   resolveTimezone,
+  runUpcomingShiftReminders,
   runWeeklyScheduleDigests,
+  SHIFT_REMINDER_MINUTES,
+  upcomingShiftKey,
 } from "@/lib/schedule-notify";
 import type { ScheduledShift } from "@/lib/types";
 
@@ -69,6 +76,7 @@ beforeEach(() => {
   mocks.dbGetAlertSettingsFor.mockResolvedValue([]);
   mocks.dbGetNotificationPreferencesFor.mockResolvedValue([]);
   mocks.loadOrgMembers.mockResolvedValue([member]);
+  mocks.dbGetOpenShifts.mockResolvedValue([]);
   mocks.dbClaimAlert.mockResolvedValue(true);
   mocks.deliver.mockResolvedValue({ email: 1, push: 1 });
 });
@@ -368,6 +376,115 @@ describe("runWeeklyScheduleDigests", () => {
   it("defaults to the current time", async () => {
     mocks.dbGetScheduledShiftsBetween.mockResolvedValue([]);
     await runWeeklyScheduleDigests();
+    expect(mocks.dbGetScheduledShiftsBetween).toHaveBeenCalled();
+  });
+});
+
+describe("upcoming shift reminders", () => {
+  // Mon Nov 2 2026, 8:00 AM in Regina.
+  const now = new Date("2026-11-02T14:00:00Z");
+  const soon = shift("2026-11-02T15:00:00Z", "2026-11-02T23:00:00Z");
+
+  it("reminds an hour ahead", () => {
+    expect(SHIFT_REMINDER_MINUTES).toBe(60);
+  });
+
+  it("plans shifts starting within the next hour that haven't started", () => {
+    const started = shift("2026-11-02T14:00:00Z", "2026-11-02T20:00:00Z");
+    const in30 = shift("2026-11-02T14:30:00Z", "2026-11-02T20:00:00Z");
+    const later = shift("2026-11-02T15:01:00Z", "2026-11-02T20:00:00Z");
+    expect(
+      planUpcomingShiftReminders([started, in30, soon, later], now),
+    ).toEqual([in30, soon]);
+  });
+
+  it("keys each reminder by shift and start time", () => {
+    expect(upcomingShiftKey(soon)).toBe(
+      `upcoming:${soon.id}:${Date.parse("2026-11-02T15:00:00Z")}`,
+    );
+  });
+
+  it("words the reminder in the member's zone", () => {
+    expect(describeUpcomingShift(soon, REGINA, now)).toEqual({
+      title: "Your shift starts at 9:00 AM",
+      body: "Heads up: you're scheduled Mon, Nov 2, 9:00 AM – 5:00 PM, starting in 1 hour.",
+      url: "/?defaultTab=time-clock",
+      tag: `upcoming:${soon.id}`,
+    });
+    const msg = describeUpcomingShift(
+      { ...soon, note: "Front desk" },
+      UTC_GUESS,
+      new Date("2026-11-02T14:15:00Z"),
+    );
+    expect(msg.title).toBe("Your shift starts at 3:00 PM UTC");
+    expect(msg.body).toContain("starting in 45 minutes. Note: Front desk");
+  });
+
+  it("does nothing without shifts due", async () => {
+    mocks.dbGetScheduledShiftsBetween.mockResolvedValue([]);
+    await expect(runUpcomingShiftReminders(now)).resolves.toEqual({
+      reminders: 0,
+      emails: 0,
+      pushes: 0,
+    });
+    expect(mocks.dbGetAlertSettingsFor).not.toHaveBeenCalled();
+  });
+
+  it("reminds each member once, skipping clocked-in members, leavers, opted-out and failing orgs", async () => {
+    mocks.dbGetScheduledShiftsBetween.mockResolvedValue([
+      soon,
+      // Already reminded.
+      { ...soon, id: 201, user_id: "u3" },
+      // Already clocked in.
+      { ...soon, id: 202, user_id: "u4" },
+      // No longer a member.
+      { ...soon, id: 203, user_id: "gone" },
+      // Org turned schedule notices off.
+      { ...soon, id: 204, org_id: "org_off" },
+      // Org whose member lookup fails.
+      { ...soon, id: 205, org_id: "org_err" },
+    ]);
+    mocks.dbGetNotificationPreferencesFor.mockResolvedValue([
+      { user_id: "u1", timezone: "America/Regina" },
+    ]);
+    mocks.dbGetAlertSettingsFor.mockResolvedValue([
+      { org_id: "org_off", schedule_notifications: false },
+    ]);
+    mocks.loadOrgMembers.mockImplementation(async (orgId: string) => {
+      if (orgId === "org_err") throw new Error("clerk");
+      return [member, { ...member, userId: "u3" }, { ...member, userId: "u4" }];
+    });
+    mocks.dbGetOpenShifts.mockResolvedValue([{ user_id: "u4" }]);
+    mocks.dbClaimAlert.mockImplementation(
+      async (key: string) => !key.startsWith("upcoming:201:"),
+    );
+
+    await expect(runUpcomingShiftReminders(now)).resolves.toEqual({
+      reminders: 1,
+      emails: 1,
+      pushes: 1,
+    });
+    expect(mocks.dbGetScheduledShiftsBetween).toHaveBeenCalledWith(
+      now,
+      new Date(now.getTime() + 60 * 60_000 + 1),
+    );
+    expect(mocks.dbClaimAlert).toHaveBeenCalledWith(
+      upcomingShiftKey(soon),
+      "org_1",
+    );
+    expect(mocks.deliver).toHaveBeenCalledTimes(1);
+    const [delivery] = mocks.deliver.mock.calls[0][0];
+    expect(delivery).toMatchObject({
+      recipient: { userId: "u1", email: "ada@x.test" },
+      category: "schedule_alerts",
+      message: { title: "Your shift starts at 9:00 AM" },
+    });
+    expect(mocks.loadOrgMembers).not.toHaveBeenCalledWith("org_off");
+  });
+
+  it("defaults to the current time", async () => {
+    mocks.dbGetScheduledShiftsBetween.mockResolvedValue([]);
+    await runUpcomingShiftReminders();
     expect(mocks.dbGetScheduledShiftsBetween).toHaveBeenCalled();
   });
 });

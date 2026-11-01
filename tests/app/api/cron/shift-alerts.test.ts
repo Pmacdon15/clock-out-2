@@ -4,12 +4,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   runShiftAlerts: vi.fn(),
   runWeeklyScheduleDigests: vi.fn(),
+  runUpcomingShiftReminders: vi.fn(),
 }));
 vi.mock("@/lib/alerts-runner", () => ({
   runShiftAlerts: mocks.runShiftAlerts,
 }));
 vi.mock("@/lib/schedule-notify", () => ({
   runWeeklyScheduleDigests: mocks.runWeeklyScheduleDigests,
+  runUpcomingShiftReminders: mocks.runUpcomingShiftReminders,
 }));
 
 import { GET, POST } from "@/app/api/cron/shift-alerts/route";
@@ -20,12 +22,14 @@ const request = (auth?: string) =>
   });
 
 const digests = { digests: 1, emails: 1, pushes: 0 };
+const reminders = { reminders: 2, emails: 2, pushes: 1 };
 
 beforeEach(() => {
   vi.stubEnv("CRON_SECRET", "cron-secret");
   vi.spyOn(console, "error").mockImplementation(() => {});
   mocks.runShiftAlerts.mockResolvedValue([{ orgId: "org_1", status: "ok" }]);
   mocks.runWeeklyScheduleDigests.mockResolvedValue(digests);
+  mocks.runUpcomingShiftReminders.mockResolvedValue(reminders);
 });
 
 describe("/api/cron/shift-alerts", () => {
@@ -44,10 +48,14 @@ describe("/api/cron/shift-alerts", () => {
         success: true,
         orgs: [{ orgId: "org_1", status: "ok" }],
         schedules: digests,
+        reminders,
       });
     }
     expect(mocks.runShiftAlerts.mock.calls[0][0]).toBe(
       mocks.runWeeklyScheduleDigests.mock.calls[0][0],
+    );
+    expect(mocks.runUpcomingShiftReminders.mock.calls[0][0]).toBe(
+      mocks.runShiftAlerts.mock.calls[0][0],
     );
   });
 
@@ -72,6 +80,17 @@ describe("/api/cron/shift-alerts", () => {
     await expect(res.json()).resolves.toMatchObject({
       orgs: [{ orgId: "org_1", status: "ok" }],
       schedules: null,
+    });
+  });
+
+  it("still runs the other jobs when reminders fail", async () => {
+    mocks.runUpcomingShiftReminders.mockRejectedValue(new Error("db"));
+    const res = await GET(request("Bearer cron-secret"));
+    expect(res.status).toBe(500);
+    await expect(res.json()).resolves.toMatchObject({
+      orgs: [{ orgId: "org_1", status: "ok" }],
+      schedules: digests,
+      reminders: null,
     });
   });
 });
