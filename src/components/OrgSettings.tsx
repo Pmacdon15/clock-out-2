@@ -2,6 +2,7 @@
 
 import { use, useOptimistic } from "react";
 import type {
+  AlertSettingsData,
   BreakSettingsData,
   LocationSettingsData,
   OrgSettingsData,
@@ -10,6 +11,7 @@ import type {
   SerializableResult,
   SiteData,
 } from "@/lib/types";
+import AlertSettings from "./AlertSettings";
 import BreakSettings from "./BreakSettings";
 import LocationSettings from "./LocationSettings";
 import OvertimeSettings from "./OvertimeSettings";
@@ -44,6 +46,9 @@ interface OrgSettingsProps {
     SerializableResult<OvertimeSettingsData | null, { reason: string }>
   >;
   sitesPromise?: Promise<SerializableResult<SiteData[], { reason: string }>>;
+  alertSettingsPromise?: Promise<
+    SerializableResult<AlertSettingsData, { reason: string }>
+  >;
   hasReporting: boolean;
   hasGeofencing?: boolean;
 }
@@ -56,6 +61,7 @@ export default function OrgSettings({
   locationSettingsPromise,
   overtimeSettingsPromise,
   sitesPromise,
+  alertSettingsPromise,
 }: OrgSettingsProps) {
   const settingsResult = use(orgSettingsPromise);
   const breakSettingsResult = breakSettingsPromise
@@ -69,6 +75,9 @@ export default function OrgSettings({
     : null;
   const sitesResult = sitesPromise ? use(sitesPromise) : null;
   const sites = sitesResult?.ok ? sitesResult.value : [];
+  const alertSettingsResult = alertSettingsPromise
+    ? use(alertSettingsPromise)
+    : null;
   const [optimisticSettings, setOptimisticSettings] = useOptimistic(
     settingsResult?.ok ? settingsResult.value : null,
     (state: OrgSettingsData | null, next: Partial<OrgSettingsData>) => {
@@ -114,6 +123,13 @@ export default function OrgSettings({
         initialData={optimisticBreakSettings}
         onUpdateOptimistic={(next) => setOptimisticBreakSettings(next)}
       />
+      {alertSettingsResult && (
+        <AlertSettings
+          initialData={
+            alertSettingsResult.ok ? alertSettingsResult.value : null
+          }
+        />
+      )}
       <OvertimeSettings
         initialData={optimisticOvertimeSettings}
         onUpdateOptimistic={(next) => setOptimisticOvertimeSettings(next)}

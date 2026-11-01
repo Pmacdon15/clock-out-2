@@ -4,6 +4,7 @@ import { auth } from "@clerk/nextjs/server";
 import { startOfDay, subDays } from "date-fns";
 import type { Result } from "neverthrow";
 import { updateTag } from "next/cache";
+import { after } from "next/server";
 import {
   cancelTimeOffRequestDal as dalCancelTimeOffRequest,
   clockIn as dalClockIn,
@@ -29,6 +30,7 @@ import {
 import type { Coordinates } from "./geo";
 import { reverseGeocode, searchAddress } from "./geoapify";
 import { sendWeeklyReports } from "./reports";
+import { notifyScheduleChange } from "./schedule-notify";
 import type { BreakLimits, BreakType, TimeOffType } from "./types";
 
 /**
@@ -390,6 +392,8 @@ export async function createScheduledShiftAction(
   shiftStart: string,
   shiftEnd: string,
   note?: string | null,
+  /** The admin's browser zone: wording fallback for the member's notice. */
+  timezone?: string | null,
 ) {
   const result = await dalCreateScheduledShift(
     memberId,
@@ -401,6 +405,7 @@ export async function createScheduledShiftAction(
   return result.match(
     (shift) => {
       updateTag(`scheduled-shifts-${shift.org_id}`);
+      after(() => notifyScheduleChange("added", shift, timezone));
       return { success: true as const, data: shift };
     },
     (err) => {
@@ -409,12 +414,16 @@ export async function createScheduledShiftAction(
   );
 }
 
-export async function deleteScheduledShiftAction(id: number) {
+export async function deleteScheduledShiftAction(
+  id: number,
+  timezone?: string | null,
+) {
   const result = await dalDeleteScheduledShift(id);
 
   return result.match(
     (shift) => {
       updateTag(`scheduled-shifts-${shift.org_id}`);
+      after(() => notifyScheduleChange("removed", shift, timezone));
       return { success: true as const };
     },
     (err) => {

@@ -6,10 +6,12 @@ import { timeEntriesReducer } from "@/lib/reducers/time-entries";
 import type { DashboardTabsProps } from "@/lib/types";
 import { SettingsFallback } from "./fallbacks/settings-fallback";
 import { ViewHoursFallback } from "./fallbacks/view-hours-fallback";
+import NotificationSettings from "./NotificationSettings";
 import OrgSettings from "./OrgSettings";
 import { useOrgSwitcher } from "./OrgSwitcher";
 import Schedule from "./Schedule";
 import TimeOff from "./TimeOff";
+import TimezoneSync from "./TimezoneSync";
 import { Card } from "./ui";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import ViewHours from "./ViewHours";
@@ -21,6 +23,8 @@ export default function DashboardTabs({
   locationSettingsPromise,
   overtimeSettingsPromise,
   sitesPromise,
+  alertSettingsPromise,
+  notificationSettingsPromise,
   entriesPromise,
   orgTimeEntriesPromise,
   recentEntriesPromise,
@@ -92,9 +96,17 @@ export default function DashboardTabs({
 
   return (
     <Tabs className="space-y-8" defaultValue={defaultTab}>
+      {notificationSettingsPromise && (
+        <Suspense fallback={null}>
+          <TimezoneSync settingsPromise={notificationSettingsPromise} />
+        </Suspense>
+      )}
       <TabsList>
         <TabsTrigger value="time-clock">Time Clock</TabsTrigger>
         <TabsTrigger value="view">Hours</TabsTrigger>
+        {notificationSettingsPromise && (
+          <TabsTrigger value="notifications">Notifications</TabsTrigger>
+        )}
         <TabsTrigger value="schedule">Schedule</TabsTrigger>
         <TabsTrigger value="time-off">Time Off</TabsTrigger>
         {isAdmin && <TabsTrigger value="settings">Settings</TabsTrigger>}
@@ -133,6 +145,16 @@ export default function DashboardTabs({
         </Suspense>
       </TabsContent>
 
+      {notificationSettingsPromise && (
+        <TabsContent className="mt-0" value="notifications">
+          <Suspense fallback={<SettingsFallback />}>
+            <NotificationSettings
+              isAdmin={isAdmin}
+              settingsPromise={notificationSettingsPromise}
+            />
+          </Suspense>
+        </TabsContent>
+      )}
       <TabsContent className="mt-0" value="schedule">
         <Suspense fallback={<ViewHoursFallback />}>
           <Schedule
@@ -158,6 +180,7 @@ export default function DashboardTabs({
         <TabsContent className="mt-0" value="settings">
           <Suspense fallback={<SettingsFallback />}>
             <OrgSettings
+              alertSettingsPromise={alertSettingsPromise}
               breakSettingsPromise={breakSettingsPromise}
               hasGeofencing={hasGeofencing}
               hasReporting={hasReporting}

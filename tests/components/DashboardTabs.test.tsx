@@ -7,6 +7,7 @@ const captured = vi.hoisted(() => ({
   timeClock: [] as Record<string, unknown>[],
   viewHours: [] as Record<string, unknown>[],
   orgSettings: [] as Record<string, unknown>[],
+  notifications: [] as Record<string, unknown>[],
   timeOff: [] as Record<string, unknown>[],
   schedule: [] as Record<string, unknown>[],
   orgSwitcher: vi.fn(),
@@ -30,11 +31,20 @@ vi.mock("@/components/OrgSettings", () => ({
     return <div data-testid="org-settings" />;
   },
 }));
+vi.mock("@/components/NotificationSettings", () => ({
+  default: (props: Record<string, unknown>) => {
+    captured.notifications.push(props);
+    return <div data-testid="notification-settings" />;
+  },
+}));
 vi.mock("@/components/Schedule", () => ({
   default: (props: Record<string, unknown>) => {
     captured.schedule.push(props);
     return <div data-testid="schedule" />;
   },
+}));
+vi.mock("@/components/TimezoneSync", () => ({
+  default: () => <div data-testid="timezone-sync" />,
 }));
 vi.mock("@/components/TimeOff", () => ({
   default: (props: Record<string, unknown>) => {
@@ -77,6 +87,49 @@ function props(
 const latest = (list: Record<string, unknown>[]) => list[list.length - 1];
 
 describe("DashboardTabs", () => {
+  it("offers every member a notifications tab when preferences are loaded", () => {
+    const notificationSettingsPromise = ok({
+      preferences: {
+        email_enabled: true,
+        push_enabled: true,
+        shift_alerts: true,
+        break_alerts: true,
+        admin_alerts: true,
+      },
+      emailAvailable: true,
+      pushAvailable: false,
+      vapidPublicKey: null,
+    });
+    const alertSettingsPromise = ok(null as never);
+    render(
+      <DashboardTabs
+        {...props({
+          alertSettingsPromise,
+          defaultTabPromise: resolved("notifications"),
+          isAdminPromise: resolved(true),
+          notificationSettingsPromise,
+        })}
+      />,
+    );
+    expect(screen.getByTestId("notification-settings")).toBeInTheDocument();
+    expect(screen.getByTestId("timezone-sync")).toBeInTheDocument();
+    expect(latest(captured.notifications)).toEqual({
+      isAdmin: true,
+      settingsPromise: notificationSettingsPromise,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(latest(captured.orgSettings).alertSettingsPromise).toBe(
+      alertSettingsPromise,
+    );
+  });
+
+  it("hides the notifications tab without preferences", () => {
+    render(<DashboardTabs {...props()} />);
+    expect(
+      screen.queryByRole("button", { name: "Notifications" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("shows the error when entries fail to load", () => {
     render(
       <DashboardTabs

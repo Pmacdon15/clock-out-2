@@ -46,6 +46,9 @@ const inputClass =
   "h-11 w-full rounded-xl border-2 border-zinc-200 bg-white px-3 dark:border-zinc-800 dark:bg-zinc-950";
 
 /** Still to come or under way: shown before the shifts that are over. */
+/** This browser's IANA zone, so the member's notice can word times locally. */
+const browserTimezone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
+
 function isCurrentOrUpcoming(shift: ScheduledShiftWithStatus) {
   if (shift.status === "scheduled" || shift.status === "not_clocked_in") {
     return true;
@@ -80,7 +83,8 @@ function ShiftRow({
 }) {
   const [confirming, setConfirming] = useState(false);
   const { mutate, isPending } = useMutation({
-    mutationFn: deleteScheduledShiftAction,
+    mutationFn: (id: number) =>
+      deleteScheduledShiftAction(id, browserTimezone()),
     onSuccess: (res) => {
       if (res.success) {
         toast.success("Shift removed");
@@ -173,6 +177,7 @@ function ShiftForm({ members }: { members: Member[] }) {
         shiftStart.toISOString(),
         shiftEnd.toISOString(),
         note,
+        browserTimezone(),
       );
     },
     onSuccess: (res) => {

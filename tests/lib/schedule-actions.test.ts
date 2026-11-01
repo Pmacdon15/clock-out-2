@@ -5,6 +5,13 @@ const mocks = vi.hoisted(() => ({
   updateTag: vi.fn(),
   createScheduledShiftDal: vi.fn(),
   deleteScheduledShiftDal: vi.fn(),
+  after: vi.fn((fn: () => unknown) => fn()),
+  notifyScheduleChange: vi.fn(),
+}));
+
+vi.mock("next/server", () => ({ after: mocks.after }));
+vi.mock("@/lib/schedule-notify", () => ({
+  notifyScheduleChange: mocks.notifyScheduleChange,
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: { protect: vi.fn() } }));
@@ -32,8 +39,16 @@ describe("createScheduledShiftAction", () => {
         "2026-01-05T09:00:00.000Z",
         "2026-01-05T17:00:00.000Z",
         "Desk",
+        "America/Regina",
       ),
     ).resolves.toEqual({ success: true, data: shift });
+    // The member is told after the response, in the admin's zone as a fallback.
+    expect(mocks.after).toHaveBeenCalledTimes(1);
+    expect(mocks.notifyScheduleChange).toHaveBeenCalledWith(
+      "added",
+      shift,
+      "America/Regina",
+    );
     expect(mocks.createScheduledShiftDal).toHaveBeenCalledWith(
       "user_1",
       new Date("2026-01-05T09:00:00.000Z"),
@@ -49,16 +64,22 @@ describe("createScheduledShiftAction", () => {
       createScheduledShiftAction("user_1", "a", "b"),
     ).resolves.toEqual({ success: false, error: "nope" });
     expect(mocks.updateTag).not.toHaveBeenCalled();
+    expect(mocks.notifyScheduleChange).not.toHaveBeenCalled();
   });
 });
 
 describe("deleteScheduledShiftAction", () => {
   it("revalidates the schedule", async () => {
     mocks.deleteScheduledShiftDal.mockResolvedValue(ok(shift));
-    await expect(deleteScheduledShiftAction(1)).resolves.toEqual({
+    await expect(deleteScheduledShiftAction(1, "UTC")).resolves.toEqual({
       success: true,
     });
     expect(mocks.updateTag).toHaveBeenCalledWith("scheduled-shifts-org_1");
+    expect(mocks.notifyScheduleChange).toHaveBeenCalledWith(
+      "removed",
+      shift,
+      "UTC",
+    );
   });
 
   it("returns the error", async () => {

@@ -190,6 +190,8 @@ describe("Schedule", () => {
       "2026-01-07T22:00:00.000Z",
       "2026-01-08T06:00:00.000Z",
       "Night",
+      // The admin's zone, so the member's notice words the times locally.
+      Intl.DateTimeFormat().resolvedOptions().timeZone,
     );
     expect(screen.getByLabelText("Note (optional)")).toHaveValue("");
   });
@@ -229,7 +231,10 @@ describe("Schedule", () => {
     await waitFor(() =>
       expect(mocks.toast.success).toHaveBeenCalledWith("Shift removed"),
     );
-    expect(mocks.deleteScheduledShiftAction.mock.calls[0][0]).toBe(s.id);
+    expect(mocks.deleteScheduledShiftAction.mock.calls[0]).toEqual([
+      s.id,
+      Intl.DateTimeFormat().resolvedOptions().timeZone,
+    ]);
   });
 
   it("shows the error when removing fails", async () => {
