@@ -146,6 +146,7 @@ describe("getMyNotificationSettings", () => {
         emailAvailable: true,
         pushAvailable: false,
         vapidPublicKey: null,
+        timezone: null,
       },
     });
 

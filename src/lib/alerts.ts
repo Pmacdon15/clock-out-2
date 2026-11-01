@@ -26,6 +26,7 @@ export const DEFAULT_ALERT_SETTINGS: AlertSettingsInput = {
   break_reminder_enabled: false,
   break_reminder_minutes: 45,
   notify_admins: true,
+  schedule_notifications: true,
 };
 
 /** What a person gets before saving any preference: email and push both on. */
@@ -35,6 +36,7 @@ export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferencesInput = {
   shift_alerts: true,
   break_alerts: true,
   admin_alerts: true,
+  schedule_alerts: true,
 };
 
 const HOUR_MS = 3_600_000;
@@ -68,6 +70,8 @@ export function normalizeAlertSettings(
       d.break_reminder_minutes,
     ),
     notify_admins: data?.notify_admins ?? d.notify_admins,
+    schedule_notifications:
+      data?.schedule_notifications ?? d.schedule_notifications,
   };
 }
 
@@ -89,6 +93,7 @@ export function validateAlertSettings(
     input.auto_clock_out_enabled,
     input.break_reminder_enabled,
     input.notify_admins,
+    input.schedule_notifications,
   ];
   if (!booleans.every((b) => typeof b === "boolean")) {
     return "Invalid alert settings";
@@ -127,7 +132,21 @@ export function normalizeNotificationPreferences(
     shift_alerts: data?.shift_alerts ?? d.shift_alerts,
     break_alerts: data?.break_alerts ?? d.break_alerts,
     admin_alerts: data?.admin_alerts ?? d.admin_alerts,
+    schedule_alerts: data?.schedule_alerts ?? d.schedule_alerts,
   };
+}
+
+/** Whether a string is an IANA time zone this runtime knows. */
+export function isValidTimeZone(tz: unknown): tz is string {
+  if (typeof tz !== "string" || tz.length === 0 || tz.length > 64) {
+    return false;
+  }
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function isValidNotificationPreferences(
@@ -265,7 +284,11 @@ export function planShiftAlerts({
 
 /* ----------------------------------------------------------- wording -- */
 
-export type AlertCategory = "shift_alerts" | "break_alerts" | "admin_alerts";
+export type AlertCategory =
+  | "shift_alerts"
+  | "break_alerts"
+  | "admin_alerts"
+  | "schedule_alerts";
 
 export type NotificationMessage = {
   title: string;
@@ -274,6 +297,8 @@ export type NotificationMessage = {
   url: string;
   /** Collapses repeat notifications about the same thing on a device. */
   tag: string;
+  /** Extra detail lines, listed in the email (push shows `body` only). */
+  lines?: string[];
 };
 
 export function formatElapsed(ms: number): string {

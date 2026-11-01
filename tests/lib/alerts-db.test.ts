@@ -24,7 +24,7 @@ const valuesOf = (call: number) => sql.mock.calls[call].slice(1);
 const allText = () => sql.mock.calls.map((_c, i) => textOf(i)).join("\n");
 
 /** Number of statements `ensureAlertTables` runs the first time. */
-const ENSURE_STATEMENTS = 6;
+const ENSURE_STATEMENTS = 8;
 
 const input = {
   forgot_clock_out_enabled: true,
@@ -34,6 +34,7 @@ const input = {
   break_reminder_enabled: false,
   break_reminder_minutes: 45,
   notify_admins: true,
+  schedule_notifications: true,
 };
 
 const prefs = {
@@ -42,6 +43,7 @@ const prefs = {
   shift_alerts: true,
   break_alerts: true,
   admin_alerts: false,
+  schedule_alerts: true,
 };
 
 beforeAll(async () => {
@@ -111,7 +113,7 @@ describe("alert settings", () => {
     expect(textOf(0)).toContain("INSERT INTO settings");
     expect(textOf(1)).toContain("INSERT INTO alert_settings");
     expect(textOf(1)).toContain("ON CONFLICT (org_id)");
-    expect(valuesOf(1).slice(0, 8)).toEqual([
+    expect(valuesOf(1).slice(0, 9)).toEqual([
       "o1",
       true,
       10,
@@ -119,6 +121,7 @@ describe("alert settings", () => {
       16,
       false,
       45,
+      true,
       true,
     ]);
   });
@@ -159,13 +162,14 @@ describe("notification preferences", () => {
     sql.mockResolvedValueOnce([{ user_id: "u1" }]);
     await adb.dbUpdateNotificationPreferences("u1", prefs);
     expect(textOf(0)).toContain("INSERT INTO notification_preferences");
-    expect(valuesOf(0).slice(0, 6)).toEqual([
+    expect(valuesOf(0).slice(0, 7)).toEqual([
       "u1",
       true,
       false,
       true,
       true,
       false,
+      true,
     ]);
   });
 });
@@ -264,5 +268,42 @@ describe("cron reads and writes", () => {
     await primeTables();
     await expect(adb.dbAutoClockOut(7, 16)).resolves.toBeUndefined();
     expect(valuesOf(0)).toEqual([16, 7, 16, null, null, null]);
+  });
+});
+
+describe("schedule notification queries", () => {
+  it("remembers a person's time zone, creating their row if needed", async () => {
+    await primeTables();
+    await adb.dbSetUserTimezone("u1", "America/Regina");
+    expect(textOf(0)).toContain("INSERT INTO notification_preferences");
+    expect(textOf(0)).toContain("DO UPDATE SET timezone");
+    expect(valuesOf(0)).toEqual(["u1", "America/Regina", "America/Regina"]);
+  });
+
+  it("reads settings for many orgs, skipping the query for none", async () => {
+    await expect(adb.dbGetAlertSettingsFor([])).resolves.toEqual([]);
+    expect(sql).not.toHaveBeenCalled();
+    await primeTables();
+    sql.mockResolvedValueOnce([{ org_id: "o1" }]);
+    await expect(adb.dbGetAlertSettingsFor(["o1"])).resolves.toEqual([
+      { org_id: "o1" },
+    ]);
+    expect(valuesOf(0)).toEqual([["o1"]]);
+  });
+
+  it("lists every org's shifts in a window, uncached", async () => {
+    await primeTables();
+    db.resetScheduledShiftsTableCheck();
+    await db.ensureScheduledShiftsTable();
+    sql.mockClear();
+    sql.mockResolvedValueOnce([{ id: 1 }]);
+    const start = new Date("2026-11-01T00:00:00Z");
+    const end = new Date("2026-11-10T00:00:00Z");
+    await expect(adb.dbGetScheduledShiftsBetween(start, end)).resolves.toEqual(
+      [{ id: 1 }],
+    );
+    expect(textOf(0)).toContain("FROM scheduled_shifts");
+    expect(valuesOf(0)).toEqual([start, end]);
+    expect(cacheTag).not.toHaveBeenCalled();
   });
 });

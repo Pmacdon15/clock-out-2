@@ -72,6 +72,12 @@ const TOPICS: Toggle[] = [
     description: "When a break runs long or reaches its time limit.",
   },
   {
+    key: "schedule_alerts",
+    label: "My schedule",
+    description:
+      "Your schedule for the coming week (Sunday evening), and shifts added or removed.",
+  },
+  {
     key: "admin_alerts",
     label: "Team alerts",
     description: "Alerts about members of organizations you administer.",

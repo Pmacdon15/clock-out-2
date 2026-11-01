@@ -67,6 +67,7 @@ describe("normalizeAlertSettings", () => {
         break_reminder_enabled: true,
         break_reminder_minutes: "30" as unknown as number,
         notify_admins: false,
+        schedule_notifications: false,
       }),
     ).toEqual({
       forgot_clock_out_enabled: true,
@@ -76,6 +77,7 @@ describe("normalizeAlertSettings", () => {
       break_reminder_enabled: true,
       break_reminder_minutes: 30,
       notify_admins: false,
+      schedule_notifications: false,
     });
   });
 
@@ -100,6 +102,7 @@ describe("validateAlertSettings", () => {
 
   it.each([
     [{ notify_admins: "yes" }, "Invalid alert settings"],
+    [{ schedule_notifications: null }, "Invalid alert settings"],
     [{ forgot_clock_out_hours: 0 }, "Reminder hours must be between"],
     [{ forgot_clock_out_hours: "5" }, "Reminder hours must be between"],
     [
@@ -152,6 +155,7 @@ describe("notification preferences", () => {
         shift_alerts: false,
         break_alerts: false,
         admin_alerts: false,
+        schedule_alerts: false,
       }),
     ).toEqual({
       email_enabled: false,
@@ -159,6 +163,7 @@ describe("notification preferences", () => {
       shift_alerts: false,
       break_alerts: false,
       admin_alerts: false,
+      schedule_alerts: false,
     });
   });
 
@@ -357,5 +362,17 @@ describe("wording", () => {
       title: "Ada's break is over",
       body: "Ada's meal period reached its 30-minute limit.",
     });
+  });
+});
+
+describe("isValidTimeZone", () => {
+  it("accepts real IANA zones only", async () => {
+    const { isValidTimeZone } = await import("@/lib/alerts");
+    expect(isValidTimeZone("America/Regina")).toBe(true);
+    expect(isValidTimeZone("UTC")).toBe(true);
+    expect(isValidTimeZone("Mars/Olympus")).toBe(false);
+    expect(isValidTimeZone("")).toBe(false);
+    expect(isValidTimeZone("A".repeat(65))).toBe(false);
+    expect(isValidTimeZone(42)).toBe(false);
   });
 });

@@ -224,6 +224,8 @@ export type AlertSettingsData = {
   break_reminder_minutes: number;
   /** Also send every alert to the org's admins. */
   notify_admins: boolean;
+  /** Tell members about their weekly schedule and shifts added/removed. */
+  schedule_notifications: boolean;
   updated_at?: Date;
 };
 
@@ -244,13 +246,17 @@ export type NotificationPreferencesData = {
   break_alerts: boolean;
   /** Admins only: alerts about other members of their org. */
   admin_alerts: boolean;
+  /** My weekly schedule, and shifts added to or removed from it. */
+  schedule_alerts: boolean;
+  /** IANA zone from the person's browser, for wording shift times. */
+  timezone?: string | null;
   updated_at?: Date;
 };
 
 /** The editable part of {@link NotificationPreferencesData}. */
 export type NotificationPreferencesInput = Omit<
   NotificationPreferencesData,
-  "user_id" | "updated_at"
+  "user_id" | "updated_at" | "timezone"
 >;
 
 /** A browser push subscription, as `PushSubscription.toJSON()` gives it. */

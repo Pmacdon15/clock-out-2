@@ -5,6 +5,7 @@ import {
   deletePushSubscriptionDal,
   savePushSubscriptionDal,
   sendTestNotificationDal,
+  setMyTimezoneDal,
   updateAlertSettingsDal,
   updateNotificationPreferencesDal,
 } from "./alerts-dal";
@@ -61,6 +62,17 @@ export async function sendTestNotificationAction() {
   const result = await sendTestNotificationDal();
   return result.match(
     (counts) => ({ success: true as const, data: counts }),
+    (e) => ({ success: false as const, error: e.reason }),
+  );
+}
+
+export async function setMyTimezoneAction(timezone: string) {
+  const result = await setMyTimezoneDal(timezone);
+  return result.match(
+    (row) => {
+      updateTag(`notification-prefs-${row.user_id}`);
+      return { success: true as const };
+    },
     (e) => ({ success: false as const, error: e.reason }),
   );
 }

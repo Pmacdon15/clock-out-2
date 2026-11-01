@@ -21,6 +21,8 @@ interface ShiftAlertEmailProps {
   actionUrl: string;
   /** Public origin of the app, for the logo and the preferences link. */
   appUrl: string;
+  /** Optional detail lines (e.g. each shift of a weekly schedule). */
+  lines?: string[];
 }
 
 /** One alert (forgot to clock out, auto clock-out, still on break) by email. */
@@ -29,6 +31,7 @@ export const ShiftAlertEmail = ({
   body,
   actionUrl,
   appUrl,
+  lines = [],
 }: ShiftAlertEmailProps) => {
   const preferencesUrl = `${appUrl}/?defaultTab=notifications`;
   return (
@@ -53,6 +56,18 @@ export const ShiftAlertEmail = ({
             <Text className="text-[14px] text-black leading-[24px]">
               {body}
             </Text>
+            {lines.length > 0 && (
+              <Section className="rounded border border-gray-200 border-solid px-[16px]">
+                {lines.map((line) => (
+                  <Text
+                    className="my-[8px] text-[14px] text-black leading-[20px]"
+                    key={line}
+                  >
+                    {line}
+                  </Text>
+                ))}
+              </Section>
+            )}
             <Section className="mt-[24px] mb-[24px] text-center">
               <Button
                 className="rounded bg-[#000000] px-5 py-3 text-center font-semibold text-[12px] text-white no-underline"
@@ -63,8 +78,8 @@ export const ShiftAlertEmail = ({
             </Section>
             <Hr className="mx-0 my-[26px] w-full border border-[#eaeaea] border-solid" />
             <Text className="text-center text-[12px] text-gray-500 leading-[24px]">
-              You're getting this because your organization turned on shift
-              alerts.{" "}
+              You're getting this because your organization uses Clock Out
+              notifications.{" "}
               <Link
                 className="text-blue-600 no-underline"
                 href={preferencesUrl}

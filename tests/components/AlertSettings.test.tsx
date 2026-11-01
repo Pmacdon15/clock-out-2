@@ -61,6 +61,7 @@ describe("AlertSettings", () => {
       break_reminder_enabled: true,
       break_reminder_minutes: 40,
       notify_admins: false,
+      schedule_notifications: true,
     });
     // What was saved is now the baseline.
     await waitFor(() => expect(save()).toBeDisabled());

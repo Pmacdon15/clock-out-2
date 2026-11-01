@@ -77,6 +77,7 @@ export async function sendAlertEmail(
         body: message.body,
         actionUrl: `${origin}${message.url}`,
         appUrl: origin,
+        lines: message.lines,
       }),
     );
     await sesClient.send(
@@ -87,7 +88,7 @@ export async function sendAlertEmail(
             Html: { Charset: "UTF-8", Data: html },
             Text: {
               Charset: "UTF-8",
-              Data: `${message.body}\n\n${origin}${message.url}`,
+              Data: [message.body, ...(message.lines ?? []), "", `${origin}${message.url}`].join("\n"),
             },
           },
           Subject: { Charset: "UTF-8", Data: message.title },

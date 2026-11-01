@@ -3,6 +3,7 @@ import { err, ok, type Result } from "neverthrow";
 import {
   isValidNotificationPreferences,
   isValidPushSubscription,
+  isValidTimeZone,
   normalizeAlertSettings,
   normalizeNotificationPreferences,
   validateAlertSettings,
@@ -12,6 +13,7 @@ import {
   dbGetAlertSettings,
   dbGetNotificationPreferences,
   dbSavePushSubscription,
+  dbSetUserTimezone,
   dbUpdateAlertSettings,
   dbUpdateNotificationPreferences,
 } from "./alerts-db";
@@ -78,6 +80,7 @@ export async function updateAlertSettingsDal(
     break_reminder_enabled: input.break_reminder_enabled,
     break_reminder_minutes: input.break_reminder_minutes,
     notify_admins: input.notify_admins,
+    schedule_notifications: input.schedule_notifications,
   })
     .then((row) => ok(row))
     .catch((e) => {
@@ -93,6 +96,8 @@ export type NotificationSettingsView = {
   pushAvailable: boolean;
   /** Public VAPID key browsers subscribe with (null when push is off). */
   vapidPublicKey: string | null;
+  /** The time zone remembered for this person, if any. */
+  timezone: string | null;
 };
 
 export async function getMyNotificationSettings(): Promise<
@@ -112,6 +117,7 @@ export async function getMyNotificationSettings(): Promise<
         vapidPublicKey: isPushConfigured()
           ? (process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY as string)
           : null,
+        timezone: row?.timezone ?? null,
       },
     }))
     .catch((e) => {
@@ -137,11 +143,27 @@ export async function updateNotificationPreferencesDal(
     shift_alerts: input.shift_alerts,
     break_alerts: input.break_alerts,
     admin_alerts: input.admin_alerts,
+    schedule_alerts: input.schedule_alerts,
   })
     .then((row) => ok(row))
     .catch((e) => {
       console.error("Update notification preferences error: ", e);
       return err({ reason: "Failed to update notification preferences" });
+    });
+}
+
+/** Remembers the caller's browser time zone for wording shift times. */
+export async function setMyTimezoneDal(
+  timezone: string,
+): Promise<Result<{ user_id: string }, Failure>> {
+  const { userId } = await auth.protect();
+  if (!userId) return err({ reason: "Unauthorized" });
+  if (!isValidTimeZone(timezone)) return err({ reason: "Invalid time zone" });
+  return await dbSetUserTimezone(userId, timezone)
+    .then(() => ok({ user_id: userId }))
+    .catch((e) => {
+      console.error("Save time zone error: ", e);
+      return err({ reason: "Failed to save time zone" });
     });
 }
 

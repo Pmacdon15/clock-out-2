@@ -1,11 +1,16 @@
 import { cacheLife, cacheTag } from "next/cache";
-import { ensureTimeEntryBreaksTable, sql } from "./db";
+import {
+  ensureScheduledShiftsTable,
+  ensureTimeEntryBreaksTable,
+  sql,
+} from "./db";
 import type {
   AlertSettingsData,
   AlertSettingsInput,
   BreakLimits,
   BreakType,
   NotificationPreferencesData,
+  ScheduledShift,
   NotificationPreferencesInput,
   PushSubscriptionInput,
   PushSubscriptionRow,
@@ -74,6 +79,15 @@ export function ensureAlertTables(): Promise<void> {
 			sent_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 		)
 	`;
+    await sql`
+		ALTER TABLE alert_settings
+			ADD COLUMN IF NOT EXISTS schedule_notifications BOOLEAN NOT NULL DEFAULT TRUE
+	`;
+    await sql`
+		ALTER TABLE notification_preferences
+			ADD COLUMN IF NOT EXISTS schedule_alerts BOOLEAN NOT NULL DEFAULT TRUE,
+			ADD COLUMN IF NOT EXISTS timezone TEXT
+	`;
   })().catch((error) => {
     alertTablesReady = null;
     throw error;
@@ -115,14 +129,14 @@ export async function dbUpdateAlertSettings(
 			forgot_clock_out_enabled, forgot_clock_out_hours,
 			auto_clock_out_enabled, auto_clock_out_hours,
 			break_reminder_enabled, break_reminder_minutes,
-			notify_admins, updated_at
+			notify_admins, schedule_notifications, updated_at
 		)
 		VALUES (
 			${orgId},
 			${input.forgot_clock_out_enabled}, ${input.forgot_clock_out_hours},
 			${input.auto_clock_out_enabled}, ${input.auto_clock_out_hours},
 			${input.break_reminder_enabled}, ${input.break_reminder_minutes},
-			${input.notify_admins}, NOW()
+			${input.notify_admins}, ${input.schedule_notifications}, NOW()
 		)
 		ON CONFLICT (org_id)
 		DO UPDATE SET
@@ -133,6 +147,7 @@ export async function dbUpdateAlertSettings(
 			break_reminder_enabled = ${input.break_reminder_enabled},
 			break_reminder_minutes = ${input.break_reminder_minutes},
 			notify_admins = ${input.notify_admins},
+			schedule_notifications = ${input.schedule_notifications},
 			updated_at = NOW()
 		RETURNING *
 	`;
@@ -185,11 +200,12 @@ export async function dbUpdateNotificationPreferences(
   const [updated] = await sql`
 		INSERT INTO notification_preferences (
 			user_id, email_enabled, push_enabled,
-			shift_alerts, break_alerts, admin_alerts, updated_at
+			shift_alerts, break_alerts, admin_alerts, schedule_alerts, updated_at
 		)
 		VALUES (
 			${userId}, ${input.email_enabled}, ${input.push_enabled},
-			${input.shift_alerts}, ${input.break_alerts}, ${input.admin_alerts}, NOW()
+			${input.shift_alerts}, ${input.break_alerts}, ${input.admin_alerts},
+			${input.schedule_alerts}, NOW()
 		)
 		ON CONFLICT (user_id)
 		DO UPDATE SET
@@ -198,10 +214,25 @@ export async function dbUpdateNotificationPreferences(
 			shift_alerts = ${input.shift_alerts},
 			break_alerts = ${input.break_alerts},
 			admin_alerts = ${input.admin_alerts},
+			schedule_alerts = ${input.schedule_alerts},
 			updated_at = NOW()
 		RETURNING *
 	`;
   return updated as NotificationPreferencesData;
+}
+
+/**
+ * Remembers the person's browser time zone, creating their preferences row
+ * (with defaults) if they have none, so shift times can be worded locally.
+ */
+export async function dbSetUserTimezone(userId: string, timezone: string) {
+  await ensureAlertTables();
+  await sql`
+		INSERT INTO notification_preferences (user_id, timezone, updated_at)
+		VALUES (${userId}, ${timezone}, NOW())
+		ON CONFLICT (user_id)
+		DO UPDATE SET timezone = ${timezone}, updated_at = NOW()
+	`;
 }
 
 /* -------------------------------------------------- push subscriptions -- */
@@ -379,4 +410,27 @@ export async function dbAutoClockOut(
 		SELECT * FROM closed
 	`;
   return closed as unknown as OpenShift | undefined;
+}
+
+/* --------------------------------------------------- schedule digests -- */
+
+/** Uncached settings for many orgs at once (missing orgs have no row). */
+export async function dbGetAlertSettingsFor(orgIds: string[]) {
+  if (orgIds.length === 0) return [] as AlertSettingsData[];
+  await ensureAlertTables();
+  const rows = await sql`
+		SELECT * FROM alert_settings WHERE org_id = ANY(${orgIds})
+	`;
+  return rows as unknown as AlertSettingsData[];
+}
+
+/** Every org's shifts starting in [start, end), uncached, for the digest. */
+export async function dbGetScheduledShiftsBetween(start: Date, end: Date) {
+  await ensureScheduledShiftsTable();
+  const rows = await sql`
+		SELECT * FROM scheduled_shifts
+		WHERE shift_start >= ${start} AND shift_start < ${end}
+		ORDER BY shift_start ASC, id ASC
+	`;
+  return rows as unknown as ScheduledShift[];
 }

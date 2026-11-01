@@ -8,6 +8,7 @@ import { SettingsFallback } from "./fallbacks/settings-fallback";
 import { ViewHoursFallback } from "./fallbacks/view-hours-fallback";
 import NotificationSettings from "./NotificationSettings";
 import OrgSettings from "./OrgSettings";
+import TimezoneSync from "./TimezoneSync";
 import { useOrgSwitcher } from "./OrgSwitcher";
 import Schedule from "./Schedule";
 import { Card } from "./ui";
@@ -93,6 +94,11 @@ export default function DashboardTabs({
 
   return (
     <Tabs className="space-y-8" defaultValue={defaultTab}>
+      {notificationSettingsPromise && (
+        <Suspense fallback={null}>
+          <TimezoneSync settingsPromise={notificationSettingsPromise} />
+        </Suspense>
+      )}
       <TabsList>
         <TabsTrigger value="time-clock">Time Clock</TabsTrigger>
         <TabsTrigger value="view">Hours</TabsTrigger>

@@ -1,6 +1,13 @@
 "use client";
 
-import { BellRing, Coffee, Loader2, TimerOff, Users } from "lucide-react";
+import {
+  BellRing,
+  CalendarDays,
+  Coffee,
+  Loader2,
+  TimerOff,
+  Users,
+} from "lucide-react";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { updateAlertSettingsAction } from "@/lib/alert-actions";
@@ -188,6 +195,15 @@ export default function AlertSettings({ initialData }: AlertSettingsProps) {
             value={form.break_reminder_minutes}
           />
         </Rule>
+
+        <Rule
+          checked={form.schedule_notifications}
+          description="Send members their schedule for the coming week on Sunday evening, and tell them when a shift is added or removed."
+          icon={CalendarDays}
+          id="alert-schedule"
+          onToggle={(v) => set("schedule_notifications", v)}
+          title="Schedule notifications"
+        />
 
         <Rule
           checked={form.notify_admins}
