@@ -1,0 +1,98 @@
+name: Biome
+
+# On a pull request from this repo, Biome fixes what it can
+# (`biome check --write --unsafe`), commits the result to the PR branch, and
+# re-runs every check on that commit. Whatever it can't fix fails this check.
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: biome-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  biome:
+    name: Biome
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # commit the fixes
+      actions: write # re-run the checks on the fix commit
+    env:
+      # Fork PRs get a read-only token, so they are checked but not fixed.
+      CAN_FIX: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The PR's own commit, not GitHub's merge preview, so fixes apply to the branch.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+
+      - name: Apply safe and unsafe fixes
+        if: env.CAN_FIX == 'true'
+        # Unfixable problems are reported by the final step instead.
+        run: bunx biome check --write --unsafe || true
+
+      - name: Commit fixes to the pull request
+        if: env.CAN_FIX == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          mapfile -t changed < <(git diff --name-only)
+          if [ "${#changed[@]}" -eq 0 ]; then
+            echo "Nothing to fix."
+            exit 0
+          fi
+          printf 'Fixed: %s\n' "${changed[@]}"
+
+          # Commit through the API so GitHub signs it (shows as Verified).
+          tmp=$(mktemp -d)
+          for file in "${changed[@]}"; do
+            base64 -w0 "$file" > "$tmp/content"
+            jq -n --arg path "$file" --rawfile contents "$tmp/content" \
+              '{path: $path, contents: $contents}'
+          done | jq -s . > "$tmp/additions.json"
+
+          jq -n \
+            --arg repo "$GITHUB_REPOSITORY" \
+            --arg branch "$BRANCH" \
+            --arg head "$HEAD_SHA" \
+            --slurpfile additions "$tmp/additions.json" \
+            '{
+              query: "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid } } }",
+              variables: { input: {
+                branch: { repositoryNameWithOwner: $repo, branchName: $branch },
+                expectedHeadOid: $head,
+                message: {
+                  headline: "style: apply Biome fixes",
+                  body: "Automated `biome check --write --unsafe`."
+                },
+                fileChanges: { additions: $additions[0] }
+              } }
+            }' > "$tmp/request.json"
+
+          oid=$(gh api graphql --input "$tmp/request.json" --jq '.data.createCommitOnBranch.commit.oid')
+          echo "Committed $oid to $BRANCH"
+
+          # Commits made with this token don't trigger workflows, so start the
+          # checks on the new head ourselves. Same job names, so they satisfy
+          # the same required checks.
+          for workflow in tests.yml typecheck.yml biome.yml; do
+            gh workflow run "$workflow" --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
+          done
+
+      - name: Check
+        run: bunx biome ci --reporter=github .

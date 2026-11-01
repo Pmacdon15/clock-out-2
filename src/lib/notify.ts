@@ -88,7 +88,12 @@ export async function sendAlertEmail(
             Html: { Charset: "UTF-8", Data: html },
             Text: {
               Charset: "UTF-8",
-              Data: [message.body, ...(message.lines ?? []), "", `${origin}${message.url}`].join("\n"),
+              Data: [
+                message.body,
+                ...(message.lines ?? []),
+                "",
+                `${origin}${message.url}`,
+              ].join("\n"),
             },
           },
           Subject: { Charset: "UTF-8", Data: message.title },

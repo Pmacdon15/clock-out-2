@@ -25,9 +25,10 @@ export const FALLBACK_TIMEZONE = "UTC";
 const SCHEDULE_URL = "/?defaultTab=schedule";
 
 /** A person's zone, or the fallback when it's unknown or invalid. */
-export function resolveTimezone(
-  ...candidates: (string | null | undefined)[]
-): { tz: string; known: boolean } {
+export function resolveTimezone(...candidates: (string | null | undefined)[]): {
+  tz: string;
+  known: boolean;
+} {
   const tz = candidates.find(isValidTimeZone);
   return tz ? { tz, known: true } : { tz: FALLBACK_TIMEZONE, known: false };
 }
@@ -46,7 +47,11 @@ export function formatShiftRange(
     formatInTimeZone(start, tz, "yyyy-MM-dd") ===
     formatInTimeZone(end, tz, "yyyy-MM-dd");
   const from = formatInTimeZone(start, tz, "EEE, MMM d, h:mm a");
-  const to = formatInTimeZone(end, tz, sameDay ? "h:mm a" : "EEE, MMM d, h:mm a");
+  const to = formatInTimeZone(
+    end,
+    tz,
+    sameDay ? "h:mm a" : "EEE, MMM d, h:mm a",
+  );
   return `${from} – ${to}${known ? "" : ` ${tz}`}`;
 }
 
@@ -186,14 +191,17 @@ export function formatHours(ms: number): string {
   return `${hours}h`;
 }
 
-export function describeWeeklyDigest(digest: WeeklyDigest): NotificationMessage {
+export function describeWeeklyDigest(
+  digest: WeeklyDigest,
+): NotificationMessage {
   const { zone, weekOf, shifts } = digest;
   const monday = fromZonedTime(`${weekOf}T12:00:00`, zone.tz);
   const sunday = new Date(monday.getTime() + 6 * DAY_MS);
   const label = `${formatInTimeZone(monday, zone.tz, "MMM d")} – ${formatInTimeZone(sunday, zone.tz, "MMM d")}`;
   const totalMs = shifts.reduce(
     (sum, s) =>
-      sum + (new Date(s.shift_end).getTime() - new Date(s.shift_start).getTime()),
+      sum +
+      (new Date(s.shift_end).getTime() - new Date(s.shift_start).getTime()),
     0,
   );
   const count = `${shifts.length} shift${shifts.length === 1 ? "" : "s"}`;
@@ -214,7 +222,11 @@ export function describeWeeklyDigest(digest: WeeklyDigest): NotificationMessage 
   };
 }
 
-export type DigestRunResult = { digests: number; emails: number; pushes: number };
+export type DigestRunResult = {
+  digests: number;
+  emails: number;
+  pushes: number;
+};
 
 /**
  * Sends every weekly schedule that's due. Safe to run every few minutes: a
@@ -243,7 +255,9 @@ export async function runWeeklyScheduleDigests(
   const settingsByOrg = new Map(settingsRows.map((r) => [r.org_id, r]));
 
   for (const orgId of orgIds) {
-    if (!normalizeAlertSettings(settingsByOrg.get(orgId)).schedule_notifications) {
+    if (
+      !normalizeAlertSettings(settingsByOrg.get(orgId)).schedule_notifications
+    ) {
       continue;
     }
     try {

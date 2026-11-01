@@ -27,8 +27,9 @@ const view = (timezone: string | null): NotificationSettingsView => ({
   timezone,
 });
 
-const renderWith = (result: Parameters<typeof TimezoneSync>[0]["settingsPromise"]) =>
-  render(<TimezoneSync settingsPromise={result} />);
+const renderWith = (
+  result: Parameters<typeof TimezoneSync>[0]["settingsPromise"],
+) => render(<TimezoneSync settingsPromise={result} />);
 
 describe("TimezoneSync", () => {
   it("saves the browser zone when none is stored, and renders nothing", async () => {

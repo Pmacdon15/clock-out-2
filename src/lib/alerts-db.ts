@@ -10,10 +10,10 @@ import type {
   BreakLimits,
   BreakType,
   NotificationPreferencesData,
-  ScheduledShift,
   NotificationPreferencesInput,
   PushSubscriptionInput,
   PushSubscriptionRow,
+  ScheduledShift,
 } from "./types";
 
 let alertTablesReady: Promise<void> | null = null;

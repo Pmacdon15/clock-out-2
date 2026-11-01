@@ -299,9 +299,9 @@ describe("schedule notification queries", () => {
     sql.mockResolvedValueOnce([{ id: 1 }]);
     const start = new Date("2026-11-01T00:00:00Z");
     const end = new Date("2026-11-10T00:00:00Z");
-    await expect(adb.dbGetScheduledShiftsBetween(start, end)).resolves.toEqual(
-      [{ id: 1 }],
-    );
+    await expect(adb.dbGetScheduledShiftsBetween(start, end)).resolves.toEqual([
+      { id: 1 },
+    ]);
     expect(textOf(0)).toContain("FROM scheduled_shifts");
     expect(valuesOf(0)).toEqual([start, end]);
     expect(cacheTag).not.toHaveBeenCalled();

@@ -54,7 +54,12 @@ const shift = (
   ...overrides,
 });
 
-const member = { userId: "u1", name: "Ada", email: "ada@x.test", isAdmin: false };
+const member = {
+  userId: "u1",
+  name: "Ada",
+  email: "ada@x.test",
+  isAdmin: false,
+};
 
 // Sunday Nov 1 2026, 6:00 PM in Regina.
 const sundayEvening = new Date("2026-11-02T00:00:00Z");
@@ -159,9 +164,9 @@ describe("notifyScheduleChange", () => {
 
   it("skips past shifts, self-scheduled shifts, and leavers", async () => {
     const past = shift("2026-10-01T15:00:00Z", "2026-10-01T23:00:00Z");
-    await expect(notifyScheduleChange("removed", past, null, now)).resolves.toBe(
-      false,
-    );
+    await expect(
+      notifyScheduleChange("removed", past, null, now),
+    ).resolves.toBe(false);
     const self = { ...upcoming, created_by: "u1" };
     await expect(notifyScheduleChange("added", self, null, now)).resolves.toBe(
       false,

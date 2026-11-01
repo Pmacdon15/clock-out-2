@@ -42,3 +42,6 @@ next-env.d.ts
 
 # clerk configuration (can include secrets)
 /.clerk/
+
+# vitest blob reports (CI merges them for coverage)
+/.vitest-reports/

@@ -35,27 +35,32 @@ bun dev
 Open http://localhost:3000. Other scripts:
 
 ```bash
-bun run build        # production build
-bun run test         # vitest run
-bun run typecheck    # tsc --noEmit
-bun run lint         # biome check --write --unsafe
-bun run format       # biome format --write
+bun run build            # production build
+bun run test             # vitest run (every project)
+bun run test:unit        # lib, hooks and other unit tests
+bun run test:components  # React component tests
+bun run test:app         # pages and API route handlers
+bun run test:build       # next build, then check every page keeps a static shell
+bun run test:coverage    # all tests with the 100% coverage gate
+bun run typecheck        # next typegen && tsc --noEmit
+bun run lint             # biome check --write --unsafe
+bun run format           # biome format --write
 ```
 
 ### Environment variables
 
-| Variable | Purpose |
-| --- | --- |
-| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk publishable key. The MCP OAuth issuer is derived from it, so it also decides which Clerk instance issues MCP tokens. |
-| `CLERK_SECRET_KEY` | Clerk secret key (used by `@clerk/nextjs`). |
-| `CLERK_WEBHOOK_SIGNING_SECRET` | Verifies Clerk webhooks at `/api/webhooks/clerk`. |
-| `DATABASE_URL` | Neon Postgres connection string. |
-| `NEXT_PUBLIC_APP_URL` | Public origin of the deployment (e.g. `https://clockout.patmac.ca`); used as the MCP server's website/icon origin. |
-| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` | Amazon SES credentials for report email. |
-| `SES_FROM_EMAIL` | From address for report email. |
-| `CRON_SECRET` | Bearer secret guarding `/api/cron/weekly-report` (called daily by Vercel Cron) and `/api/cron/shift-alerts`. |
-| `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | Web Push (VAPID) key pair for push notifications. Push is off until both are set. |
-| `VAPID_SUBJECT` | Optional contact for push services, e.g. `mailto:you@example.com`. Defaults to `NEXT_PUBLIC_APP_URL`. |
+| Variable                                                   | Purpose                                                                                                                    |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`                        | Clerk publishable key. The MCP OAuth issuer is derived from it, so it also decides which Clerk instance issues MCP tokens. |
+| `CLERK_SECRET_KEY`                                         | Clerk secret key (used by `@clerk/nextjs`).                                                                                |
+| `CLERK_WEBHOOK_SIGNING_SECRET`                             | Verifies Clerk webhooks at `/api/webhooks/clerk`.                                                                          |
+| `DATABASE_URL`                                             | Neon Postgres connection string.                                                                                           |
+| `NEXT_PUBLIC_APP_URL`                                      | Public origin of the deployment (e.g. `https://clockout.patmac.ca`); used as the MCP server's website/icon origin.         |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` | Amazon SES credentials for report email.                                                                                   |
+| `SES_FROM_EMAIL`                                           | From address for report email.                                                                                             |
+| `CRON_SECRET`                                              | Bearer secret guarding `/api/cron/weekly-report` (called daily by Vercel Cron) and `/api/cron/shift-alerts`.               |
+| `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`        | Web Push (VAPID) key pair for push notifications. Push is off until both are set.                                          |
+| `VAPID_SUBJECT`                                            | Optional contact for push services, e.g. `mailto:you@example.com`. Defaults to `NEXT_PUBLIC_APP_URL`.                      |
 
 ### Database
 
@@ -73,11 +78,11 @@ Streamable HTTP transport. The server identifies itself as `clock-out` ("Clock O
 
 Discovery documents (served from the app origin, CORS-open):
 
-| URL | What it is |
-| --- | --- |
-| `/.well-known/oauth-protected-resource` | RFC 9728 Protected Resource Metadata: names the MCP endpoint as the resource and Clerk as its authorization server. |
+| URL                                       | What it is                                                                                                                                                |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/.well-known/oauth-protected-resource`   | RFC 9728 Protected Resource Metadata: names the MCP endpoint as the resource and Clerk as its authorization server.                                       |
 | `/.well-known/oauth-authorization-server` | Clerk's OAuth authorization-server metadata, proxied from the Clerk instance for clients that look for it on the resource's own domain (2025-03-26 spec). |
-| `/.well-known/openid-configuration` | Clerk's OpenID Connect discovery document, proxied the same way. |
+| `/.well-known/openid-configuration`       | Clerk's OpenID Connect discovery document, proxied the same way.                                                                                          |
 
 ### Connecting a client
 
@@ -96,28 +101,28 @@ An unauthenticated request gets a `401` with a `WWW-Authenticate` header pointin
 
 ### Tools (18)
 
-Read-only tools are marked *(read)*. Most tools accept `org_id` (an organization ID, slug, or name); with a single organization it can be omitted, and members are identified by name, email, or `user_id`. Time inputs take an IANA `timezone` (default `America/Edmonton`).
+Read-only tools are marked _(read)_. Most tools accept `org_id` (an organization ID, slug, or name); with a single organization it can be omitted, and members are identified by name, email, or `user_id`. Time inputs take an IANA `timezone` (default `America/Edmonton`).
 
-| Tool | What it does |
-| --- | --- |
-| `list_organizations` *(read)* | Lists the organizations the signed-in user belongs to, with `org_id`, name, slug, and their role. |
-| `list_members` *(read)* | Lists an organization's members (name, email for admins, role, currently clocked in?). |
-| `who_is_working` *(read)* | Who is clocked in right now, since when, and for how long — plus who is clocked out. |
-| `get_clock_status` *(read)* | Whether you (or a member, for admins) are clocked in, whether a break is running, and how long the shift has run. |
-| `clock_in` | Starts a shift for yourself, or for any member if you're an admin. Rejects double clock-ins and overlaps. |
-| `clock_out` | Ends the active shift for yourself or (admin) any member; optional custom clock-out time. |
-| `toggle_break` | Starts, ends, or toggles a live break (`unpaid_meal`, `unpaid_rest`, or `paid_rest`) on an active shift for yourself or (admin) any member. |
-| `manage_breaks` | *(Admin for add/update/delete; anyone for list/start/end/toggle)* Adds, edits, deletes, or lists breaks of the 3 kinds (`unpaid_meal`, `unpaid_rest`, `paid_rest`) on a shift. |
-| `add_time_entry` | Adds one shift or a batch (`entries` array) — the tool to use when importing a photographed paper timecard or schedule. Strictly rejects overlapping shifts. |
-| `list_time_entries` *(read)* | Lists shifts between `start_date` and `end_date` (default last 7 days) with durations; admins can filter by member or use `member: "all"`. |
-| `get_weekly_timecard` *(read)* | Weekly timecard: totals, days worked, and day-by-day breakdowns. Supports `week_of`, explicit dates, or the month-week selector (year, month, week 1–4). |
-| `export_timesheet` *(read)* | Generates PDF **and** Excel timesheets for a period (group by week/month) and returns embedded files plus signed-in download links. |
-| `update_time_entry` | *(Admin)* Changes `clock_in`/`clock_out`/`hours_worked`/`skip_lunch` on an existing entry, by `entry_id` or member + date. Overlap-checked. |
-| `delete_time_entry` | *(Admin)* Permanently deletes a time entry by `entry_id`. |
-| `manage_reporting_settings` | Views or updates the emailed-report schedule (`off`, `weekly`, `bi-weekly`, `twice-monthly`, `custom` weekday every 1–2 weeks) or sends a test report. Updating requires `org:admin` and a plan with the Reporting feature. |
-| `manage_break_settings` | Views, updates, or toggles the lunch/break deduction: `dock_lunch` on/off, `lunch_duration_minutes`, `lunch_min_shift_hours`. Anyone can view; updating is `org:admin`. Available on every plan. |
-| `run_hours_report` | *(Admin, Reporting feature)* Net hours (after break deductions) for one member or everyone between two dates, with daily breakdowns. `deliver`: return in chat (default), `email_admins`, or `both`. |
-| `invite_member` | *(Admin)* Sends organization invitations by email (`action: "send"`, role `org:member` or `org:admin`), lists pending invitations (`"list"`), or revokes one (`"revoke"`). |
+| Tool                           | What it does                                                                                                                                                                                                                |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list_organizations` _(read)_  | Lists the organizations the signed-in user belongs to, with `org_id`, name, slug, and their role.                                                                                                                           |
+| `list_members` _(read)_        | Lists an organization's members (name, email for admins, role, currently clocked in?).                                                                                                                                      |
+| `who_is_working` _(read)_      | Who is clocked in right now, since when, and for how long — plus who is clocked out.                                                                                                                                        |
+| `get_clock_status` _(read)_    | Whether you (or a member, for admins) are clocked in, whether a break is running, and how long the shift has run.                                                                                                           |
+| `clock_in`                     | Starts a shift for yourself, or for any member if you're an admin. Rejects double clock-ins and overlaps.                                                                                                                   |
+| `clock_out`                    | Ends the active shift for yourself or (admin) any member; optional custom clock-out time.                                                                                                                                   |
+| `toggle_break`                 | Starts, ends, or toggles a live break (`unpaid_meal`, `unpaid_rest`, or `paid_rest`) on an active shift for yourself or (admin) any member.                                                                                 |
+| `manage_breaks`                | _(Admin for add/update/delete; anyone for list/start/end/toggle)_ Adds, edits, deletes, or lists breaks of the 3 kinds (`unpaid_meal`, `unpaid_rest`, `paid_rest`) on a shift.                                              |
+| `add_time_entry`               | Adds one shift or a batch (`entries` array) — the tool to use when importing a photographed paper timecard or schedule. Strictly rejects overlapping shifts.                                                                |
+| `list_time_entries` _(read)_   | Lists shifts between `start_date` and `end_date` (default last 7 days) with durations; admins can filter by member or use `member: "all"`.                                                                                  |
+| `get_weekly_timecard` _(read)_ | Weekly timecard: totals, days worked, and day-by-day breakdowns. Supports `week_of`, explicit dates, or the month-week selector (year, month, week 1–4).                                                                    |
+| `export_timesheet` _(read)_    | Generates PDF **and** Excel timesheets for a period (group by week/month) and returns embedded files plus signed-in download links.                                                                                         |
+| `update_time_entry`            | _(Admin)_ Changes `clock_in`/`clock_out`/`hours_worked`/`skip_lunch` on an existing entry, by `entry_id` or member + date. Overlap-checked.                                                                                 |
+| `delete_time_entry`            | _(Admin)_ Permanently deletes a time entry by `entry_id`.                                                                                                                                                                   |
+| `manage_reporting_settings`    | Views or updates the emailed-report schedule (`off`, `weekly`, `bi-weekly`, `twice-monthly`, `custom` weekday every 1–2 weeks) or sends a test report. Updating requires `org:admin` and a plan with the Reporting feature. |
+| `manage_break_settings`        | Views, updates, or toggles the lunch/break deduction: `dock_lunch` on/off, `lunch_duration_minutes`, `lunch_min_shift_hours`. Anyone can view; updating is `org:admin`. Available on every plan.                            |
+| `run_hours_report`             | _(Admin, Reporting feature)_ Net hours (after break deductions) for one member or everyone between two dates, with daily breakdowns. `deliver`: return in chat (default), `email_admins`, or `both`.                        |
+| `invite_member`                | _(Admin)_ Sends organization invitations by email (`action: "send"`, role `org:member` or `org:admin`), lists pending invitations (`"list"`), or revokes one (`"revoke"`).                                                  |
 
 Rules the server enforces and tells clients about: never create duplicate/overlapping shifts (edit the existing entry instead); only edit/delete when the user explicitly asks; report hours are net of break deductions; exporting always returns both the PDF and spreadsheet links.
 
@@ -132,21 +137,21 @@ Location capture and geofencing are web-app features — the browser supplies th
 
 Clock Out leans on Clerk for more than sign-in. Everything a fresh Clerk instance needs turned on — in the Clerk Dashboard for the production instance — is in this one table:
 
-| # | Clerk setting | Exact value | Used for |
-| --- | --- | --- | --- |
-| 1 | Organizations | Enabled, with the built-in roles `org:admin` and `org:member` | The app is multi-tenant on Clerk orgs; memberships, organization invitations (web UI and the MCP `invite_member` tool), and every admin-only check depend on it |
-| 2 | Billing | Clerk Billing enabled, with organization subscription plans | Organizations subscribe to plans; the plan features below are attached to plans and checked with `has({ feature: … })` |
-| 3 | Billing feature | **`reporting`** | Report scheduling and running — gated by `has({ feature: "reporting" })`, including the MCP tools `manage_reporting_settings` and `run_hours_report`. Plans without it can still use everything else, including break settings |
-| 4 | Billing feature | **`geofencing`** | Location capture, job sites, and geofenced clock-in — gated by `has({ feature: "geofencing" })` |
-| 5 | Billing feature | **`download_graph`** | Downloading the hours charts on the View Hours page — gated by `has({ feature: "download_graph" })` |
-| 6 | OAuth provider | Clerk enabled as an OAuth 2.0 authorization server | MCP clients (Claude, ChatGPT, Gemini, …) sign users in and receive access tokens the API verifies |
-| 7 | OAuth provider setting | **Dynamic Client Registration (DCR)** — on | MCP clients register themselves at `/oauth/register` instead of being created by hand |
-| 8 | OAuth provider setting | **Client ID Metadata Documents (CIMD)** — on | The other registration route some MCP clients use |
-| 9 | OAuth scopes | **`profile`**, **`email`**, **`offline_access`** grantable to registered clients | The scopes the MCP server requests. `offline_access` matters: without it clients get no refresh token and keep dropping the connection (Gemini account linking fails outright). No per-client setup is needed or wanted — don't create manual OAuth applications for MCP clients |
-| 10 | Webhook endpoint | `https://<your-domain>/api/webhooks/clerk` | Receives Clerk events at `/api/webhooks/clerk`; its signing secret goes in `CLERK_WEBHOOK_SIGNING_SECRET` |
-| 11 | Webhook event | **`subscriptionItem.active`** (the only event the code handles) | How the app learns an organization's current plan |
-| 12 | Production instance + custom domain | Instance Frontend API domain `https://clerk.clockout.patmac.ca` | The MCP OAuth issuer is derived from the publishable key; MCP discovery, token verification, and every client's stored connection key off that issuer |
-| 13 | Sign-in methods | Email/password and/or social, under User & Authentication | Normal user sign-in to the web app; MCP sign-in rides on the same Clerk sign-in |
+| #   | Clerk setting                       | Exact value                                                                      | Used for                                                                                                                                                                                                                                                                         |
+| --- | ----------------------------------- | -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Organizations                       | Enabled, with the built-in roles `org:admin` and `org:member`                    | The app is multi-tenant on Clerk orgs; memberships, organization invitations (web UI and the MCP `invite_member` tool), and every admin-only check depend on it                                                                                                                  |
+| 2   | Billing                             | Clerk Billing enabled, with organization subscription plans                      | Organizations subscribe to plans; the plan features below are attached to plans and checked with `has({ feature: … })`                                                                                                                                                           |
+| 3   | Billing feature                     | **`reporting`**                                                                  | Report scheduling and running — gated by `has({ feature: "reporting" })`, including the MCP tools `manage_reporting_settings` and `run_hours_report`. Plans without it can still use everything else, including break settings                                                   |
+| 4   | Billing feature                     | **`geofencing`**                                                                 | Location capture, job sites, and geofenced clock-in — gated by `has({ feature: "geofencing" })`                                                                                                                                                                                  |
+| 5   | Billing feature                     | **`download_graph`**                                                             | Downloading the hours charts on the View Hours page — gated by `has({ feature: "download_graph" })`                                                                                                                                                                              |
+| 6   | OAuth provider                      | Clerk enabled as an OAuth 2.0 authorization server                               | MCP clients (Claude, ChatGPT, Gemini, …) sign users in and receive access tokens the API verifies                                                                                                                                                                                |
+| 7   | OAuth provider setting              | **Dynamic Client Registration (DCR)** — on                                       | MCP clients register themselves at `/oauth/register` instead of being created by hand                                                                                                                                                                                            |
+| 8   | OAuth provider setting              | **Client ID Metadata Documents (CIMD)** — on                                     | The other registration route some MCP clients use                                                                                                                                                                                                                                |
+| 9   | OAuth scopes                        | **`profile`**, **`email`**, **`offline_access`** grantable to registered clients | The scopes the MCP server requests. `offline_access` matters: without it clients get no refresh token and keep dropping the connection (Gemini account linking fails outright). No per-client setup is needed or wanted — don't create manual OAuth applications for MCP clients |
+| 10  | Webhook endpoint                    | `https://<your-domain>/api/webhooks/clerk`                                       | Receives Clerk events at `/api/webhooks/clerk`; its signing secret goes in `CLERK_WEBHOOK_SIGNING_SECRET`                                                                                                                                                                        |
+| 11  | Webhook event                       | **`subscriptionItem.active`** (the only event the code handles)                  | How the app learns an organization's current plan                                                                                                                                                                                                                                |
+| 12  | Production instance + custom domain | Instance Frontend API domain `https://clerk.clockout.patmac.ca`                  | The MCP OAuth issuer is derived from the publishable key; MCP discovery, token verification, and every client's stored connection key off that issuer                                                                                                                            |
+| 13  | Sign-in methods                     | Email/password and/or social, under User & Authentication                        | Normal user sign-in to the web app; MCP sign-in rides on the same Clerk sign-in                                                                                                                                                                                                  |
 
 App-side, Clerk is wired in through `src/proxy.ts` (`clerkMiddleware`, protecting `/dashboard(.*)`) and `@clerk/nextjs` providers; no JWT templates or custom session claims are used — MCP token verification is done by Clerk's `authenticateRequest`, not by checking JWT claims in app code.
 
@@ -158,12 +163,12 @@ Deployed on Vercel. `vercel.json` registers a daily cron (`0 6 * * *`) hitting `
 
 Long-running entries used to inflate totals silently. Admins now set rules under **Settings → Shift Alerts** (all off by default):
 
-| Rule | What happens |
-| --- | --- |
-| Forgot to clock out | After *N* hours on the clock (default 10), the member gets one reminder. |
-| Automatic clock-out | After *N* hours (default 16), the shift is closed at exactly clock-in + *N*. Breaks are trimmed to the new end (a running break is also capped at its type's limit) and the member is told. Must be later than the reminder. |
-| Forgot to end break | When a break has run *N* minutes (default 45) — or reaches its type's time limit, if that's sooner — the member is reminded they're still on break / back on the clock. |
-| Notify admins too | Every alert is also sent to the org's admins (an admin's own shift isn't sent to them twice). |
+| Rule                | What happens                                                                                                                                                                                                                 |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Forgot to clock out | After _N_ hours on the clock (default 10), the member gets one reminder.                                                                                                                                                     |
+| Automatic clock-out | After _N_ hours (default 16), the shift is closed at exactly clock-in + _N_. Breaks are trimmed to the new end (a running break is also capped at its type's limit) and the member is told. Must be later than the reminder. |
+| Forgot to end break | When a break has run _N_ minutes (default 45) — or reaches its type's time limit, if that's sooner — the member is reminded they're still on break / back on the clock.                                                      |
+| Notify admins too   | Every alert is also sent to the org's admins (an admin's own shift isn't sent to them twice).                                                                                                                                |
 
 Every person picks **email, push or both** — and which alerts they want — on the **Notifications** tab, where they can also turn push on/off per device and send themselves a test. Each alert is sent once (tracked in `sent_alerts`), however often the cron runs.
 
@@ -192,6 +197,7 @@ Uses the SES setup the reports already use (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACC
 Push uses the standard Web Push protocol with VAPID keys, sent straight from the server with the [`web-push`](https://github.com/web-push-libs/web-push) package. This is what Firebase Cloud Messaging uses under the hood for web apps anyway, so there's no Firebase project, SDK or account to manage, and it is the only way to reach iPhones from a web app.
 
 1. Generate a key pair once:
+
    ```bash
    bunx web-push generate-vapid-keys
    ```
