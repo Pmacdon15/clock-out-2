@@ -80,6 +80,8 @@ describe("clockInAction", () => {
       data: entry,
     });
     expect(mocks.updateTag).toHaveBeenCalledWith("time-entries-user_1-org_1");
+    // The admin schedule reads the org-wide list, so it must refresh too.
+    expect(mocks.updateTag).toHaveBeenCalledWith("org-time-entries-org_1");
   });
 
   it("skips revalidation when no entry comes back", async () => {

@@ -99,3 +99,20 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_time_entry_breaks_one_open
     ON time_entry_breaks (time_entry_id)
     WHERE break_end IS NULL;
 CREATE INDEX IF NOT EXISTS idx_sites_org ON sites (org_id);
+
+-- Shifts an admin publishes for a member. Compared with time_entries to flag
+-- late arrivals and no-shows; nothing here changes worked hours.
+CREATE TABLE IF NOT EXISTS scheduled_shifts (
+    id SERIAL PRIMARY KEY,
+    org_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    shift_start TIMESTAMP WITH TIME ZONE NOT NULL,
+    shift_end TIMESTAMP WITH TIME ZONE NOT NULL,
+    note TEXT,
+    created_by TEXT NOT NULL,
+    CHECK (shift_end > shift_start),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_scheduled_shifts_org_start
+    ON scheduled_shifts (org_id, shift_start);

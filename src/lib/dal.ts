@@ -1,4 +1,5 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
+import { addDays, startOfDay, subDays } from "date-fns";
 import { fromZonedTime } from "date-fns-tz";
 import { errAsync, okAsync, type ResultAsync } from "neverthrow";
 import {
@@ -14,8 +15,10 @@ import {
   dbCheckActiveEntry,
   dbClockIn,
   dbClockOut,
+  dbCreateScheduledShift,
   dbCreateSite,
   dbDeleteBreak,
+  dbDeleteScheduledShift,
   dbDeleteSite,
   dbDeleteTimeEntry,
   dbEndOpenBreak,
@@ -27,6 +30,7 @@ import {
   dbGetLocationSettings,
   dbGetOrgTimeEntries,
   dbGetReportingSettings,
+  dbGetScheduledShifts,
   dbGetSites,
   dbGetSitesForEnforcement,
   dbGetTimeEntries,
@@ -45,12 +49,20 @@ import {
   type StoredLocation,
 } from "./geo";
 import { reverseGeocode } from "./geoapify";
+import {
+  evaluateShifts,
+  invalidShiftReason,
+  SCHEDULE_FUTURE_DAYS,
+  SCHEDULE_PAST_DAYS,
+} from "./schedule-utils";
 import type {
   BreakLimits,
   BreakSettingsData,
   BreakType,
   LocationSettingsData,
   ReportingSettingsData,
+  ScheduledShift,
+  ScheduledShiftWithStatus,
   SerializableResult,
   SiteData,
   TimeEntry,
@@ -1101,5 +1113,118 @@ export async function deleteSiteDal(id: number) {
     .catch((e) => {
       console.error("Delete site error: ", e);
       return errAsync({ reason: "Failed to delete site" } as const);
+    });
+}
+
+/* ---------------------------------------------------- scheduled shifts -- */
+
+/** Longest note an admin can attach to a shift. */
+const MAX_SHIFT_NOTE_LENGTH = 500;
+
+/**
+ * The schedule from two weeks back to four weeks ahead, each shift compared
+ * with the member's actual clock times. Admins see every member's shifts;
+ * members see their own.
+ */
+export async function getSchedule(): Promise<
+  SerializableResult<ScheduledShiftWithStatus[], { reason: string }>
+> {
+  const { userId, orgId, orgRole } = await auth.protect();
+  if (!userId || !orgId) {
+    return {
+      error: { reason: "Unauthorized or no organization selected" },
+      ok: false,
+    };
+  }
+
+  const isAdmin = orgRole === "org:admin";
+  const now = new Date();
+  // Whole days keep the cache keys stable across requests.
+  const rangeStart = startOfDay(subDays(now, SCHEDULE_PAST_DAYS));
+  const rangeEnd = startOfDay(addDays(now, SCHEDULE_FUTURE_DAYS + 1));
+  // A day of slack before the range catches clock-ins made ahead of the
+  // first shift (or a shift still running when it began).
+  const entriesStart = subDays(rangeStart, 1);
+
+  return await Promise.all([
+    dbGetScheduledShifts(orgId, isAdmin ? null : userId, rangeStart, rangeEnd),
+    isAdmin
+      ? dbGetOrgTimeEntries(orgId, entriesStart, rangeEnd)
+      : dbGetTimeEntries(userId, orgId, entriesStart, rangeEnd),
+  ])
+    .then(([shifts, entries]) => ({
+      value: evaluateShifts(shifts, entries, now),
+      ok: true as const,
+    }))
+    .catch((e) => {
+      console.error("Error fetching schedule: ", e);
+      return { error: { reason: "Error fetching schedule" }, ok: false };
+    });
+}
+
+/** Publishes a shift for a member of the admin's organization. */
+export async function createScheduledShiftDal(
+  memberId: string,
+  shiftStart: Date,
+  shiftEnd: Date,
+  note?: string | null,
+) {
+  const { userId, orgId, orgRole } = await auth.protect();
+  if (!userId || !orgId || orgRole !== "org:admin") {
+    return errAsync({ reason: "Unauthorized" } as const);
+  }
+
+  const invalid = invalidShiftReason(shiftStart, shiftEnd);
+  if (invalid) {
+    return errAsync({ reason: invalid } as const);
+  }
+  const trimmedNote = note?.trim() || null;
+  if (trimmedNote && trimmedNote.length > MAX_SHIFT_NOTE_LENGTH) {
+    return errAsync({ reason: "Note is too long" } as const);
+  }
+
+  const members = await getOrgMembers();
+  if (!members.some((member) => member.id === memberId)) {
+    return errAsync({ reason: "Member not found" } as const);
+  }
+
+  return await dbCreateScheduledShift(
+    orgId,
+    memberId,
+    shiftStart,
+    shiftEnd,
+    trimmedNote,
+    userId,
+  )
+    .then((created) => okAsync(created))
+    .catch((e) => {
+      console.error("Error creating shift: ", e);
+      return errAsync({ reason: "Failed to create shift" } as const);
+    });
+}
+
+export async function deleteScheduledShiftDal(id: number) {
+  const { userId, orgId, orgRole } = await auth.protect();
+  if (!userId || !orgId || orgRole !== "org:admin") {
+    return errAsync({ reason: "Unauthorized" } as const);
+  }
+
+  return await dbDeleteScheduledShift(id, orgId)
+    .then(
+      (
+        deleted,
+      ): ResultAsync<
+        ScheduledShift,
+        { readonly reason: "Shift not found" }
+      > => {
+        if (!deleted) {
+          return errAsync({ reason: "Shift not found" } as const);
+        }
+        return okAsync(deleted);
+      },
+    )
+    .catch((e) => {
+      console.error("Error deleting shift: ", e);
+      return errAsync({ reason: "Failed to delete shift" } as const);
     });
 }

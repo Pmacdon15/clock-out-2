@@ -7,6 +7,7 @@ import type {
   BreakType,
   LocationSettingsData,
   ReportingSettingsData,
+  ScheduledShift,
   SiteData,
   TimeEntry,
   TimeEntryBreak,
@@ -781,4 +782,95 @@ export async function dbDeleteSite(id: number, orgId: string) {
 		RETURNING *
 	`;
   return deleted as unknown as SiteData | undefined;
+}
+
+/* ------------------------------------------------- scheduled shifts -- */
+
+let scheduledShiftsTableReady: Promise<void> | null = null;
+
+/**
+ * Production databases that predate `scheduled_shifts` in schema.sql don't
+ * have it, so create it on first use (same approach as the other optional
+ * tables). Runs once per server instance; a failure is not cached.
+ */
+export function ensureScheduledShiftsTable(): Promise<void> {
+  scheduledShiftsTableReady ??= (async () => {
+    await sql`
+		CREATE TABLE IF NOT EXISTS scheduled_shifts (
+			id SERIAL PRIMARY KEY,
+			org_id TEXT NOT NULL,
+			user_id TEXT NOT NULL,
+			shift_start TIMESTAMP WITH TIME ZONE NOT NULL,
+			shift_end TIMESTAMP WITH TIME ZONE NOT NULL,
+			note TEXT,
+			created_by TEXT NOT NULL,
+			CHECK (shift_end > shift_start),
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+		)
+	`;
+    await sql`
+		CREATE INDEX IF NOT EXISTS idx_scheduled_shifts_org_start
+			ON scheduled_shifts (org_id, shift_start)
+	`;
+  })().catch((error) => {
+    scheduledShiftsTableReady = null;
+    throw error;
+  });
+  return scheduledShiftsTableReady;
+}
+
+/** Test-only: forget that the table check ran. */
+export function resetScheduledShiftsTableCheck() {
+  scheduledShiftsTableReady = null;
+}
+
+/**
+ * Shifts starting in [start, end). With a `userId`, only that member's
+ * shifts; with null, every member's.
+ */
+export async function dbGetScheduledShifts(
+  orgId: string,
+  userId: string | null,
+  start: Date,
+  end: Date,
+) {
+  "use cache";
+  cacheTag(`scheduled-shifts-${orgId}`);
+  cacheLife("hours");
+  await ensureScheduledShiftsTable();
+  const rows = await sql`
+		SELECT * FROM scheduled_shifts
+		WHERE org_id = ${orgId}
+		AND (${userId}::TEXT IS NULL OR user_id = ${userId})
+		AND shift_start >= ${start} AND shift_start < ${end}
+		ORDER BY shift_start ASC, id ASC
+	`;
+  return rows as unknown as ScheduledShift[];
+}
+
+export async function dbCreateScheduledShift(
+  orgId: string,
+  userId: string,
+  shiftStart: Date,
+  shiftEnd: Date,
+  note: string | null,
+  createdBy: string,
+) {
+  await ensureScheduledShiftsTable();
+  const [created] = await sql`
+		INSERT INTO scheduled_shifts (org_id, user_id, shift_start, shift_end, note, created_by)
+		VALUES (${orgId}, ${userId}, ${shiftStart}, ${shiftEnd}, ${note}, ${createdBy})
+		RETURNING *
+	`;
+  return created as unknown as ScheduledShift;
+}
+
+export async function dbDeleteScheduledShift(id: number, orgId: string) {
+  await ensureScheduledShiftsTable();
+  const [deleted] = await sql`
+		DELETE FROM scheduled_shifts WHERE id = ${id} AND org_id = ${orgId}
+		RETURNING *
+	`;
+  return deleted as unknown as ScheduledShift | undefined;
 }

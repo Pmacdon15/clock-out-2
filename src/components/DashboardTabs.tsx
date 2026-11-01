@@ -8,6 +8,7 @@ import { SettingsFallback } from "./fallbacks/settings-fallback";
 import { ViewHoursFallback } from "./fallbacks/view-hours-fallback";
 import OrgSettings from "./OrgSettings";
 import { useOrgSwitcher } from "./OrgSwitcher";
+import Schedule from "./Schedule";
 import { Card } from "./ui";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import ViewHours from "./ViewHours";
@@ -21,6 +22,7 @@ export default function DashboardTabs({
   entriesPromise,
   orgTimeEntriesPromise,
   recentEntriesPromise,
+  schedulePromise,
   membersPromise,
   selectedUserIdPromise,
   selectedWeekPromise,
@@ -84,6 +86,7 @@ export default function DashboardTabs({
       <TabsList>
         <TabsTrigger value="time-clock">Time Clock</TabsTrigger>
         <TabsTrigger value="view">Hours</TabsTrigger>
+        <TabsTrigger value="schedule">Schedule</TabsTrigger>
         {isAdmin && <TabsTrigger value="settings">Settings</TabsTrigger>}
       </TabsList>
 
@@ -114,6 +117,16 @@ export default function DashboardTabs({
             setOptimisticEntries={setOptimisticEntries}
             startDatePromise={startDatePromise}
             timeframePromise={timeframePromise}
+          />
+        </Suspense>
+      </TabsContent>
+
+      <TabsContent className="mt-0" value="schedule">
+        <Suspense fallback={<ViewHoursFallback />}>
+          <Schedule
+            isAdmin={isAdmin}
+            membersPromise={membersPromise}
+            schedulePromise={schedulePromise}
           />
         </Suspense>
       </TabsContent>
