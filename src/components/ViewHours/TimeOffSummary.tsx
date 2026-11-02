@@ -4,6 +4,7 @@ import { Palmtree } from "lucide-react";
 import {
   formatTimeOffDates,
   formatTimeOffHours,
+  isPaidTimeOff,
   TIME_OFF_TYPE_LABELS,
   timeOffHoursInRange,
 } from "@/lib/time-off-utils";
@@ -46,7 +47,13 @@ export function TimeOffSummary({
 
   if (inRange.length === 0) return null;
 
-  const total = inRange.reduce((sum, { hours }) => sum + hours, 0);
+  // Unpaid time off is listed but kept out of the paid total.
+  const total = inRange
+    .filter(({ request }) => isPaidTimeOff(request.request_type))
+    .reduce((sum, { hours }) => sum + hours, 0);
+  const unpaid = inRange
+    .filter(({ request }) => !isPaidTimeOff(request.request_type))
+    .reduce((sum, { hours }) => sum + hours, 0);
   const names = new Map(members.map((m) => [m.id, m.name]));
 
   return (
@@ -56,8 +63,15 @@ export function TimeOffSummary({
           <Palmtree className="h-4 w-4" />
           Approved time off
         </h4>
-        <span className="font-bold tabular-nums">
-          {formatTimeOffHours(total)}
+        <span className="text-right">
+          <span className="font-bold tabular-nums">
+            {formatTimeOffHours(total)}
+          </span>
+          {unpaid > 0 && (
+            <span className="block text-muted-foreground text-xs tabular-nums">
+              + {formatTimeOffHours(unpaid)} unpaid
+            </span>
+          )}
         </span>
       </div>
       <ul className="space-y-2 text-sm">

@@ -12,7 +12,9 @@ import type {
   SiteData,
   TimeEntry,
   TimeEntryBreak,
+  TimeOffAllowance,
   TimeOffRequest,
+  TimeOffStatus,
   TimeOffType,
 } from "./types";
 
@@ -997,7 +999,7 @@ export function ensureTimeOffTable(): Promise<void> {
 			id SERIAL PRIMARY KEY,
 			org_id TEXT NOT NULL,
 			user_id TEXT NOT NULL,
-			request_type TEXT NOT NULL CHECK (request_type IN ('vacation', 'sick')),
+			request_type TEXT NOT NULL CHECK (request_type IN ('vacation', 'sick', 'unpaid')),
 			start_date DATE NOT NULL,
 			end_date DATE NOT NULL,
 			hours_per_day DOUBLE PRECISION NOT NULL DEFAULT 8,
@@ -1014,6 +1016,32 @@ export function ensureTimeOffTable(): Promise<void> {
     await sql`
 		CREATE INDEX IF NOT EXISTS idx_time_off_requests_org_dates
 			ON time_off_requests (org_id, end_date)
+	`;
+    // Tables made before unpaid time off only allow vacation and sick days.
+    await sql`
+		DO $$
+		BEGIN
+			IF NOT EXISTS (
+				SELECT 1 FROM pg_constraint
+				WHERE conname = 'time_off_requests_request_type_check'
+				AND pg_get_constraintdef(oid) LIKE '%unpaid%'
+			) THEN
+				ALTER TABLE time_off_requests
+					DROP CONSTRAINT IF EXISTS time_off_requests_request_type_check;
+				ALTER TABLE time_off_requests
+					ADD CONSTRAINT time_off_requests_request_type_check
+					CHECK (request_type IN ('vacation', 'sick', 'unpaid'));
+			END IF;
+		END $$
+	`;
+    await sql`
+		CREATE TABLE IF NOT EXISTS time_off_allowances (
+			org_id TEXT NOT NULL,
+			user_id TEXT NOT NULL,
+			pto_days DOUBLE PRECISION NOT NULL CHECK (pto_days >= 0),
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+			PRIMARY KEY (org_id, user_id)
+		)
 	`;
   })().catch((error) => {
     timeOffTableReady = null;
@@ -1077,6 +1105,102 @@ export async function dbGetApprovedTimeOffForPeriod(
 		ORDER BY start_date ASC, id ASC
 	`;
   return rows as unknown as TimeOffRequest[];
+}
+
+/**
+ * A member's vacation (PTO) requests with one of `statuses` overlapping
+ * [start, end] (inclusive dates), for checking their PTO allowance.
+ */
+export async function dbGetPtoRequestsForPeriod(
+  userId: string,
+  orgId: string,
+  start: string,
+  end: string,
+  statuses: TimeOffStatus[],
+) {
+  await ensureTimeOffTable();
+  const rows = await sql`
+		SELECT id, org_id, user_id, request_type,
+			start_date::TEXT AS start_date, end_date::TEXT AS end_date,
+			hours_per_day, note, status, reviewed_by, reviewed_at,
+			created_at, updated_at
+		FROM time_off_requests
+		WHERE user_id = ${userId} AND org_id = ${orgId}
+		AND request_type = 'vacation'
+		AND status = ANY(${statuses})
+		AND start_date <= ${end}::DATE AND end_date >= ${start}::DATE
+		ORDER BY start_date ASC, id ASC
+	`;
+  return rows as unknown as TimeOffRequest[];
+}
+
+/** One request in the org, or undefined. */
+export async function dbGetTimeOffRequest(id: number, orgId: string) {
+  await ensureTimeOffTable();
+  const [row] = await sql`
+		SELECT id, org_id, user_id, request_type,
+			start_date::TEXT AS start_date, end_date::TEXT AS end_date,
+			hours_per_day, note, status, reviewed_by, reviewed_at,
+			created_at, updated_at
+		FROM time_off_requests
+		WHERE id = ${id} AND org_id = ${orgId}
+	`;
+  return row as unknown as TimeOffRequest | undefined;
+}
+
+/**
+ * PTO allowances in the org. With a `userId`, only that member's; with null,
+ * every member's.
+ */
+export async function dbGetTimeOffAllowances(
+  orgId: string,
+  userId: string | null,
+) {
+  "use cache";
+  cacheTag(`time-off-${orgId}`);
+  cacheLife("hours");
+  await ensureTimeOffTable();
+  const rows = await sql`
+		SELECT org_id, user_id, pto_days, updated_at
+		FROM time_off_allowances
+		WHERE org_id = ${orgId}
+		AND (${userId}::TEXT IS NULL OR user_id = ${userId})
+	`;
+  return rows as unknown as TimeOffAllowance[];
+}
+
+/** A member's yearly PTO days, or null when they have no limit. */
+export async function dbGetTimeOffAllowance(userId: string, orgId: string) {
+  await ensureTimeOffTable();
+  const [row] = await sql`
+		SELECT pto_days FROM time_off_allowances
+		WHERE org_id = ${orgId} AND user_id = ${userId}
+	`;
+  return row ? Number(row.pto_days) : null;
+}
+
+/** Sets a member's yearly PTO days; null removes the limit. */
+export async function dbSetTimeOffAllowance(
+  orgId: string,
+  userId: string,
+  ptoDays: number | null,
+) {
+  await ensureTimeOffTable();
+  if (ptoDays === null) {
+    await sql`
+		DELETE FROM time_off_allowances
+		WHERE org_id = ${orgId} AND user_id = ${userId}
+	`;
+    return { org_id: orgId, user_id: userId, pto_days: null };
+  }
+  const [saved] = await sql`
+		INSERT INTO time_off_allowances (org_id, user_id, pto_days)
+		VALUES (${orgId}, ${userId}, ${ptoDays})
+		ON CONFLICT (org_id, user_id)
+		DO UPDATE SET pto_days = EXCLUDED.pto_days, updated_at = NOW()
+		RETURNING org_id, user_id, pto_days, updated_at
+	`;
+  return saved as unknown as TimeOffAllowance;
 }
 
 /**

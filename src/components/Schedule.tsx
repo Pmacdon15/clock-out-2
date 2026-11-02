@@ -462,8 +462,12 @@ function ShiftForm({
             role="alert"
           >
             {new Map(members.map((m) => [m.id, m.name])).get(memberId)} has
-            approved {TIME_OFF_TYPE_LABELS[conflict.request_type].toLowerCase()}{" "}
-            on {formatTimeOffDates(conflict)}. Pick another day — they can still
+            approved{" "}
+            {TIME_OFF_TYPE_LABELS[conflict.request_type]
+              .charAt(0)
+              .toLowerCase()}
+            {TIME_OFF_TYPE_LABELS[conflict.request_type].slice(1)} on{" "}
+            {formatTimeOffDates(conflict)}. Pick another day — they can still
             clock in if they choose to work.
           </p>
         )}

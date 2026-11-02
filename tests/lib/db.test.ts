@@ -1046,13 +1046,20 @@ describe("time off requests", () => {
     sql.mockReset();
   };
 
-  it("ensureTimeOffTable creates the table and its index once", async () => {
+  it("ensureTimeOffTable creates the tables and index once", async () => {
     sql.mockResolvedValue([]);
     await Promise.all([db.ensureTimeOffTable(), db.ensureTimeOffTable()]);
-    expect(sql).toHaveBeenCalledTimes(2);
+    expect(sql).toHaveBeenCalledTimes(4);
     expect(textOf(0)).toContain("CREATE TABLE IF NOT EXISTS time_off_requests");
     expect(textOf(0)).toContain("CHECK (end_date >= start_date)");
+    expect(textOf(0)).toContain("'vacation', 'sick', 'unpaid'");
     expect(textOf(1)).toContain("idx_time_off_requests_org_dates");
+    // Older tables get the unpaid type added to their check constraint.
+    expect(textOf(2)).toContain("time_off_requests_request_type_check");
+    expect(textOf(2)).toContain("'vacation', 'sick', 'unpaid'");
+    expect(textOf(3)).toContain(
+      "CREATE TABLE IF NOT EXISTS time_off_allowances",
+    );
   });
 
   it("ensureTimeOffTable retries after a failure", async () => {
@@ -1061,7 +1068,7 @@ describe("time off requests", () => {
     sql.mockReset();
     sql.mockResolvedValue([]);
     await db.ensureTimeOffTable();
-    expect(sql).toHaveBeenCalledTimes(2);
+    expect(sql).toHaveBeenCalledTimes(4);
   });
 
   it("dbGetTimeOffRequests reads dates as text and tags the cache", async () => {
@@ -1158,6 +1165,75 @@ describe("time off requests", () => {
     ).resolves.toEqual({ id: 5, status: "approved" });
     expect(textOf(0)).toContain("status = 'pending'");
     expect(valuesOf(0)).toEqual(["approved", "a1", 5, "o1"]);
+  });
+
+  it("dbGetPtoRequestsForPeriod reads a member's vacation overlap", async () => {
+    await ready();
+    sql.mockResolvedValue([{ id: 1 }]);
+    await expect(
+      db.dbGetPtoRequestsForPeriod("u1", "o1", "2026-01-01", "2026-12-31", [
+        "pending",
+        "approved",
+      ]),
+    ).resolves.toEqual([{ id: 1 }]);
+    expect(textOf(0)).toContain("request_type = 'vacation'");
+    expect(textOf(0)).toContain("status = ANY(");
+    expect(valuesOf(0)).toEqual([
+      "u1",
+      "o1",
+      ["pending", "approved"],
+      "2026-12-31",
+      "2026-01-01",
+    ]);
+  });
+
+  it("dbGetTimeOffRequest reads one request in the org", async () => {
+    await ready();
+    sql.mockResolvedValue([{ id: 5 }]);
+    await expect(db.dbGetTimeOffRequest(5, "o1")).resolves.toEqual({ id: 5 });
+    expect(valuesOf(0)).toEqual([5, "o1"]);
+    sql.mockResolvedValue([]);
+    await expect(db.dbGetTimeOffRequest(6, "o1")).resolves.toBeUndefined();
+  });
+
+  it("dbGetTimeOffAllowances reads the org's allowances and tags the cache", async () => {
+    await ready();
+    sql.mockResolvedValue([{ user_id: "u1", pto_days: 10 }]);
+    await expect(db.dbGetTimeOffAllowances("o1", "u1")).resolves.toEqual([
+      { user_id: "u1", pto_days: 10 },
+    ]);
+    expect(textOf(0)).toContain("FROM time_off_allowances");
+    expect(valuesOf(0)).toEqual(["o1", "u1", "u1"]);
+    expect(cacheTag).toHaveBeenCalledWith("time-off-o1");
+  });
+
+  it("dbGetTimeOffAllowance gives a number, or null without a limit", async () => {
+    await ready();
+    sql.mockResolvedValue([{ pto_days: "12.5" }]);
+    await expect(db.dbGetTimeOffAllowance("u1", "o1")).resolves.toBe(12.5);
+    sql.mockResolvedValue([]);
+    await expect(db.dbGetTimeOffAllowance("u1", "o1")).resolves.toBeNull();
+  });
+
+  it("dbSetTimeOffAllowance upserts, or deletes for no limit", async () => {
+    await ready();
+    sql.mockResolvedValue([{ user_id: "u1", pto_days: 15 }]);
+    await expect(db.dbSetTimeOffAllowance("o1", "u1", 15)).resolves.toEqual({
+      user_id: "u1",
+      pto_days: 15,
+    });
+    expect(textOf(0)).toContain("INSERT INTO time_off_allowances");
+    expect(textOf(0)).toContain("ON CONFLICT (org_id, user_id)");
+    expect(valuesOf(0)).toEqual(["o1", "u1", 15]);
+
+    sql.mockReset();
+    sql.mockResolvedValue([]);
+    await expect(db.dbSetTimeOffAllowance("o1", "u1", null)).resolves.toEqual({
+      org_id: "o1",
+      user_id: "u1",
+      pto_days: null,
+    });
+    expect(textOf(0)).toContain("DELETE FROM time_off_allowances");
   });
 
   it("dbCancelTimeOffRequest limits members to their pending requests", async () => {

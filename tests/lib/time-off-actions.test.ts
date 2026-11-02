@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   createTimeOffRequestDal: vi.fn(),
   reviewTimeOffRequestDal: vi.fn(),
   cancelTimeOffRequestDal: vi.fn(),
+  setTimeOffAllowanceDal: vi.fn(),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: { protect: vi.fn() } }));
@@ -18,12 +19,14 @@ vi.mock("@/lib/dal", () => ({
   createTimeOffRequestDal: mocks.createTimeOffRequestDal,
   reviewTimeOffRequestDal: mocks.reviewTimeOffRequestDal,
   cancelTimeOffRequestDal: mocks.cancelTimeOffRequestDal,
+  setTimeOffAllowanceDal: mocks.setTimeOffAllowanceDal,
 }));
 
 import {
   cancelTimeOffRequestAction,
   createTimeOffRequestAction,
   reviewTimeOffRequestAction,
+  setTimeOffAllowanceAction,
 } from "@/lib/actions";
 
 const request = { id: 3, org_id: "org_1", user_id: "user_1" };
@@ -71,6 +74,17 @@ describe("time off actions", () => {
       data: request,
     });
     expect(mocks.reviewTimeOffRequestDal).toHaveBeenCalledWith(3, "approved");
+  });
+
+  it("sets a PTO allowance and revalidates time off", async () => {
+    const saved = { org_id: "org_1", user_id: "user_1", pto_days: 10 };
+    mocks.setTimeOffAllowanceDal.mockResolvedValue(ok(saved));
+    await expect(setTimeOffAllowanceAction("user_1", 10)).resolves.toEqual({
+      success: true,
+      data: saved,
+    });
+    expect(mocks.setTimeOffAllowanceDal).toHaveBeenCalledWith("user_1", 10);
+    expect(mocks.updateTag).toHaveBeenCalledWith("time-off-org_1");
   });
 
   it("cancels a request", async () => {

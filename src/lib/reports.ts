@@ -25,6 +25,7 @@ import {
 import {
   formatTimeOffDates,
   formatTimeOffHours,
+  isPaidTimeOff,
   TIME_OFF_TYPE_LABELS,
   timeOffHoursInRange,
 } from "./time-off-utils";
@@ -333,9 +334,11 @@ export async function sendWeeklyReports(
           return [];
         });
       let timeOffHours = 0;
+      let unpaidTimeOffHours = 0;
       const timeOffLines = timeOff.map((request) => {
         const hours = timeOffHoursInRange(request, customStart, customEnd);
-        timeOffHours += hours;
+        if (isPaidTimeOff(request.request_type)) timeOffHours += hours;
+        else unpaidTimeOffHours += hours;
         return {
           type: TIME_OFF_TYPE_LABELS[request.request_type],
           dates: formatTimeOffDates(request),
@@ -387,6 +390,9 @@ export async function sendWeeklyReports(
               })),
               timeOff: timeOffLines,
               totalTimeOff: formatTimeOffHours(timeOffHours),
+              ...(unpaidTimeOffHours > 0
+                ? { totalUnpaidTimeOff: formatTimeOffHours(unpaidTimeOffHours) }
+                : {}),
             }),
           );
 

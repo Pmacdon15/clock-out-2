@@ -275,7 +275,7 @@ describe("Schedule", () => {
       target: { value: "2026-01-08" },
     });
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "Sam has approved vacation on Jan 7 – Jan 8, 2026",
+      "Sam has approved vacation (PTO) on Jan 7 – Jan 8, 2026",
     );
     expect(
       screen.getByRole("button", { name: "Publish shift" }),
