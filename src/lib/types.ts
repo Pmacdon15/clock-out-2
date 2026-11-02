@@ -72,11 +72,21 @@ export type BreakSettingsData = {
   max_meal_break_minutes?: number | null;
   max_unpaid_rest_break_minutes?: number | null;
   max_paid_break_minutes?: number | null;
+  /**
+   * How many paid / unpaid breaks a member may start in one shift. Null or
+   * absent means no limit. Unpaid covers meal periods and unpaid rest
+   * breaks together.
+   */
+  max_paid_breaks_per_shift?: number | null;
+  max_unpaid_breaks_per_shift?: number | null;
   updated_at?: Date;
 };
 
 /** Per-break-type limits in minutes; null = no limit. */
 export type BreakLimits = Record<BreakType, number | null>;
+
+/** How many paid / unpaid breaks fit in one shift; null = no limit. */
+export type BreakCountLimits = { paid: number | null; unpaid: number | null };
 
 /**
  * Overtime thresholds in hours. Null/absent turns that threshold off; with

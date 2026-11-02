@@ -4,9 +4,12 @@ import { fromZonedTime } from "date-fns-tz";
 import { errAsync, okAsync, type ResultAsync } from "neverthrow";
 import {
   BREAK_TYPE_VALUES,
+  breakCountLimitMessage,
   getBreakLimits,
+  isBreakCountReached,
   isBreakOverLimit,
   isBreakType,
+  isValidBreakCountLimit,
   isValidBreakLimit,
   validateBreak,
 } from "./break-utils";
@@ -87,6 +90,7 @@ import {
   shiftCalendarDays,
 } from "./time-off-utils";
 import type {
+  BreakCountLimits,
   BreakLimits,
   BreakSettingsData,
   BreakType,
@@ -577,6 +581,8 @@ export async function updateBreakSettingsDal(
   minShiftHours: number = 5,
   /** Per-break-type limits in minutes (null = none); undefined keeps them. */
   limits?: BreakLimits,
+  /** Per-shift paid / unpaid break counts (null = none); undefined keeps them. */
+  countLimits?: BreakCountLimits,
 ) {
   const authUser = await auth.protect();
   if (!authUser.userId || !authUser.orgId || authUser.orgRole !== "org:admin") {
@@ -590,7 +596,12 @@ export async function updateBreakSettingsDal(
     minShiftHours < 0 ||
     minShiftHours > 24 ||
     (limits !== undefined &&
-      !BREAK_TYPE_VALUES.every((type) => isValidBreakLimit(limits[type])))
+      !BREAK_TYPE_VALUES.every((type) => isValidBreakLimit(limits[type]))) ||
+    (countLimits !== undefined &&
+      !(
+        isValidBreakCountLimit(countLimits.paid) &&
+        isValidBreakCountLimit(countLimits.unpaid)
+      ))
   ) {
     return errAsync({ reason: "Invalid break settings" } as const);
   }
@@ -600,6 +611,7 @@ export async function updateBreakSettingsDal(
     durationMinutes,
     minShiftHours,
     limits,
+    countLimits,
   )
     .then((updated) => {
       return okAsync(updated);
@@ -825,11 +837,17 @@ export async function startBreak(breakType: BreakType = "unpaid_meal") {
   if (activeEntry === null) {
     return errAsync({ reason: "Not clocked in" } as const);
   }
+  const breakSettings = await loadBreakSettings(orgId);
+  // The org may cap how many paid / unpaid breaks fit in one shift.
+  if (isBreakCountReached(activeEntry, breakType, breakSettings)) {
+    return errAsync({
+      reason: breakCountLimitMessage(breakType, breakSettings),
+    });
+  }
   const runningBreak = (activeEntry.breaks ?? []).find((brk) => !brk.break_end);
   if (runningBreak) {
     // A break past its type's limit is already over in all but the record:
     // close it at its deadline, then let the new break start.
-    const breakSettings = await loadBreakSettings(orgId);
     if (!isBreakOverLimit(runningBreak, breakSettings)) {
       return errAsync({ reason: "A break is already running" } as const);
     }

@@ -338,9 +338,15 @@ describe("break settings", () => {
       null,
       null,
       null,
+      null,
+      null,
       true,
       30,
       5,
+      true,
+      null,
+      true,
+      null,
       true,
       null,
       true,
@@ -371,6 +377,8 @@ describe("break settings", () => {
       45,
       null,
       15,
+      null,
+      null,
       false,
       30,
       5,
@@ -380,6 +388,49 @@ describe("break settings", () => {
       null,
       false,
       15,
+      true,
+      null,
+      true,
+      null,
+    ]);
+  });
+
+  it("dbUpdateBreakSettings overwrites the per-shift break counts when they are passed", async () => {
+    sql.mockResolvedValue([]);
+    await db.ensureBreakSettingsTable();
+    sql.mockReset();
+    sql
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ org_id: "o1", max_paid_breaks_per_shift: 2 }]);
+    await db.dbUpdateBreakSettings("o1", false, 30, 5, undefined, {
+      paid: 2,
+      unpaid: null,
+    });
+    expect(textOf(1)).toContain("max_paid_breaks_per_shift = CASE WHEN");
+    expect(textOf(1)).toContain("max_unpaid_breaks_per_shift = CASE WHEN");
+    expect(valuesOf(1)).toEqual([
+      "o1",
+      false,
+      30,
+      5,
+      null,
+      null,
+      null,
+      2,
+      null,
+      false,
+      30,
+      5,
+      true,
+      null,
+      true,
+      null,
+      true,
+      null,
+      false,
+      2,
+      false,
+      null,
     ]);
   });
 
@@ -401,9 +452,15 @@ describe("break settings", () => {
       null,
       null,
       null,
+      null,
+      null,
       false,
       45,
       6,
+      true,
+      null,
+      true,
+      null,
       true,
       null,
       true,

@@ -2,6 +2,7 @@ import { neon } from "@neondatabase/serverless";
 import { cacheLife, cacheTag } from "next/cache";
 import type { StoredLocation } from "./geo";
 import type {
+  BreakCountLimits,
   BreakLimits,
   BreakSettingsData,
   BreakType,
@@ -291,7 +292,9 @@ export function ensureBreakSettingsTable(): Promise<void> {
 		ALTER TABLE break_settings
 			ADD COLUMN IF NOT EXISTS max_meal_break_minutes INTEGER,
 			ADD COLUMN IF NOT EXISTS max_unpaid_rest_break_minutes INTEGER,
-			ADD COLUMN IF NOT EXISTS max_paid_break_minutes INTEGER
+			ADD COLUMN IF NOT EXISTS max_paid_break_minutes INTEGER,
+			ADD COLUMN IF NOT EXISTS max_paid_breaks_per_shift INTEGER,
+			ADD COLUMN IF NOT EXISTS max_unpaid_breaks_per_shift INTEGER
 	`;
   })().catch((error) => {
     breakSettingsTableReady = null;
@@ -327,6 +330,11 @@ export async function dbUpdateBreakSettings(
    * MCP tool) can't wipe them.
    */
   limits?: BreakLimits,
+  /**
+   * Per-shift paid / unpaid break count limits (null clears one). Omit
+   * (undefined) to keep the stored ones, like `limits`.
+   */
+  countLimits?: BreakCountLimits,
 ) {
   await ensureBreakSettingsTable();
   await sql`
@@ -339,15 +347,20 @@ export async function dbUpdateBreakSettings(
   const meal = limits?.unpaid_meal ?? null;
   const unpaidRest = limits?.unpaid_rest ?? null;
   const paidRest = limits?.paid_rest ?? null;
+  const keepCounts = countLimits === undefined;
+  const paidCount = countLimits?.paid ?? null;
+  const unpaidCount = countLimits?.unpaid ?? null;
   const [updated] = await sql`
 		INSERT INTO break_settings (
 			org_id, dock_lunch, lunch_duration_minutes, lunch_min_shift_hours,
 			max_meal_break_minutes, max_unpaid_rest_break_minutes, max_paid_break_minutes,
+			max_paid_breaks_per_shift, max_unpaid_breaks_per_shift,
 			updated_at
 		)
 		VALUES (
 			${orgId}, ${dockLunch}, ${durationMinutes}, ${minShiftHours},
 			${meal}, ${unpaidRest}, ${paidRest},
+			${paidCount}, ${unpaidCount},
 			NOW()
 		)
 		ON CONFLICT (org_id)
@@ -364,6 +377,12 @@ export async function dbUpdateBreakSettings(
             max_paid_break_minutes = CASE WHEN ${keepLimits}
                 THEN break_settings.max_paid_break_minutes
                 ELSE ${paidRest}::INTEGER END,
+            max_paid_breaks_per_shift = CASE WHEN ${keepCounts}
+                THEN break_settings.max_paid_breaks_per_shift
+                ELSE ${paidCount}::INTEGER END,
+            max_unpaid_breaks_per_shift = CASE WHEN ${keepCounts}
+                THEN break_settings.max_unpaid_breaks_per_shift
+                ELSE ${unpaidCount}::INTEGER END,
             updated_at = NOW()
 		RETURNING *
 	`;

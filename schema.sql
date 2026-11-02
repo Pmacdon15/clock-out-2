@@ -36,6 +36,10 @@ CREATE TABLE IF NOT EXISTS break_settings (
 ALTER TABLE break_settings ADD COLUMN IF NOT EXISTS max_meal_break_minutes INTEGER;
 ALTER TABLE break_settings ADD COLUMN IF NOT EXISTS max_unpaid_rest_break_minutes INTEGER;
 ALTER TABLE break_settings ADD COLUMN IF NOT EXISTS max_paid_break_minutes INTEGER;
+-- How many paid / unpaid breaks a member may start in one shift. NULL = no
+-- limit. Unpaid covers meal periods and unpaid rest breaks together.
+ALTER TABLE break_settings ADD COLUMN IF NOT EXISTS max_paid_breaks_per_shift INTEGER;
+ALTER TABLE break_settings ADD COLUMN IF NOT EXISTS max_unpaid_breaks_per_shift INTEGER;
 
 -- Overtime thresholds in hours. NULL turns that threshold off. Daily
 -- overtime is hours past the daily threshold on one day; weekly overtime is
