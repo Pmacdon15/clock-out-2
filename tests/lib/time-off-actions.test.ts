@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: { protect: vi.fn() } }));
 vi.mock("next/cache", () => ({ updateTag: mocks.updateTag }));
+vi.mock("next/server", () => ({ after: vi.fn() }));
+vi.mock("@/lib/schedule-notify", () => ({ notifyScheduleChange: vi.fn() }));
 vi.mock("@/lib/geoapify", () => ({}));
 vi.mock("@/lib/reports", () => ({}));
 vi.mock("@/lib/dal", () => ({

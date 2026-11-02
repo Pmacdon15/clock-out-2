@@ -7,6 +7,10 @@ import MainPageHeader from "@/components/headers/main-page-header";
 import InstallPrompt from "@/components/InstallPrompt";
 import McpConnectCard from "@/components/McpConnectCard";
 import {
+  getMyNotificationSettings,
+  getOrgAlertSettings,
+} from "@/lib/alerts-dal";
+import {
   getOrgBreakSettings,
   getOrgLocationSettings,
   getOrgMembers,
@@ -34,6 +38,7 @@ export default function Home(props: PageProps<"/">) {
         <Show when="signed-in">
           <Suspense fallback={<DashboardSkeleton />}>
             <DashboardTabs
+              alertSettingsPromise={getOrgAlertSettings()}
               breakSettingsPromise={getOrgBreakSettings()}
               defaultTabPromise={props.searchParams.then((p) =>
                 parseParams(p.defaultTab),
@@ -59,6 +64,7 @@ export default function Home(props: PageProps<"/">) {
               )}
               locationSettingsPromise={getOrgLocationSettings()}
               membersPromise={getOrgMembers()}
+              notificationSettingsPromise={getMyNotificationSettings()}
               orgIdPromise={authPromise.then((auth) => auth.orgId)}
               orgSettingsPromise={getOrgReportingSettings()}
               overtimeSettingsPromise={getOrgOvertimeSettings()}

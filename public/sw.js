@@ -5,6 +5,7 @@ const PRECACHE_ASSETS = [
   "/icon-512.png",
   "/icon.svg",
   "/favicon.ico",
+  "/notification-badge.png",
 ];
 
 self.addEventListener("install", (event) => {
@@ -88,4 +89,57 @@ self.addEventListener("fetch", (event) => {
       }),
     );
   }
+});
+
+// ------------------------------------------------------------ push alerts --
+// Shift alerts ("forgot to clock out", "still on break") arrive as Web Push
+// messages carrying JSON: { title, body, url, tag, icon, badge }.
+
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    data = { body: event.data ? event.data.text() : "" };
+  }
+
+  const title = data.title || "Clock Out";
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body: data.body || "",
+      // The avatar beside the text (Android, desktop). iOS always shows the
+      // Home Screen icon (apple-touch-icon.png) instead.
+      icon: data.icon || "/icon-192.png",
+      // Monochrome status-bar glyph on Android.
+      badge: data.badge || "/notification-badge.png",
+      tag: data.tag || undefined,
+      renotify: Boolean(data.tag),
+      data: { url: data.url || "/" },
+    }),
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const target = new URL(
+    (event.notification.data && event.notification.data.url) || "/",
+    self.location.origin,
+  ).href;
+
+  event.waitUntil(
+    self.clients
+      .matchAll({ type: "window", includeUncontrolled: true })
+      .then((windows) => {
+        for (const client of windows) {
+          if (new URL(client.url).origin === self.location.origin) {
+            return client.focus().then((focused) =>
+              focused && "navigate" in focused
+                ? focused.navigate(target)
+                : focused,
+            );
+          }
+        }
+        return self.clients.openWindow(target);
+      }),
+  );
 });

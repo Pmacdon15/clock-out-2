@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  approvedTimeOffOverlapping,
   countDays,
   formatDays,
   formatTimeOffDates,
@@ -11,6 +12,7 @@ import {
   isTimeOffType,
   ptoDaysUsed,
   ptoOverAllowanceReason,
+  shiftCalendarDays,
   timeOffDaysInRange,
   timeOffHoursInRange,
 } from "@/lib/time-off-utils";
@@ -204,5 +206,61 @@ describe("PTO allowances", () => {
     expect(formatDays(1)).toBe("1 day");
     expect(formatDays(0)).toBe("0 days");
     expect(formatDays(2.5)).toBe("2.5 days");
+  });
+});
+
+describe("shiftCalendarDays", () => {
+  const start = new Date("2026-01-06T01:00:00Z");
+  const end = new Date("2026-01-06T09:00:00Z");
+
+  it("uses the UTC days without local days", () => {
+    expect(shiftCalendarDays(start, end)).toEqual({
+      start: "2026-01-06",
+      end: "2026-01-06",
+    });
+  });
+
+  it("doesn't count the next day for a shift ending at midnight", () => {
+    expect(
+      shiftCalendarDays(
+        new Date("2026-01-05T16:00:00Z"),
+        new Date("2026-01-06T00:00:00Z"),
+      ),
+    ).toEqual({ start: "2026-01-05", end: "2026-01-05" });
+  });
+
+  it("uses the scheduler's local days when they're plausible", () => {
+    expect(
+      shiftCalendarDays(start, end, { start: "2026-01-05", end: "2026-01-06" }),
+    ).toEqual({ start: "2026-01-05", end: "2026-01-06" });
+  });
+
+  it.each([
+    [{ start: "bad", end: "2026-01-06" }],
+    [{ start: "2026-01-06", end: "2026-01-05" }],
+    [{ start: "2026-01-01", end: "2026-01-06" }],
+    [{ start: "2026-01-06", end: "2026-01-09" }],
+  ])("falls back to UTC days for %o", (localDays) => {
+    expect(shiftCalendarDays(start, end, localDays)).toEqual({
+      start: "2026-01-06",
+      end: "2026-01-06",
+    });
+  });
+});
+
+describe("approvedTimeOffOverlapping", () => {
+  const requests = [
+    { status: "approved", start_date: "2026-01-05", end_date: "2026-01-07" },
+    { status: "pending", start_date: "2026-01-05", end_date: "2026-01-07" },
+    { status: "approved", start_date: "2026-01-10", end_date: "2026-01-10" },
+  ] as const;
+
+  it("returns only approved requests touching the days", () => {
+    expect(
+      approvedTimeOffOverlapping([...requests], "2026-01-07", "2026-01-08"),
+    ).toEqual([requests[0]]);
+    expect(
+      approvedTimeOffOverlapping([...requests], "2026-01-08", "2026-01-09"),
+    ).toEqual([]);
   });
 });

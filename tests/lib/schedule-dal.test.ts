@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   dbDeleteScheduledShift: vi.fn(),
   dbGetOrgTimeEntries: vi.fn(),
   dbGetTimeEntries: vi.fn(),
+  dbGetApprovedTimeOffForPeriod: vi.fn(),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({
@@ -31,6 +32,7 @@ vi.mock("@/lib/db", () => ({
   dbDeleteScheduledShift: mocks.dbDeleteScheduledShift,
   dbGetOrgTimeEntries: mocks.dbGetOrgTimeEntries,
   dbGetTimeEntries: mocks.dbGetTimeEntries,
+  dbGetApprovedTimeOffForPeriod: mocks.dbGetApprovedTimeOffForPeriod,
 }));
 
 import {
@@ -61,6 +63,7 @@ beforeEach(() => {
   vi.setSystemTime(new Date("2026-01-05T12:30:00Z"));
   mocks.fetchAllPages.mockResolvedValue([]);
   mocks.getProcessedMembers.mockResolvedValue([{ id: "user_1", name: "Sam" }]);
+  mocks.dbGetApprovedTimeOffForPeriod.mockResolvedValue([]);
 });
 
 describe("getSchedule", () => {
@@ -215,6 +218,63 @@ describe("createScheduledShiftDal", () => {
     await createScheduledShiftDal("user_1", shiftStart, shiftEnd);
     expect(mocks.dbCreateScheduledShift.mock.calls[0][4]).toBeNull();
     expect(mocks.dbCreateScheduledShift.mock.calls[1][4]).toBeNull();
+  });
+
+  it("rejects a shift on the member's approved time off", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbGetApprovedTimeOffForPeriod.mockResolvedValue([
+      {
+        id: 3,
+        status: "approved",
+        start_date: "2026-01-04",
+        end_date: "2026-01-06",
+      },
+    ]);
+    expect(
+      (
+        await createScheduledShiftDal("user_1", shiftStart, shiftEnd)
+      )._unsafeUnwrapErr(),
+    ).toEqual({
+      reason: "This member has approved time off on Jan 4 – Jan 6, 2026",
+    });
+    expect(mocks.dbGetApprovedTimeOffForPeriod).toHaveBeenCalledWith(
+      "user_1",
+      "org_1",
+      "2026-01-05",
+      "2026-01-05",
+    );
+    expect(mocks.dbCreateScheduledShift).not.toHaveBeenCalled();
+  });
+
+  it("checks time off on the scheduler's local days", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbCreateScheduledShift.mockResolvedValue(shift);
+    // 6pm–2am in UTC-7 is 01:00–09:00 UTC the next day.
+    await createScheduledShiftDal(
+      "user_1",
+      new Date("2026-01-06T01:00:00Z"),
+      new Date("2026-01-06T09:00:00Z"),
+      null,
+      { start: "2026-01-05", end: "2026-01-06" },
+    );
+    expect(mocks.dbGetApprovedTimeOffForPeriod).toHaveBeenCalledWith(
+      "user_1",
+      "org_1",
+      "2026-01-05",
+      "2026-01-06",
+    );
+  });
+
+  it("reports a failed time off check", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbGetApprovedTimeOffForPeriod.mockRejectedValue(new Error("db"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(
+      (
+        await createScheduledShiftDal("user_1", shiftStart, shiftEnd)
+      )._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Failed to create shift" });
+    expect(mocks.dbCreateScheduledShift).not.toHaveBeenCalled();
   });
 
   it("reports a failed insert", async () => {

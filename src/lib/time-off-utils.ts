@@ -219,3 +219,52 @@ export function formatDays(days: number) {
   const n = Number.isInteger(days) ? days : Number(days.toFixed(1));
   return `${n} ${n === 1 ? "day" : "days"}`;
 }
+
+/** `YYYY-MM-DD` of a moment in UTC. */
+function utcDateString(moment: Date) {
+  return moment.toISOString().slice(0, 10);
+}
+
+/**
+ * The calendar days (`YYYY-MM-DD`, inclusive) a shift covers, used to check it
+ * against time off. Time off is stored as plain dates, so the days come from
+ * the scheduler's local calendar. `localDays` is trusted only when each date is
+ * within a day of the matching UTC date (every real time zone is); otherwise,
+ * or when it's missing, the UTC dates are used.
+ */
+export function shiftCalendarDays(
+  shiftStart: Date,
+  shiftEnd: Date,
+  localDays?: { start: string; end: string } | null,
+) {
+  const utc = {
+    start: utcDateString(shiftStart),
+    // A shift ending at midnight doesn't touch the next day.
+    end: utcDateString(new Date(shiftEnd.getTime() - 1)),
+  };
+  if (!localDays) return utc;
+  const start = dayNumber(localDays.start);
+  const end = dayNumber(localDays.end);
+  if (
+    start === null ||
+    end === null ||
+    end < start ||
+    Math.abs(start - (dayNumber(utc.start) as number)) > 1 ||
+    Math.abs(end - (dayNumber(utc.end) as number)) > 1
+  ) {
+    return utc;
+  }
+  return { start: localDays.start, end: localDays.end };
+}
+
+/** Approved requests that cover any day in [start, end] (`YYYY-MM-DD`). */
+export function approvedTimeOffOverlapping<
+  T extends Pick<TimeOffRequest, "status" | "start_date" | "end_date">,
+>(requests: T[], start: string, end: string) {
+  return requests.filter(
+    (request) =>
+      request.status === "approved" &&
+      request.start_date <= end &&
+      request.end_date >= start,
+  );
+}

@@ -25,6 +25,7 @@ import {
   dbDeleteTimeEntry,
   dbEndOpenBreak,
   dbGetActiveEntry,
+  dbGetApprovedTimeOffForPeriod,
   dbGetBreakSettings,
   dbGetBreaksForEntriesInOrg,
   dbGetBreakWithEntry,
@@ -72,10 +73,12 @@ import {
   SCHEDULE_PAST_DAYS,
 } from "./schedule-utils";
 import {
+  formatTimeOffDates,
   invalidAllowanceReason,
   invalidTimeOffReason,
   MAX_TIME_OFF_NOTE_LENGTH,
   ptoOverAllowanceReason,
+  shiftCalendarDays,
 } from "./time-off-utils";
 import type {
   BreakLimits,
@@ -1254,6 +1257,7 @@ export async function createScheduledShiftDal(
   shiftStart: Date,
   shiftEnd: Date,
   note?: string | null,
+  localDays?: { start: string; end: string } | null,
 ) {
   const { userId, orgId, orgRole } = await auth.protect();
   if (!userId || !orgId || orgRole !== "org:admin") {
@@ -1272,6 +1276,27 @@ export async function createScheduledShiftDal(
   const members = await getOrgMembers();
   if (!members.some((member) => member.id === memberId)) {
     return errAsync({ reason: "Member not found" } as const);
+  }
+
+  // Members can still clock in on their time off, but they can't be
+  // scheduled for it.
+  const days = shiftCalendarDays(shiftStart, shiftEnd, localDays);
+  let timeOff: TimeOffRequest[];
+  try {
+    timeOff = await dbGetApprovedTimeOffForPeriod(
+      memberId,
+      orgId,
+      days.start,
+      days.end,
+    );
+  } catch (e) {
+    console.error("Error checking time off: ", e);
+    return errAsync({ reason: "Failed to create shift" } as const);
+  }
+  if (timeOff.length > 0) {
+    return errAsync({
+      reason: `This member has approved time off on ${formatTimeOffDates(timeOff[0])}`,
+    } as const);
   }
 
   return await dbCreateScheduledShift(
