@@ -24,6 +24,7 @@ import {
   getTimeOffAllowances,
   getTimeOffRequests,
 } from "@/lib/dal";
+import { getOrgPayroll } from "@/lib/payroll-dal";
 import { parseParams } from "@/lib/utils";
 
 export default function Home(props: PageProps<"/">) {
@@ -70,6 +71,7 @@ export default function Home(props: PageProps<"/">) {
               orgSettingsPromise={getOrgReportingSettings()}
               overtimeSettingsPromise={getOrgOvertimeSettings()}
               payRatesPromise={getOrgPayRates()}
+              payrollPromise={getOrgPayroll()}
               orgTimeEntriesPromise={props.searchParams.then((p) =>
                 getOrgTimeEntries({
                   start: parseParams(p.start),

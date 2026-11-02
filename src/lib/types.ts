@@ -54,6 +54,7 @@ export type SerializableResult<T, E> =
   | { error: E; ok: false };
 
 import type { NotificationSettingsView } from "./alerts-dal";
+import type { PayrollView } from "./payroll";
 import type { EntryAction } from "./reducers/time-entries";
 
 export type ReportingSettingsData = {
@@ -174,6 +175,8 @@ export interface DashboardTabsProps {
   payRatesPromise?: Promise<
     SerializableResult<PayRateData[], { reason: string }>
   >;
+  /** Optional CPP/QPP and EI deduction settings plus the CRA rates. */
+  payrollPromise?: Promise<SerializableResult<PayrollView, { reason: string }>>;
   sitesPromise?: Promise<SerializableResult<SiteData[], { reason: string }>>;
   alertSettingsPromise?: Promise<
     SerializableResult<AlertSettingsData, { reason: string }>
@@ -223,6 +226,8 @@ export interface ViewHoursProps {
   overtimeSettings?: OvertimeSettingsData | null;
   /** Rates the viewer may see; gross pay is estimated for these members. */
   payRates?: PayRateData[];
+  /** Deductions are estimated beside gross pay when enabled. */
+  payroll?: PayrollView | null;
   membersPromise?: Promise<
     {
       id: string;

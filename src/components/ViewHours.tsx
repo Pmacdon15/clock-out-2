@@ -26,6 +26,7 @@ export default function ViewHours({
   breakSettings,
   overtimeSettings,
   payRates,
+  payroll,
   membersPromise,
   orgTimeEntriesPromise,
   timeOffPromise,
@@ -252,6 +253,7 @@ export default function ViewHours({
               isViewingAll={isViewingAll}
               members={members}
               payRates={rates}
+              payroll={payroll}
               splitsByEntry={splitsByEntry}
             />
           )}

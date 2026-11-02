@@ -11,6 +11,15 @@ import {
   type PayRate,
   sumPay,
 } from "@/lib/pay";
+import {
+  computeDeductionsForPeriods,
+  jurisdictionFor,
+  type PayrollDeductions,
+  type PayrollView,
+  type ProvinceCode,
+  provinceName,
+  sumDeductions,
+} from "@/lib/payroll";
 import type { TimeEntry } from "@/lib/types";
 import { Card } from "../ui";
 
@@ -21,6 +30,8 @@ interface PaySummaryProps {
   payRates: Map<string, PayRate>;
   isViewingAll?: boolean;
   members?: { id: string; name: string }[];
+  /** When deductions are on, CPP/QPP, EI and net pay are estimated too. */
+  payroll?: PayrollView | null;
 }
 
 /** yyyy-MM-dd in the browser's zone, as the overtime split counts days. */
@@ -52,11 +63,13 @@ export function PaySummary({
   payRates,
   isViewingAll = false,
   members = [],
+  payroll = null,
 }: PaySummaryProps) {
   const summary = useMemo(() => {
     const byMember = new Map<string, PayBreakdown[]>();
     const byWeek = new Map<string, PayBreakdown[]>();
     const unrated = new Set<string>();
+    const byMemberWeek = new Map<string, Map<string, number>>();
     for (const entry of entries) {
       const rate = payRates.get(entry.user_id);
       if (!rate) {
@@ -70,6 +83,30 @@ export function PaySummary({
       ]);
       const week = weekStartOf(dayOf(entry.clock_in));
       byWeek.set(week, [...(byWeek.get(week) ?? []), pay]);
+      const weeks = byMemberWeek.get(entry.user_id) ?? new Map();
+      weeks.set(week, (weeks.get(week) ?? 0) + pay.grossPay);
+      byMemberWeek.set(entry.user_id, weeks);
+    }
+    // Deductions are worked out per member per Monday–Sunday week (52 pay
+    // periods a year), so annual maximums and the prorated basic exemption
+    // apply the way they would on weekly pay.
+    let deductions: (PayrollDeductions & { province: ProvinceCode }) | null =
+      null;
+    if (payroll?.enabled) {
+      const jurisdiction = jurisdictionFor(payroll.province);
+      const totals = sumDeductions(
+        Array.from(
+          byMemberWeek.values(),
+          (weeks) =>
+            computeDeductionsForPeriods(
+              Array.from(weeks, ([date, gross]) => ({ date, gross })),
+              payroll.rates,
+              jurisdiction,
+              52,
+            ).total,
+        ),
+      );
+      deductions = { ...totals, province: payroll.province };
     }
     const memberRows = Array.from(byMember.entries())
       .map(([id, pays]) => ({
@@ -87,8 +124,9 @@ export function PaySummary({
       memberRows,
       weekRows,
       unratedCount: unrated.size,
+      deductions,
     };
-  }, [entries, splitsByEntry, payRates, members]);
+  }, [entries, splitsByEntry, payRates, members, payroll]);
 
   const ownRate = !isViewingAll ? summary.memberRows[0]?.rate : undefined;
 
@@ -127,6 +165,47 @@ export function PaySummary({
           </div>
         </div>
       </div>
+
+      {summary.deductions && (
+        <div className="mt-4" data-testid="pay-deductions">
+          <div className="mb-2 font-bold text-[10px] text-zinc-500 uppercase tracking-wider dark:text-zinc-400">
+            Estimated deductions · {provinceName(summary.deductions.province)}
+          </div>
+          <ul className="space-y-1 text-sm">
+            <li className="flex items-center justify-between">
+              <span>
+                {summary.deductions.province === "QC" ? "QPP" : "CPP"}
+              </span>
+              <span className="tabular-nums" data-testid="deduction-pension">
+                {formatMoney(summary.deductions.pension)}
+              </span>
+            </li>
+            <li className="flex items-center justify-between">
+              <span>
+                {summary.deductions.province === "QC" ? "QPP2" : "CPP2"}
+              </span>
+              <span className="tabular-nums" data-testid="deduction-pension2">
+                {formatMoney(summary.deductions.pension2)}
+              </span>
+            </li>
+            <li className="flex items-center justify-between">
+              <span>EI</span>
+              <span className="tabular-nums" data-testid="deduction-ei">
+                {formatMoney(summary.deductions.ei)}
+              </span>
+            </li>
+            <li className="flex items-center justify-between border-t pt-1 font-bold">
+              <span>Net pay before income tax</span>
+              <span className="tabular-nums" data-testid="net-pay">
+                {formatMoney(summary.deductions.net)}
+              </span>
+            </li>
+          </ul>
+          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+            Annual maximums count only the hours shown here.
+          </p>
+        </div>
+      )}
 
       {summary.weekRows.length > 1 && (
         <div className="mt-4">
