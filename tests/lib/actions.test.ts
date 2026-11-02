@@ -290,6 +290,7 @@ describe("updateBreakSettingAction", () => {
       5,
       undefined,
       undefined,
+      undefined,
     );
     expect(mocks.updateTag).toHaveBeenCalledWith("break-settings-org_1");
   });
@@ -302,6 +303,26 @@ describe("updateBreakSettingAction", () => {
       45,
       6,
       undefined,
+      undefined,
+      undefined,
+    );
+  });
+
+  it("forwards the limits and whether lunch is paid", async () => {
+    mocks.updateBreakSettingsDal.mockResolvedValue(ok({ org_id: "org_1" }));
+    const limits = {
+      unpaid_meal: 30,
+      paid_meal: 30,
+      unpaid_rest: 15,
+      paid_rest: null,
+    };
+    await updateBreakSettingAction(false, 30, 5, limits, true);
+    expect(mocks.updateBreakSettingsDal).toHaveBeenCalledWith(
+      false,
+      30,
+      5,
+      limits,
+      true,
       undefined,
     );
   });
@@ -335,10 +356,10 @@ describe("startBreakAction", () => {
     expect(mocks.updateTag).toHaveBeenCalledWith("org-time-entries-org_1");
   });
 
-  it("defaults to the meal period", async () => {
+  it("leaves the default (the org's lunch) to the server", async () => {
     mocks.startBreak.mockResolvedValue(ok(brk));
     await startBreakAction();
-    expect(mocks.startBreak).toHaveBeenCalledWith("unpaid_meal");
+    expect(mocks.startBreak).toHaveBeenCalledWith(undefined);
   });
 
   it("returns the failure reason", async () => {

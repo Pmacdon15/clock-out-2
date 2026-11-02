@@ -6,9 +6,11 @@ import {
   BREAK_TYPE_VALUES,
   breakCountLimitMessage,
   getBreakLimits,
+  getMealBreakType,
   isBreakCountReached,
   isBreakOverLimit,
   isBreakType,
+  isMealBreakType,
   isValidBreakCountLimit,
   isValidBreakLimit,
   validateBreak,
@@ -581,6 +583,8 @@ export async function updateBreakSettingsDal(
   minShiftHours: number = 5,
   /** Per-break-type limits in minutes (null = none); undefined keeps them. */
   limits?: BreakLimits,
+  /** Whether lunch is paid; undefined keeps the stored choice. */
+  paidLunch?: boolean,
   /** Per-shift paid / unpaid break counts (null = none); undefined keeps them. */
   countLimits?: BreakCountLimits,
 ) {
@@ -597,6 +601,7 @@ export async function updateBreakSettingsDal(
     minShiftHours > 24 ||
     (limits !== undefined &&
       !BREAK_TYPE_VALUES.every((type) => isValidBreakLimit(limits[type]))) ||
+    (paidLunch !== undefined && typeof paidLunch !== "boolean") ||
     (countLimits !== undefined &&
       !(
         isValidBreakCountLimit(countLimits.paid) &&
@@ -611,6 +616,7 @@ export async function updateBreakSettingsDal(
     durationMinutes,
     minShiftHours,
     limits,
+    paidLunch,
     countLimits,
   )
     .then((updated) => {
@@ -811,8 +817,11 @@ async function loadBreakSettings(
  * Starts a break on the caller's running shift. Breaks only exist inside a
  * shift, so this fails when the member is not clocked in, and refuses a
  * second break while one is still running.
+ *
+ * Lunch is either paid or unpaid for the whole org (`paid_lunch`), so only
+ * that meal-period kind can be started; with no type given, lunch is started.
  */
-export async function startBreak(breakType: BreakType = "unpaid_meal") {
+export async function startBreak(requestedType?: BreakType) {
   const { userId, orgId } = await auth.protect();
   if (!userId || !orgId) {
     return errAsync({
@@ -820,8 +829,20 @@ export async function startBreak(breakType: BreakType = "unpaid_meal") {
     } as const);
   }
 
-  if (!isBreakType(breakType)) {
+  if (requestedType !== undefined && !isBreakType(requestedType)) {
     return errAsync({ reason: "Unknown break type" } as const);
+  }
+
+  const breakSettings = await loadBreakSettings(orgId);
+  const mealType = getMealBreakType(breakSettings);
+  const breakType = requestedType ?? mealType;
+  if (isMealBreakType(breakType) && breakType !== mealType) {
+    return errAsync({
+      reason:
+        mealType === "paid_meal"
+          ? "Lunch is paid in this organization"
+          : "Lunch is unpaid in this organization",
+    } as const);
   }
 
   const activeEntry = await dbGetActiveEntry(userId, orgId).catch((e) => {
@@ -837,7 +858,6 @@ export async function startBreak(breakType: BreakType = "unpaid_meal") {
   if (activeEntry === null) {
     return errAsync({ reason: "Not clocked in" } as const);
   }
-  const breakSettings = await loadBreakSettings(orgId);
   // The org may cap how many paid / unpaid breaks fit in one shift.
   if (isBreakCountReached(activeEntry, breakType, breakSettings)) {
     return errAsync({

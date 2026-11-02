@@ -36,8 +36,11 @@ CREATE TABLE IF NOT EXISTS break_settings (
 ALTER TABLE break_settings ADD COLUMN IF NOT EXISTS max_meal_break_minutes INTEGER;
 ALTER TABLE break_settings ADD COLUMN IF NOT EXISTS max_unpaid_rest_break_minutes INTEGER;
 ALTER TABLE break_settings ADD COLUMN IF NOT EXISTS max_paid_break_minutes INTEGER;
+-- Whether lunch (the meal period) is paid. When TRUE the clock offers a paid
+-- meal period ('paid_meal') instead of an unpaid one and lunch is never docked.
+ALTER TABLE break_settings ADD COLUMN IF NOT EXISTS paid_lunch BOOLEAN NOT NULL DEFAULT FALSE;
 -- How many paid / unpaid breaks a member may start in one shift. NULL = no
--- limit. Unpaid covers meal periods and unpaid rest breaks together.
+-- limit. A meal period counts toward whichever kind lunch is (paid_lunch).
 ALTER TABLE break_settings ADD COLUMN IF NOT EXISTS max_paid_breaks_per_shift INTEGER;
 ALTER TABLE break_settings ADD COLUMN IF NOT EXISTS max_unpaid_breaks_per_shift INTEGER;
 
@@ -108,7 +111,7 @@ CREATE TABLE IF NOT EXISTS time_entry_breaks (
     id SERIAL PRIMARY KEY,
     time_entry_id INTEGER NOT NULL REFERENCES time_entries(id) ON DELETE CASCADE,
     break_type TEXT NOT NULL DEFAULT 'unpaid_meal'
-        CHECK (break_type IN ('unpaid_meal', 'unpaid_rest', 'paid_rest')),
+        CHECK (break_type IN ('unpaid_meal', 'paid_meal', 'unpaid_rest', 'paid_rest')),
     break_start TIMESTAMP WITH TIME ZONE NOT NULL,
     -- NULL while the break is still running.
     break_end TIMESTAMP WITH TIME ZONE,

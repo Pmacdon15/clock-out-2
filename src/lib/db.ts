@@ -293,6 +293,7 @@ export function ensureBreakSettingsTable(): Promise<void> {
 			ADD COLUMN IF NOT EXISTS max_meal_break_minutes INTEGER,
 			ADD COLUMN IF NOT EXISTS max_unpaid_rest_break_minutes INTEGER,
 			ADD COLUMN IF NOT EXISTS max_paid_break_minutes INTEGER,
+			ADD COLUMN IF NOT EXISTS paid_lunch BOOLEAN NOT NULL DEFAULT FALSE,
 			ADD COLUMN IF NOT EXISTS max_paid_breaks_per_shift INTEGER,
 			ADD COLUMN IF NOT EXISTS max_unpaid_breaks_per_shift INTEGER
 	`;
@@ -330,6 +331,8 @@ export async function dbUpdateBreakSettings(
    * MCP tool) can't wipe them.
    */
   limits?: BreakLimits,
+  /** Whether lunch is paid. Omit (undefined) to keep the stored choice. */
+  paidLunch?: boolean,
   /**
    * Per-shift paid / unpaid break count limits (null clears one). Omit
    * (undefined) to keep the stored ones, like `limits`.
@@ -347,6 +350,8 @@ export async function dbUpdateBreakSettings(
   const meal = limits?.unpaid_meal ?? null;
   const unpaidRest = limits?.unpaid_rest ?? null;
   const paidRest = limits?.paid_rest ?? null;
+  const keepPaidLunch = paidLunch === undefined;
+  const paid = paidLunch ?? false;
   const keepCounts = countLimits === undefined;
   const paidCount = countLimits?.paid ?? null;
   const unpaidCount = countLimits?.unpaid ?? null;
@@ -354,13 +359,13 @@ export async function dbUpdateBreakSettings(
 		INSERT INTO break_settings (
 			org_id, dock_lunch, lunch_duration_minutes, lunch_min_shift_hours,
 			max_meal_break_minutes, max_unpaid_rest_break_minutes, max_paid_break_minutes,
-			max_paid_breaks_per_shift, max_unpaid_breaks_per_shift,
+			paid_lunch, max_paid_breaks_per_shift, max_unpaid_breaks_per_shift,
 			updated_at
 		)
 		VALUES (
 			${orgId}, ${dockLunch}, ${durationMinutes}, ${minShiftHours},
 			${meal}, ${unpaidRest}, ${paidRest},
-			${paidCount}, ${unpaidCount},
+			${paid}, ${paidCount}, ${unpaidCount},
 			NOW()
 		)
 		ON CONFLICT (org_id)
@@ -377,6 +382,9 @@ export async function dbUpdateBreakSettings(
             max_paid_break_minutes = CASE WHEN ${keepLimits}
                 THEN break_settings.max_paid_break_minutes
                 ELSE ${paidRest}::INTEGER END,
+            paid_lunch = CASE WHEN ${keepPaidLunch}
+                THEN break_settings.paid_lunch
+                ELSE ${paid}::BOOLEAN END,
             max_paid_breaks_per_shift = CASE WHEN ${keepCounts}
                 THEN break_settings.max_paid_breaks_per_shift
                 ELSE ${paidCount}::INTEGER END,
@@ -556,7 +564,7 @@ export function ensureTimeEntryBreaksTable(): Promise<void> {
 			id SERIAL PRIMARY KEY,
 			time_entry_id INTEGER NOT NULL REFERENCES time_entries(id) ON DELETE CASCADE,
 			break_type TEXT NOT NULL DEFAULT 'unpaid_meal'
-				CHECK (break_type IN ('unpaid_meal', 'unpaid_rest', 'paid_rest')),
+				CHECK (break_type IN ('unpaid_meal', 'paid_meal', 'unpaid_rest', 'paid_rest')),
 			break_start TIMESTAMP WITH TIME ZONE NOT NULL,
 			break_end TIMESTAMP WITH TIME ZONE,
 			CHECK (break_end IS NULL OR break_end > break_start),
@@ -572,6 +580,32 @@ export function ensureTimeEntryBreaksTable(): Promise<void> {
 		CREATE UNIQUE INDEX IF NOT EXISTS idx_time_entry_breaks_one_open
 			ON time_entry_breaks (time_entry_id)
 			WHERE break_end IS NULL
+	`;
+    // Tables created before the paid meal period existed only allow the
+    // first three kinds; swap that check for one that also allows it.
+    await sql`
+		DO $$
+		DECLARE c RECORD;
+		BEGIN
+			FOR c IN
+				SELECT conname FROM pg_constraint
+				WHERE conrelid = 'time_entry_breaks'::regclass
+				AND contype = 'c'
+				AND pg_get_constraintdef(oid) LIKE '%break_type%'
+				AND pg_get_constraintdef(oid) NOT LIKE '%paid_meal%'
+			LOOP
+				EXECUTE format('ALTER TABLE time_entry_breaks DROP CONSTRAINT %I', c.conname);
+			END LOOP;
+			IF NOT EXISTS (
+				SELECT 1 FROM pg_constraint
+				WHERE conrelid = 'time_entry_breaks'::regclass
+				AND contype = 'c'
+				AND pg_get_constraintdef(oid) LIKE '%paid_meal%'
+			) THEN
+				ALTER TABLE time_entry_breaks ADD CONSTRAINT time_entry_breaks_break_type_check
+					CHECK (break_type IN ('unpaid_meal', 'paid_meal', 'unpaid_rest', 'paid_rest'));
+			END IF;
+		END $$
 	`;
   })().catch((error) => {
     timeEntryBreaksTableReady = null;
@@ -715,6 +749,7 @@ export async function dbEndOpenBreak(
 ) {
   await ensureTimeEntryBreaksTable();
   const meal = limits?.unpaid_meal ?? null;
+  const paidMeal = limits?.paid_meal ?? null;
   const unpaidRest = limits?.unpaid_rest ?? null;
   const paidRest = limits?.paid_rest ?? null;
   const [updated] = await sql`
@@ -723,6 +758,7 @@ export async function dbEndOpenBreak(
 				NOW(),
 				break_start + make_interval(mins => (CASE break_type
 					WHEN 'unpaid_meal' THEN ${meal}::INTEGER
+					WHEN 'paid_meal' THEN ${paidMeal}::INTEGER
 					WHEN 'unpaid_rest' THEN ${unpaidRest}::INTEGER
 					WHEN 'paid_rest' THEN ${paidRest}::INTEGER
 				END))

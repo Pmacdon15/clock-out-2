@@ -96,6 +96,12 @@ describe("getRemainingBreakCount / isBreakCountReached", () => {
     expect(isBreakCountReached(entry, "paid_rest", settings)).toBe(false);
   });
 
+  it("counts a paid lunch against the paid limit", () => {
+    const entry = shift("paid_meal", "paid_rest");
+    expect(isBreakCountReached(entry, "paid_rest", settings)).toBe(true);
+    expect(getRemainingBreakCount(entry, "unpaid_rest", settings)).toBe(1);
+  });
+
   it("never goes below zero", () => {
     const entry = shift("paid_rest", "paid_rest", "paid_rest");
     expect(getRemainingBreakCount(entry, "paid_rest", settings)).toBe(0);

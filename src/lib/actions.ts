@@ -167,6 +167,7 @@ export async function updateBreakSettingAction(
   durationMinutes: number = 30,
   minShiftHours: number = 5,
   limits?: BreakLimits,
+  paidLunch?: boolean,
   countLimits?: BreakCountLimits,
 ) {
   const result = await updateBreakSettingsDal(
@@ -174,6 +175,7 @@ export async function updateBreakSettingAction(
     durationMinutes,
     minShiftHours,
     limits,
+    paidLunch,
     countLimits,
   );
 
@@ -220,7 +222,7 @@ function updateBreakTags(entry: { user_id: string; org_id: string }) {
   updateTag(`org-time-entries-${entry.org_id}`);
 }
 
-export async function startBreakAction(breakType: BreakType = "unpaid_meal") {
+export async function startBreakAction(breakType?: BreakType) {
   const result = await dalStartBreak(breakType);
 
   return result.match(

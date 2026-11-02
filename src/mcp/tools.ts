@@ -12,14 +12,16 @@ import {
 import { formatInTimeZone, fromZonedTime, toZonedTime } from "date-fns-tz";
 import { z } from "zod";
 import {
+  BREAK_TYPE_VALUES,
   breakTypeLabel,
-  DEFAULT_BREAK_TYPE,
   getBreakDurationMs,
   getEffectiveDurationMs,
+  getMealBreakType,
   getOpenBreak,
   getPaidBreakMs,
   getUnpaidBreakMs,
   isBreakType,
+  isMealBreakType,
   isPaidBreakType,
   MAX_BREAK_LIMIT_MINUTES,
   validateBreak,
@@ -501,10 +503,10 @@ export const toggleBreakInputSchema = z.object({
       "Action to perform on the active shift's break: 'toggle' (starts a break if none is running, or ends the running break if one is open; default), 'start' (starts a break of break_type), or 'end' (ends the currently running break).",
     ),
   break_type: z
-    .enum(["unpaid_meal", "unpaid_rest", "paid_rest"])
+    .enum(["unpaid_meal", "paid_meal", "unpaid_rest", "paid_rest"])
     .optional()
     .describe(
-      "Kind of break when starting a break (one of the 3 supported kinds): 'unpaid_meal' (Meal period — unpaid, deducted from hours; default), 'unpaid_rest' (Unpaid rest break — unpaid, deducted from hours), or 'paid_rest' (Paid rest break — paid, recorded for compliance and not deducted).",
+      "Kind of break when starting a break (one of the 4 supported kinds): 'unpaid_meal' (Meal period — unpaid lunch, deducted from hours), 'paid_meal' (Paid meal period — paid lunch, not deducted), 'unpaid_rest' (Unpaid rest break — unpaid, deducted from hours), or 'paid_rest' (Paid rest break — paid, recorded for compliance and not deducted). Lunch is paid or unpaid for the whole organization (manage_break_settings paid_lunch), so only that organization's meal kind can be started live. Defaults to the organization's meal kind.",
     ),
   timezone: timezoneField,
 });
@@ -515,7 +517,7 @@ export const manageBreaksInputSchema = z.object({
     .enum(["add", "update", "delete", "list", "start", "end", "toggle"])
     .optional()
     .describe(
-      "Action to perform: 'add' (admin: add a break of one of the 3 kinds — 'unpaid_meal', 'unpaid_rest', or 'paid_rest' — to a shift), 'update' (admin: edit an existing break's break_type, break_start, break_end, or duration_minutes), 'delete' (admin: remove a break), 'list' (list breaks recorded on a shift), or 'start'/'end'/'toggle' (start, end, or toggle a live break on an active shift). Defaults to 'list'.",
+      "Action to perform: 'add' (admin: add a break of one of the 4 kinds — 'unpaid_meal', 'paid_meal', 'unpaid_rest', or 'paid_rest' — to a shift), 'update' (admin: edit an existing break's break_type — e.g. change it to a different kind — break_start, break_end, or duration_minutes), 'delete' (admin: remove a break), 'list' (list breaks recorded on a shift), or 'start'/'end'/'toggle' (start, end, or toggle a live break on an active shift). Defaults to 'list'.",
     ),
   break_id: z
     .number()
@@ -539,10 +541,10 @@ export const manageBreaksInputSchema = z.object({
       "Shift date as YYYY-MM-DD (used to locate the time entry when entry_id is omitted, and to resolve time-of-day strings like '12:00' or '12:30 PM').",
     ),
   break_type: z
-    .enum(["unpaid_meal", "unpaid_rest", "paid_rest"])
+    .enum(["unpaid_meal", "paid_meal", "unpaid_rest", "paid_rest"])
     .optional()
     .describe(
-      "Break kind (one of the 3 supported kinds): 'unpaid_meal' (Meal period — unpaid, deducted from hours; default when adding/starting), 'unpaid_rest' (Unpaid rest break — unpaid, deducted from hours), or 'paid_rest' (Paid rest break — paid, recorded for compliance and not deducted).",
+      "Break kind (one of the 4 supported kinds): 'unpaid_meal' (Meal period — unpaid lunch, deducted from hours), 'paid_meal' (Paid meal period — paid lunch, not deducted), 'unpaid_rest' (Unpaid rest break — unpaid, deducted from hours), or 'paid_rest' (Paid rest break — paid, recorded for compliance and not deducted). When adding or starting, defaults to the organization's meal kind (paid or unpaid lunch per manage_break_settings paid_lunch). With action 'update', pass the new kind to change an existing break's type. Admins can add or change a break to any of the 4 kinds; live starts only allow the organization's meal kind.",
     ),
   break_start: z
     .string()
@@ -639,6 +641,12 @@ export const manageBreakSettingsInputSchema = z.object({
     .describe(
       "Minimum shift length in hours before the deduction applies (0–24). If omitted, the current value is kept (default 5).",
     ),
+  paid_lunch: z
+    .boolean()
+    .optional()
+    .describe(
+      "When action is 'update': true makes lunch paid (the clock offers a paid meal period, 'paid_meal', and lunch is never deducted), false makes lunch unpaid (an unpaid meal period, 'unpaid_meal', which can be docked). If omitted, the current value is kept (default false).",
+    ),
   max_meal_break_minutes: z
     .number()
     .int()
@@ -647,7 +655,7 @@ export const manageBreakSettingsInputSchema = z.object({
     .nullable()
     .optional()
     .describe(
-      "Longest a meal break ('unpaid_meal') may run, in minutes; the member is put back on the clock when it's reached. null removes the limit; omit to keep it.",
+      "Longest a meal break ('unpaid_meal' or 'paid_meal') may run, in minutes; the member is put back on the clock when it's reached. null removes the limit; omit to keep it.",
     ),
   max_unpaid_rest_break_minutes: z
     .number()
@@ -3226,11 +3234,23 @@ export async function toggleBreakTool(
     };
   }
 
-  const breakType: BreakType = input.break_type ?? DEFAULT_BREAK_TYPE;
+  const mealType = getMealBreakType(await dbGetBreakSettings(org.orgId));
+  const breakType: BreakType = input.break_type ?? mealType;
   if (!isBreakType(breakType)) {
     return {
-      summary: `Invalid break_type "${String(breakType)}". Use 'unpaid_meal', 'unpaid_rest', or 'paid_rest'.`,
+      summary: `Invalid break_type "${String(breakType)}". Choose one of the ${BREAK_TYPE_VALUES.length} kinds: ${BREAK_TYPE_VALUES.map((t) => `'${t}'`).join(", ")}.`,
       data: { status: "invalid_break_type", break_type: breakType },
+      isError: true,
+    };
+  }
+  if (isMealBreakType(breakType) && breakType !== mealType) {
+    return {
+      summary: `Lunch is ${mealType === "paid_meal" ? "paid" : "unpaid"} at ${org.orgName}, so start a '${mealType}' break instead of '${breakType}'. An admin can change this with manage_break_settings (paid_lunch), or record a different kind afterwards with manage_breaks.`,
+      data: {
+        status: "meal_type_not_allowed",
+        break_type: breakType,
+        meal_break_type: mealType,
+      },
       isError: true,
     };
   }
@@ -3439,10 +3459,11 @@ export async function manageBreaksTool(
     if (!entryRes.ok) return entryRes.result;
     const targetEntry = entryRes.entry;
 
-    const breakType: BreakType = input.break_type ?? DEFAULT_BREAK_TYPE;
+    const breakType: BreakType =
+      input.break_type ?? getMealBreakType(await dbGetBreakSettings(org.orgId));
     if (!isBreakType(breakType)) {
       return {
-        summary: `Invalid break_type "${String(breakType)}". Choose one of the 3 kinds: 'unpaid_meal', 'unpaid_rest', or 'paid_rest'.`,
+        summary: `Invalid break_type "${String(breakType)}". Choose one of the ${BREAK_TYPE_VALUES.length} kinds: ${BREAK_TYPE_VALUES.map((t) => `'${t}'`).join(", ")}.`,
         data: { status: "invalid_break_type", break_type: breakType },
         isError: true,
       };
@@ -3457,7 +3478,7 @@ export async function manageBreaksTool(
 
     let breakStart: Date | null = null;
     let breakEnd: Date | null = null;
-    const defaultDurationMinutes = breakType === "unpaid_meal" ? 30 : 15;
+    const defaultDurationMinutes = isMealBreakType(breakType) ? 30 : 15;
 
     if (input.break_start !== undefined) {
       breakStart = parseFlexibleDateTime(input.break_start, tz, shiftBaseDate);
@@ -3697,7 +3718,7 @@ export async function manageBreaksTool(
   const newBreakType: BreakType = input.break_type ?? existingBreak.break_type;
   if (!isBreakType(newBreakType)) {
     return {
-      summary: `Invalid break_type "${String(newBreakType)}". Choose one of the 3 kinds: 'unpaid_meal', 'unpaid_rest', or 'paid_rest'.`,
+      summary: `Invalid break_type "${String(newBreakType)}". Choose one of the ${BREAK_TYPE_VALUES.length} kinds: ${BREAK_TYPE_VALUES.map((t) => `'${t}'`).join(", ")}.`,
       data: { status: "invalid_break_type", break_type: newBreakType },
       isError: true,
     };
@@ -3973,12 +3994,16 @@ function limitOrNull(value: number | null | undefined) {
 
 function describeBreakSettings(settings: {
   dock_lunch: boolean;
+  paid_lunch?: boolean;
   lunch_duration_minutes: number;
   lunch_min_shift_hours: number;
 }) {
+  if (settings.paid_lunch) {
+    return "lunch is paid (paid meal period, never deducted)";
+  }
   return settings.dock_lunch
-    ? `deducting ${Number(settings.lunch_duration_minutes)} min from shifts of ${Number(settings.lunch_min_shift_hours)}h or longer`
-    : "not deducting lunch/breaks";
+    ? `lunch is unpaid, deducting ${Number(settings.lunch_duration_minutes)} min from shifts of ${Number(settings.lunch_min_shift_hours)}h or longer`
+    : "lunch is unpaid, not deducting lunch/breaks";
 }
 
 /**
@@ -3997,6 +4022,7 @@ export async function manageBreakSettingsTool(
   const currentSettings = {
     org_id: org.orgId,
     dock_lunch: current?.dock_lunch ?? false,
+    paid_lunch: current?.paid_lunch ?? false,
     lunch_duration_minutes: Number(
       current?.lunch_duration_minutes ?? DEFAULT_LUNCH_DURATION_MINUTES,
     ),
@@ -4032,6 +4058,7 @@ export async function manageBreakSettingsTool(
   if (
     input.action !== "toggle" &&
     input.dock_lunch === undefined &&
+    input.paid_lunch === undefined &&
     input.lunch_duration_minutes === undefined &&
     input.lunch_min_shift_hours === undefined &&
     input.max_meal_break_minutes === undefined &&
@@ -4040,7 +4067,7 @@ export async function manageBreakSettingsTool(
   ) {
     return {
       summary:
-        "Nothing to update. Pass dock_lunch, lunch_duration_minutes, lunch_min_shift_hours, and/or a break limit (max_meal_break_minutes, max_unpaid_rest_break_minutes, max_paid_break_minutes).",
+        "Nothing to update. Pass dock_lunch, paid_lunch, lunch_duration_minutes, lunch_min_shift_hours, and/or a break limit (max_meal_break_minutes, max_unpaid_rest_break_minutes, max_paid_break_minutes).",
       data: { status: "invalid_input", settings: currentSettings },
       isError: true,
     };
@@ -4063,22 +4090,30 @@ export async function manageBreakSettingsTool(
     input.lunch_duration_minutes ?? currentSettings.lunch_duration_minutes,
     input.lunch_min_shift_hours ?? currentSettings.lunch_min_shift_hours,
   ] as const;
+  const mealLimit =
+    input.max_meal_break_minutes === undefined
+      ? currentSettings.max_meal_break_minutes
+      : input.max_meal_break_minutes;
   const updated = limitsChanged
-    ? await dbUpdateBreakSettings(...lunch, {
-        unpaid_meal:
-          input.max_meal_break_minutes === undefined
-            ? currentSettings.max_meal_break_minutes
-            : input.max_meal_break_minutes,
-        unpaid_rest:
-          input.max_unpaid_rest_break_minutes === undefined
-            ? currentSettings.max_unpaid_rest_break_minutes
-            : input.max_unpaid_rest_break_minutes,
-        paid_rest:
-          input.max_paid_break_minutes === undefined
-            ? currentSettings.max_paid_break_minutes
-            : input.max_paid_break_minutes,
-      })
-    : await dbUpdateBreakSettings(...lunch);
+    ? await dbUpdateBreakSettings(
+        ...lunch,
+        {
+          unpaid_meal: mealLimit,
+          paid_meal: mealLimit,
+          unpaid_rest:
+            input.max_unpaid_rest_break_minutes === undefined
+              ? currentSettings.max_unpaid_rest_break_minutes
+              : input.max_unpaid_rest_break_minutes,
+          paid_rest:
+            input.max_paid_break_minutes === undefined
+              ? currentSettings.max_paid_break_minutes
+              : input.max_paid_break_minutes,
+        },
+        input.paid_lunch,
+      )
+    : input.paid_lunch === undefined
+      ? await dbUpdateBreakSettings(...lunch)
+      : await dbUpdateBreakSettings(...lunch, undefined, input.paid_lunch);
   invalidateBreakSettingsCache(org.orgId);
 
   return {

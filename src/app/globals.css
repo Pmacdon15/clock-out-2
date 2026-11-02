@@ -87,6 +87,11 @@
   * {
     @apply border-border;
   }
+  :root {
+    /* Let native controls (date/time picker icons, scrollbars, etc.)
+       follow the system theme so they stay visible in dark mode. */
+    color-scheme: light dark;
+  }
   body {
     @apply bg-background text-foreground;
   }

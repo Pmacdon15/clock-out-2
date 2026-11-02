@@ -20,15 +20,14 @@ import {
   startBreakAction,
 } from "@/lib/actions";
 import {
-  BREAK_TYPE_VALUES,
   BREAK_TYPES,
   breakCountLimitMessage,
   breakTypeLabel,
-  DEFAULT_BREAK_TYPE,
   getBreakDeadlineMs,
   getBreakDurationMs,
   getDockedMinutes,
   getEffectiveDurationMs,
+  getOfferedBreakTypes,
   getOpenBreak,
   getRemainingBreakCount,
   getUnpaidBreakMs,
@@ -112,7 +111,14 @@ export default function TimeClock({
   const [expiredBreak, setExpiredBreak] = useState<ExpiredBreak | null>(null);
   // The break already being auto-ended, so the ticker fires it only once.
   const autoEndedBreakId = useRef<number | null>(null);
-  const [breakType, setBreakType] = useState<BreakType>(DEFAULT_BREAK_TYPE);
+  // The kinds the org offers, lunch (paid or unpaid, per the org) first.
+  const offeredBreakTypes = getOfferedBreakTypes(breakSettings);
+  const [pickedBreakType, setBreakType] = useState<BreakType | null>(null);
+  // Defaults to lunch, and falls back to it if the org's lunch pay changes.
+  const breakType =
+    pickedBreakType && offeredBreakTypes.includes(pickedBreakType)
+      ? pickedBreakType
+      : offeredBreakTypes[0];
   const [isLocating, setIsLocating] = useState(false);
   const captureLocation = isCaptureEnabled(locationSettings);
   const locationRequired = isLocationRequired(locationSettings);
@@ -481,7 +487,7 @@ export default function TimeClock({
                     onChange={(e) => setBreakType(e.target.value as BreakType)}
                     value={breakType}
                   >
-                    {BREAK_TYPE_VALUES.map((value) => (
+                    {offeredBreakTypes.map((value) => (
                       <option
                         disabled={isBreakCountReached(
                           activeEntry,
