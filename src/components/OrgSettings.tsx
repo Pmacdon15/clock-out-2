@@ -1,6 +1,7 @@
 "use client";
 
 import { use, useOptimistic } from "react";
+import type { PayrollView } from "@/lib/payroll";
 import type {
   AlertSettingsData,
   BreakSettingsData,
@@ -16,6 +17,7 @@ import BreakSettings from "./BreakSettings";
 import LocationSettings from "./LocationSettings";
 import OvertimeSettings from "./OvertimeSettings";
 import PayRateSettings from "./PayRateSettings";
+import PayrollSettings from "./PayrollSettings";
 import ReportingSettings from "./ReportingSettings";
 
 interface OrgSettingsProps {
@@ -48,6 +50,8 @@ interface OrgSettingsProps {
   >;
   /** Every member's pay rate (this view is admin-only). */
   payRates?: PayRateData[];
+  /** CPP/QPP and EI deduction settings, or null when they couldn't load. */
+  payroll?: PayrollView | null;
   membersPromise?: Promise<{ id: string; name: string }[]>;
   sitesPromise?: Promise<SerializableResult<SiteData[], { reason: string }>>;
   alertSettingsPromise?: Promise<
@@ -65,6 +69,7 @@ export default function OrgSettings({
   locationSettingsPromise,
   overtimeSettingsPromise,
   payRates = [],
+  payroll = null,
   membersPromise,
   sitesPromise,
   alertSettingsPromise,
@@ -148,6 +153,7 @@ export default function OrgSettings({
         onUpdateOptimistic={(next) => setOptimisticOvertimeSettings(next)}
       />
       <PayRateSettings initialRates={payRates} members={members} />
+      <PayrollSettings initialData={payroll} />
       <LocationSettings
         hasGeofencing={hasGeofencing}
         initialData={optimisticLocationSettings}

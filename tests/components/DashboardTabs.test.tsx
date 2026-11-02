@@ -215,8 +215,36 @@ describe("DashboardTabs", () => {
       membersPromise: p.membersPromise,
       orgSettingsPromise: p.orgSettingsPromise,
       payRates: [],
+      payroll: null,
       sitesPromise: undefined,
     });
+  });
+
+  it("passes the payroll deduction settings to the hours view and settings", () => {
+    const payroll = { enabled: true, province: "QC", rates: [] };
+    render(
+      <DashboardTabs
+        {...props({
+          defaultTabPromise: resolved("view"),
+          payrollPromise: resolved({ ok: true as const, value: payroll }),
+        })}
+      />,
+    );
+    expect(latest(captured.viewHours).payroll).toEqual(payroll);
+
+    render(
+      <DashboardTabs
+        {...props({
+          defaultTabPromise: resolved("settings"),
+          isAdminPromise: resolved(true),
+          payrollPromise: resolved({
+            ok: false as const,
+            error: { reason: "err" },
+          }),
+        })}
+      />,
+    );
+    expect(latest(captured.orgSettings).payroll).toBeNull();
   });
 
   it("passes the geofencing entitlement and its settings to the panels", () => {

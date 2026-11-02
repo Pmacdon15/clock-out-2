@@ -44,6 +44,11 @@ const captured = vi.hoisted(() => ({
   }[],
 }));
 
+vi.mock("@/components/PayrollSettings", () => ({
+  default: (props: { initialData: { province: string } | null }) => (
+    <div data-testid="payroll">{props.initialData?.province ?? "none"}</div>
+  ),
+}));
 vi.mock("@/components/PayRateSettings", () => ({
   default: (props: {
     members: { id: string; name: string }[];
@@ -227,6 +232,18 @@ describe("OrgSettings", () => {
       />,
     );
     expect(screen.getByTestId("pay-rates")).toHaveTextContent("0|0");
+    expect(screen.getByTestId("payroll")).toHaveTextContent("none");
+  });
+
+  it("passes the payroll deduction settings through", () => {
+    render(
+      <OrgSettings
+        hasReporting={false}
+        orgSettingsPromise={resolved({ ok: true, value: null })}
+        payroll={{ enabled: true, province: "QC", rates: [] }}
+      />,
+    );
+    expect(screen.getByTestId("payroll")).toHaveTextContent("QC");
   });
 
   it("leaves the shift alert rules out without a promise", () => {

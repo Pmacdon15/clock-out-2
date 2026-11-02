@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { PaySummary } from "@/components/ViewHours/PaySummary";
 import { computeEntryOvertime } from "@/lib/overtime";
 import type { PayRate } from "@/lib/pay";
+import { type PayrollView, SEED_PAYROLL_RATES } from "@/lib/payroll";
 import type { TimeEntry } from "@/lib/types";
 import { makeEntry } from "../../utils";
 
@@ -36,12 +37,17 @@ const rates = new Map<string, PayRate>([
   ["u9", { hourlyRate: 10, overtimeMultiplier: 1.5 }],
 ]);
 
-function renderSummary(entries: TimeEntry[], isViewingAll = true) {
+function renderSummary(
+  entries: TimeEntry[],
+  isViewingAll = true,
+  payroll: PayrollView | null = null,
+) {
   render(
     <PaySummary
       entries={entries}
       isViewingAll={isViewingAll}
       members={members}
+      payroll={payroll}
       payRates={rates}
       splitsByEntry={computeEntryOvertime(entries, settings)}
     />,
@@ -108,5 +114,46 @@ describe("PaySummary", () => {
     renderSummary([linus], false);
     expect(screen.getByTestId("gross-pay")).toHaveTextContent("$0.00");
     expect(screen.queryByText(/\/hr/)).not.toBeInTheDocument();
+  });
+
+  describe("payroll deductions", () => {
+    const payroll = (overrides: Partial<PayrollView> = {}): PayrollView => ({
+      enabled: true,
+      province: "SK",
+      rates: [...SEED_PAYROLL_RATES],
+      ...overrides,
+    });
+
+    it("are hidden unless the org turned them on", () => {
+      renderSummary([ada], true, payroll({ enabled: false }));
+      expect(screen.queryByTestId("pay-deductions")).not.toBeInTheDocument();
+    });
+
+    it("estimate CPP, EI and net pay per member per week", () => {
+      // Ada $220 + $160 in two weeks, Grace $240: weekly CPP is 5.95% of pay
+      // less 3,500/52, EI is 1.63%.
+      renderSummary([ada, adaNextWeek, grace], true, payroll());
+      const block = screen.getByTestId("pay-deductions");
+      expect(block).toHaveTextContent("Estimated deductions · Saskatchewan");
+      expect(screen.getByTestId("deduction-pension")).toHaveTextContent(
+        "$24.89",
+      );
+      expect(screen.getByTestId("deduction-pension2")).toHaveTextContent(
+        "$0.00",
+      );
+      expect(screen.getByTestId("deduction-ei")).toHaveTextContent("$10.11");
+      expect(screen.getByTestId("net-pay")).toHaveTextContent("$585.00");
+      expect(within(block).getByText("CPP")).toBeVisible();
+    });
+
+    it("use QPP labels and Quebec rates in Quebec", () => {
+      renderSummary([grace], true, payroll({ province: "QC" }));
+      const block = screen.getByTestId("pay-deductions");
+      expect(block).toHaveTextContent("Quebec");
+      expect(within(block).getByText("QPP")).toBeVisible();
+      expect(within(block).getByText("QPP2")).toBeVisible();
+      // EI 1.30% of $240
+      expect(screen.getByTestId("deduction-ei")).toHaveTextContent("$3.12");
+    });
   });
 });

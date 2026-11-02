@@ -218,3 +218,23 @@ CREATE TABLE IF NOT EXISTS time_off_allowances (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     PRIMARY KEY (org_id, user_id)
 );
+
+-- Optional CPP/QPP and EI deduction estimates, per org. Province decides the
+-- rates: QC uses QPP and Quebec EI, everything else federal CPP and EI.
+CREATE TABLE IF NOT EXISTS payroll_settings (
+    org_id TEXT PRIMARY KEY REFERENCES settings(org_id) ON DELETE CASCADE,
+    deductions_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    province TEXT NOT NULL DEFAULT 'SK',
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- CRA T4127 figures for one jurisdiction ('CA' or 'QC'), effective from a
+-- yyyy-MM-dd date. Filled by /api/cron/payroll-rates; 2026 is seeded in code.
+CREATE TABLE IF NOT EXISTS payroll_rates (
+    jurisdiction TEXT NOT NULL,
+    effective_from TEXT NOT NULL,
+    rates JSONB NOT NULL,
+    source TEXT,
+    fetched_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    PRIMARY KEY (jurisdiction, effective_from)
+);
