@@ -18,8 +18,10 @@ import {
   deleteTimeEntry as dalDeleteTimeEntry,
   endBreak as dalEndBreak,
   reviewTimeOffRequestDal as dalReviewTimeOffRequest,
+  setTimeOffAllowanceDal as dalSetTimeOffAllowance,
   startBreak as dalStartBreak,
   updateBreakDal as dalUpdateBreak,
+  updateScheduledShiftDal as dalUpdateScheduledShift,
   updateSiteDal as dalUpdateSite,
   updateTimeEntry as dalUpdateTimeEntry,
   updateBreakSettingsDal,
@@ -418,6 +420,34 @@ export async function createScheduledShiftAction(
   );
 }
 
+export async function updateScheduledShiftAction(
+  id: number,
+  shiftStart: string,
+  shiftEnd: string,
+  note?: string | null,
+  timezone?: string | null,
+  localDays?: { start: string; end: string } | null,
+) {
+  const result = await dalUpdateScheduledShift(
+    id,
+    new Date(shiftStart),
+    new Date(shiftEnd),
+    note,
+    localDays,
+  );
+
+  return result.match(
+    (shift) => {
+      updateTag(`scheduled-shifts-${shift.org_id}`);
+      after(() => notifyScheduleChange("changed", shift, timezone));
+      return { success: true as const, data: shift };
+    },
+    (err) => {
+      return { success: false as const, error: err.reason };
+    },
+  );
+}
+
 export async function deleteScheduledShiftAction(
   id: number,
   timezone?: string | null,
@@ -455,9 +485,26 @@ export async function createTimeOffRequestAction(
   endDate: string,
   hoursPerDay: number,
   note?: string | null,
+  /** Admins only: record it for another member and/or approve it now. */
+  options?: { memberId?: string | null; approve?: boolean },
 ) {
   return timeOffResult(
-    await dalCreateTimeOffRequest(type, startDate, endDate, hoursPerDay, note),
+    options === undefined
+      ? await dalCreateTimeOffRequest(
+          type,
+          startDate,
+          endDate,
+          hoursPerDay,
+          note,
+        )
+      : await dalCreateTimeOffRequest(
+          type,
+          startDate,
+          endDate,
+          hoursPerDay,
+          note,
+          options,
+        ),
   );
 }
 
@@ -470,6 +517,14 @@ export async function reviewTimeOffRequestAction(
 
 export async function cancelTimeOffRequestAction(id: number) {
   return timeOffResult(await dalCancelTimeOffRequest(id));
+}
+
+/** Sets a member's yearly PTO days; null removes the limit. */
+export async function setTimeOffAllowanceAction(
+  memberId: string,
+  ptoDays: number | null,
+) {
+  return timeOffResult(await dalSetTimeOffAllowance(memberId, ptoDays));
 }
 
 export async function updateMemberPayRateAction(

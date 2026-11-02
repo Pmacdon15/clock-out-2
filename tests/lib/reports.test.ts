@@ -670,9 +670,32 @@ describe("time off in reports", () => {
       totalHours: "1h 0m",
       totalTimeOff: "23.5h",
       timeOff: [
-        { type: "Vacation", dates: "Dec 30, 2025 – Jan 2, 2026", hours: "16h" },
+        {
+          type: "Vacation (PTO)",
+          dates: "Dec 30, 2025 – Jan 2, 2026",
+          hours: "16h",
+        },
         { type: "Sick day", dates: "Jan 5, 2026", hours: "7.5h" },
       ],
+    });
+  });
+
+  it("totals unpaid time off apart from paid", async () => {
+    mocks.dbGetApprovedTimeOffForPeriod.mockResolvedValue([
+      sick,
+      {
+        ...sick,
+        id: 3,
+        request_type: "unpaid",
+        start_date: "2026-01-06",
+        end_date: "2026-01-06",
+        hours_per_day: 8,
+      },
+    ]);
+    await sendWeeklyReports(start, end, "org_1");
+    expect(emailProps()).toMatchObject({
+      totalTimeOff: "7.5h",
+      totalUnpaidTimeOff: "8h",
     });
   });
 
@@ -691,6 +714,7 @@ describe("time off in reports", () => {
     await sendWeeklyReports(start, end, "org_1");
     expect(mocks.send).toHaveBeenCalledTimes(1);
     expect(emailProps()).toMatchObject({ timeOff: [], totalTimeOff: "0h" });
+    expect(emailProps().totalUnpaidTimeOff).toBeUndefined();
     expect(console.error).toHaveBeenCalledWith(
       "[Reports] Error fetching time off for Ada Lovelace:",
       expect.any(Error),

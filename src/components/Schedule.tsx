@@ -2,12 +2,13 @@
 
 import { useMutation } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { CalendarClock, Loader2, Trash2 } from "lucide-react";
+import { CalendarClock, Loader2, Pencil, Trash2 } from "lucide-react";
 import { use, useState } from "react";
 import { toast } from "sonner";
 import {
   createScheduledShiftAction,
   deleteScheduledShiftAction,
+  updateScheduledShiftAction,
 } from "@/lib/actions";
 import {
   countShiftStatuses,
@@ -113,6 +114,127 @@ export function findTimeOffConflict(
   )[0];
 }
 
+/** Admin form to move a published shift or change its note. */
+function EditShiftForm({
+  shift,
+  onDone,
+}: {
+  shift: ScheduledShiftWithStatus;
+  onDone: () => void;
+}) {
+  const start = new Date(shift.shift_start);
+  const end = new Date(shift.shift_end);
+  const [date, setDate] = useState(format(start, "yyyy-MM-dd"));
+  const [startTime, setStartTime] = useState(format(start, "HH:mm"));
+  const [endTime, setEndTime] = useState(format(end, "HH:mm"));
+  const [note, setNote] = useState(shift.note ?? "");
+
+  const { mutate, isPending } = useMutation({
+    mutationFn: () => {
+      const { shiftStart, shiftEnd } = buildShiftTimes(
+        date,
+        startTime,
+        endTime,
+      );
+      return updateScheduledShiftAction(
+        shift.id,
+        shiftStart.toISOString(),
+        shiftEnd.toISOString(),
+        note,
+        browserTimezone(),
+        shiftLocalDays(shiftStart, shiftEnd),
+      );
+    },
+    onSuccess: (res) => {
+      if (res.success) {
+        toast.success("Shift updated");
+        onDone();
+      } else {
+        toast.error(res.error);
+      }
+    },
+  });
+
+  const id = `editShift${shift.id}`;
+  return (
+    <form
+      className="grid grid-cols-1 gap-3 pt-2 sm:grid-cols-2 lg:grid-cols-4"
+      onSubmit={(e) => {
+        e.preventDefault();
+        mutate();
+      }}
+    >
+      <div className="space-y-1">
+        <label className="font-medium text-xs" htmlFor={`${id}Date`}>
+          Date
+        </label>
+        <input
+          className={inputClass}
+          id={`${id}Date`}
+          onChange={(e) => setDate(e.target.value)}
+          type="date"
+          value={date}
+        />
+      </div>
+      <div className="space-y-1">
+        <label className="font-medium text-xs" htmlFor={`${id}Start`}>
+          Start
+        </label>
+        <input
+          className={inputClass}
+          id={`${id}Start`}
+          onChange={(e) => setStartTime(e.target.value)}
+          type="time"
+          value={startTime}
+        />
+      </div>
+      <div className="space-y-1">
+        <label className="font-medium text-xs" htmlFor={`${id}End`}>
+          End
+        </label>
+        <input
+          className={inputClass}
+          id={`${id}End`}
+          onChange={(e) => setEndTime(e.target.value)}
+          type="time"
+          value={endTime}
+        />
+      </div>
+      <div className="space-y-1">
+        <label className="font-medium text-xs" htmlFor={`${id}Note`}>
+          Note
+        </label>
+        <input
+          className={inputClass}
+          id={`${id}Note`}
+          maxLength={500}
+          onChange={(e) => setNote(e.target.value)}
+          value={note}
+        />
+      </div>
+      <div className="flex gap-2 sm:col-span-2 lg:col-span-4">
+        <Button
+          disabled={!date || !startTime || !endTime || isPending}
+          size="sm"
+          type="submit"
+        >
+          {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          Save shift
+        </Button>
+        <Button
+          disabled={isPending}
+          onClick={onDone}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          Cancel
+        </Button>
+      </div>
+    </form>
+  );
+}
+
 function ShiftRow({
   shift,
   memberName,
@@ -123,6 +245,7 @@ function ShiftRow({
   isAdmin: boolean;
 }) {
   const [confirming, setConfirming] = useState(false);
+  const [editing, setEditing] = useState(false);
   const { mutate, isPending } = useMutation({
     mutationFn: (id: number) =>
       deleteScheduledShiftAction(id, browserTimezone()),
@@ -176,14 +299,24 @@ function ShiftRow({
                 </button>
               </span>
             ) : (
-              <button
-                aria-label="Remove shift"
-                className="p-1 text-muted-foreground transition-colors hover:text-red-500"
-                onClick={() => setConfirming(true)}
-                type="button"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
+              <>
+                <button
+                  aria-label="Edit shift"
+                  className="p-1 text-muted-foreground transition-colors hover:text-foreground"
+                  onClick={() => setEditing((open) => !open)}
+                  type="button"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  aria-label="Remove shift"
+                  className="p-1 text-muted-foreground transition-colors hover:text-red-500"
+                  onClick={() => setConfirming(true)}
+                  type="button"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </>
             ))}
         </div>
       </div>
@@ -198,6 +331,9 @@ function ShiftRow({
       )}
       {shift.note && (
         <p className="text-muted-foreground text-xs italic">{shift.note}</p>
+      )}
+      {isAdmin && editing && (
+        <EditShiftForm onDone={() => setEditing(false)} shift={shift} />
       )}
     </li>
   );
@@ -326,8 +462,12 @@ function ShiftForm({
             role="alert"
           >
             {new Map(members.map((m) => [m.id, m.name])).get(memberId)} has
-            approved {TIME_OFF_TYPE_LABELS[conflict.request_type].toLowerCase()}{" "}
-            on {formatTimeOffDates(conflict)}. Pick another day — they can still
+            approved{" "}
+            {TIME_OFF_TYPE_LABELS[conflict.request_type]
+              .charAt(0)
+              .toLowerCase()}
+            {TIME_OFF_TYPE_LABELS[conflict.request_type].slice(1)} on{" "}
+            {formatTimeOffDates(conflict)}. Pick another day — they can still
             clock in if they choose to work.
           </p>
         )}
@@ -411,7 +551,7 @@ export default function Schedule({
             </h3>
             <p className="text-muted-foreground text-sm">
               {isAdmin
-                ? "Publish shifts and compare them with actual clock-ins over the last two weeks and the next four."
+                ? "Publish, edit or cancel shifts and compare them with actual clock-ins over the last two weeks and the next four."
                 : "Your shifts for the next four weeks, and how the last two went."}
             </p>
           </div>

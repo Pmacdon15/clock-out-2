@@ -182,6 +182,9 @@ export interface DashboardTabsProps {
   timeOffPromise: Promise<
     SerializableResult<TimeOffRequest[], { reason: string }>
   >;
+  timeOffAllowancesPromise?: Promise<
+    SerializableResult<TimeOffAllowance[], { reason: string }>
+  >;
   membersPromise?: Promise<
     {
       id: string;
@@ -337,11 +340,12 @@ export type ScheduledShiftWithStatus = ScheduledShift & {
   minutes_late: number | null;
 };
 
-export type TimeOffType = "vacation" | "sick";
+export type TimeOffType = "vacation" | "sick" | "unpaid";
 export type TimeOffStatus = "pending" | "approved" | "denied" | "cancelled";
 
 /**
- * A member's request for paid time off. Dates are whole calendar days as
+ * A member's request for time off: vacation (PTO) and sick days are paid,
+ * unpaid time off is not. Dates are whole calendar days as
  * `YYYY-MM-DD` strings (inclusive on both ends), so they mean the same day in
  * every time zone.
  */
@@ -358,5 +362,16 @@ export type TimeOffRequest = {
   reviewed_by: string | null;
   reviewed_at: Date | null;
   created_at?: Date;
+  updated_at?: Date;
+};
+
+/**
+ * How many PTO (vacation) days a member gets per calendar year. Members
+ * without one have no limit.
+ */
+export type TimeOffAllowance = {
+  org_id: string;
+  user_id: string;
+  pto_days: number;
   updated_at?: Date;
 };

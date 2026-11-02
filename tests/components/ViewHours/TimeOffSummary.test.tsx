@@ -66,7 +66,7 @@ describe("TimeOffSummary", () => {
     expect(screen.getByText("Approved time off")).toBeVisible();
     expect(screen.getByText("15.5h")).toBeVisible();
     const items = screen.getAllByRole("listitem");
-    expect(items[0]).toHaveTextContent("Vacation · Mar 5 – Mar 8, 2026");
+    expect(items[0]).toHaveTextContent("Vacation (PTO) · Mar 5 – Mar 8, 2026");
     expect(items[0]).toHaveTextContent("8h");
     expect(items[1]).toHaveTextContent("Sick day · Mar 12, 2026");
     expect(screen.queryByText(/Ada/)).toBeNull();
@@ -77,5 +77,30 @@ describe("TimeOffSummary", () => {
     expect(screen.getByText(/Ada ·/)).toBeVisible();
     expect(screen.getByText(/Unknown member ·/)).toBeVisible();
     expect(screen.getByText("32h")).toBeVisible();
+  });
+
+  it("keeps unpaid time off out of the paid total", () => {
+    renderSummary(
+      [
+        request(),
+        request({
+          request_type: "sick",
+          start_date: "2026-03-13",
+          end_date: "2026-03-13",
+          hours_per_day: 7.5,
+        }),
+        request({
+          request_type: "unpaid",
+          start_date: "2026-03-12",
+          end_date: "2026-03-12",
+        }),
+      ],
+      "u1",
+    );
+    expect(screen.getByText("23.5h")).toBeVisible();
+    expect(screen.getByText("+ 8h unpaid")).toBeVisible();
+    expect(screen.getAllByRole("listitem")[1]).toHaveTextContent(
+      "Unpaid time off · Mar 12, 2026",
+    );
   });
 });
