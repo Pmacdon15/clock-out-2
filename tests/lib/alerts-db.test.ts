@@ -253,6 +253,7 @@ describe("cron reads and writes", () => {
     await expect(
       adb.dbAutoClockOut(7, 16, {
         unpaid_meal: 30,
+        paid_meal: 45,
         unpaid_rest: null,
         paid_rest: 15,
       }),
@@ -261,13 +262,14 @@ describe("cron reads and writes", () => {
     expect(text).toContain("UPDATE time_entries");
     expect(text).toContain("DELETE FROM time_entry_breaks");
     expect(text).toContain("UPDATE time_entry_breaks");
-    expect(valuesOf(0)).toEqual([16, 7, 16, 30, null, 15]);
+    expect(text).toContain("WHEN 'paid_meal' THEN ?::INTEGER");
+    expect(valuesOf(0)).toEqual([16, 7, 16, 30, 45, null, 15]);
   });
 
   it("returns undefined when the shift was already closed, without limits", async () => {
     await primeTables();
     await expect(adb.dbAutoClockOut(7, 16)).resolves.toBeUndefined();
-    expect(valuesOf(0)).toEqual([16, 7, 16, null, null, null]);
+    expect(valuesOf(0)).toEqual([16, 7, 16, null, null, null, null]);
   });
 });
 

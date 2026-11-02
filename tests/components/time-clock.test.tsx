@@ -1,6 +1,18 @@
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { makeBreak, makeEntry, renderWithClient } from "../utils";
+import {
+  createQueryClient,
+  makeBreak,
+  makeEntry,
+  renderWithClient,
+} from "../utils";
 
 const mocks = vi.hoisted(() => ({
   clockInAction: vi.fn(),
@@ -308,6 +320,65 @@ describe("TimeClock break control", () => {
       screen.queryByRole("button", { name: "Start Break" }),
     ).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Break type")).not.toBeInTheDocument();
+  });
+
+  it("offers a paid lunch instead of an unpaid one when lunch is paid", async () => {
+    mocks.startBreakAction.mockResolvedValue({ success: true });
+    renderWithClient(
+      <TimeClock
+        breakSettings={{
+          org_id: "org_1",
+          dock_lunch: false,
+          paid_lunch: true,
+          lunch_duration_minutes: 30,
+          lunch_min_shift_hours: 5,
+        }}
+        initialEntries={[active]}
+        isAdmin={false}
+        setOptimisticEntries={vi.fn()}
+      />,
+    );
+    const select = screen.getByLabelText("Break type") as HTMLSelectElement;
+    expect(select.value).toBe("paid_meal");
+    expect(
+      Array.from(select.options).map((option) => option.textContent),
+    ).toEqual([
+      "Paid meal period (paid)",
+      "Unpaid rest break (unpaid)",
+      "Paid rest break (paid)",
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: "Start Break" }));
+    await waitFor(() =>
+      expect(mocks.startBreakAction).toHaveBeenCalledWith("paid_meal"),
+    );
+  });
+
+  it("falls back to the org's lunch when the picked one stops being offered", () => {
+    const client = createQueryClient();
+    const settings = (paid_lunch: boolean) => ({
+      org_id: "org_1",
+      dock_lunch: false,
+      paid_lunch,
+      lunch_duration_minutes: 30,
+      lunch_min_shift_hours: 5,
+    });
+    const clock = (paid_lunch: boolean) => (
+      <QueryClientProvider client={client}>
+        <TimeClock
+          breakSettings={settings(paid_lunch)}
+          initialEntries={[active]}
+          isAdmin={false}
+          setOptimisticEntries={vi.fn()}
+        />
+      </QueryClientProvider>
+    );
+    const { rerender } = render(clock(false));
+    const select = () =>
+      screen.getByLabelText("Break type") as HTMLSelectElement;
+    fireEvent.change(select(), { target: { value: "unpaid_meal" } });
+    expect(select().value).toBe("unpaid_meal");
+    rerender(clock(true));
+    expect(select().value).toBe("paid_meal");
   });
 
   it("offers every break type with its paid/unpaid wording", () => {

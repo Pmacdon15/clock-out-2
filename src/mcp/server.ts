@@ -347,7 +347,7 @@ export function registerClockOutTools(server: McpServer) {
     {
       title: "Start, end, or toggle a live break",
       description:
-        "Starts, ends, or toggles a live break on an active shift for yourself, or (when called by an org admin) for any organization member by name, email, or user_id. Supports all 3 break kinds: 'unpaid_meal' (Meal period — unpaid, deducted from hours; default), 'unpaid_rest' (Unpaid rest break — unpaid, deducted from hours), and 'paid_rest' (Paid rest break — paid, recorded for compliance and not deducted). Pass action: 'toggle' (default), 'start', or 'end'.",
+        "Starts, ends, or toggles a live break on an active shift for yourself, or (when called by an org admin) for any organization member by name, email, or user_id. Supports all 4 break kinds: 'unpaid_meal' (Meal period — unpaid lunch, deducted from hours), 'paid_meal' (Paid meal period — paid lunch, not deducted), 'unpaid_rest' (Unpaid rest break — unpaid, deducted from hours), and 'paid_rest' (Paid rest break — paid, recorded for compliance and not deducted). Lunch defaults to the organization's meal kind, and only that meal kind can be started live. Pass action: 'toggle' (default), 'start', or 'end'.",
       inputSchema: portable(toggleBreakInputSchema),
       annotations: {
         readOnlyHint: false,
@@ -367,7 +367,7 @@ export function registerClockOutTools(server: McpServer) {
     {
       title: "Add, edit, delete, or list breaks on a shift",
       description:
-        "Manages recorded breaks of the 3 kinds — 'unpaid_meal' (Meal period, unpaid), 'unpaid_rest' (Unpaid rest break, unpaid), and 'paid_rest' (Paid rest break, paid) — on a time entry. Organization admins ('org:admin') can add a break to any shift (action: 'add', with break_type and break_start/break_end or duration_minutes), edit an existing break's type or times (action: 'update', by break_id or shift), or delete a break (action: 'delete', by break_id or shift). Anyone can list breaks on their shift (action: 'list') or start/end/toggle a live break on an active shift (action: 'start' | 'end' | 'toggle').",
+        "Manages recorded breaks of the 4 kinds — 'unpaid_meal' (Meal period, unpaid), 'paid_meal' (Paid meal period, paid), 'unpaid_rest' (Unpaid rest break, unpaid), and 'paid_rest' (Paid rest break, paid) — on a time entry. Organization admins ('org:admin') can add a break to any shift (action: 'add', with break_type and break_start/break_end or duration_minutes), edit an existing break's times or change it to a different kind (action: 'update' with the new break_type, by break_id or shift), or delete a break (action: 'delete', by break_id or shift). Anyone can list breaks on their shift (action: 'list') or start/end/toggle a live break on an active shift (action: 'start' | 'end' | 'toggle').",
       inputSchema: portable(manageBreaksInputSchema),
       annotations: {
         readOnlyHint: false,
@@ -447,7 +447,7 @@ export function registerClockOutTools(server: McpServer) {
     {
       title: "View or update lunch/break deduction settings",
       description:
-        "Views or updates the organization's automatic lunch/break deduction: whether unpaid break time is docked (dock_lunch), how many minutes are deducted (lunch_duration_minutes), and the minimum shift length in hours before it applies (lunch_min_shift_hours). Unspecified fields keep their current values. Anyone can view the settings; updating is admin-only ('org:admin'). Available on every plan.",
+        "Views or updates the organization's automatic lunch/break deduction: whether unpaid break time is docked (dock_lunch), how many minutes are deducted (lunch_duration_minutes), the minimum shift length in hours before it applies (lunch_min_shift_hours), and whether lunch is paid or unpaid (paid_lunch; a paid lunch is a 'paid_meal' break and is never deducted). Unspecified fields keep their current values. Anyone can view the settings; updating is admin-only ('org:admin'). Available on every plan.",
       inputSchema: portable(manageBreakSettingsInputSchema),
       annotations: {
         readOnlyHint: false,

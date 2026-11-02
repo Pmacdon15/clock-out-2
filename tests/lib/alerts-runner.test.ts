@@ -220,6 +220,7 @@ describe("processOrgAlerts", () => {
     });
     expect(mocks.dbAutoClockOut).toHaveBeenCalledWith(1, 16, {
       unpaid_meal: null,
+      paid_meal: null,
       unpaid_rest: null,
       paid_rest: 15,
     });

@@ -7,11 +7,14 @@ import {
   getDockedMinutes,
   getEffectiveDurationMs,
   getEffectiveHours,
+  getMealBreakType,
+  getOfferedBreakTypes,
   getOpenBreak,
   getPaidBreakMs,
   getUnpaidBreakMs,
   hasUnpaidBreakRecord,
   isBreakType,
+  isMealBreakType,
   isPaidBreakType,
   validateBreak,
 } from "@/lib/break-utils";
@@ -117,9 +120,12 @@ describe("break types", () => {
   it("knows which types exist and which are paid", () => {
     expect(BREAK_TYPE_VALUES).toEqual([
       "unpaid_meal",
+      "paid_meal",
       "unpaid_rest",
       "paid_rest",
     ]);
+    expect(isPaidBreakType("paid_meal")).toBe(true);
+    expect(breakTypeLabel("paid_meal")).toBe("Paid meal period");
     expect(DEFAULT_BREAK_TYPE).toBe("unpaid_meal");
     expect(isBreakType("unpaid_meal")).toBe(true);
     expect(isBreakType("coffee")).toBe(false);
@@ -129,6 +135,32 @@ describe("break types", () => {
     expect(isPaidBreakType("unpaid_rest")).toBe(false);
     expect(breakTypeLabel("unpaid_meal")).toBe("Meal period");
     expect(breakTypeLabel("paid_rest")).toBe("Paid rest break");
+  });
+
+  it("tells the meal periods apart from rest breaks", () => {
+    expect(isMealBreakType("unpaid_meal")).toBe(true);
+    expect(isMealBreakType("paid_meal")).toBe(true);
+    expect(isMealBreakType("unpaid_rest")).toBe(false);
+    expect(isMealBreakType("paid_rest")).toBe(false);
+  });
+
+  it("uses the org's lunch pay to pick the meal period", () => {
+    expect(getMealBreakType(null)).toBe("unpaid_meal");
+    expect(getMealBreakType({ paid_lunch: false })).toBe("unpaid_meal");
+    expect(getMealBreakType({ paid_lunch: true })).toBe("paid_meal");
+  });
+
+  it("offers one kind of lunch first, plus both rest breaks", () => {
+    expect(getOfferedBreakTypes(undefined)).toEqual([
+      "unpaid_meal",
+      "unpaid_rest",
+      "paid_rest",
+    ]);
+    expect(getOfferedBreakTypes({ paid_lunch: true })).toEqual([
+      "paid_meal",
+      "unpaid_rest",
+      "paid_rest",
+    ]);
   });
 
   it("treats an unknown type as paid so it never cuts hours", () => {
@@ -299,6 +331,41 @@ describe("unpaid breaks vs. the automatic lunch dock", () => {
     shift.skip_lunch = true;
     expect(getDockedMinutes(shift, activeBreakSettings)).toBe(0);
     expect(getEffectiveHours(shift, activeBreakSettings)).toBe(8);
+  });
+
+  it("never docks a paid lunch, even with docking switched on", () => {
+    const shift = eightHourShift([]);
+    const paid = { ...activeBreakSettings, paid_lunch: true };
+    expect(getDockedMinutes(shift, paid)).toBe(0);
+    expect(getEffectiveHours(shift, paid)).toBe(8);
+  });
+
+  it("pays a 30-minute lunch but deducts 15-minute unpaid breaks", () => {
+    const shift = eightHourShift([
+      makeBreak({
+        id: 1,
+        break_type: "unpaid_rest",
+        break_start: new Date("2026-01-05T10:00:00Z"),
+        break_end: new Date("2026-01-05T10:15:00Z"),
+      }),
+      makeBreak({
+        id: 2,
+        break_type: "paid_meal",
+        break_start: new Date("2026-01-05T12:00:00Z"),
+        break_end: new Date("2026-01-05T12:30:00Z"),
+      }),
+      makeBreak({
+        id: 3,
+        break_type: "unpaid_rest",
+        break_start: new Date("2026-01-05T15:00:00Z"),
+        break_end: new Date("2026-01-05T15:15:00Z"),
+      }),
+    ]);
+    const paid = { ...activeBreakSettings, paid_lunch: true };
+    expect(getPaidBreakMs(shift)).toBe(30 * 60_000);
+    expect(getUnpaidBreakMs(shift)).toBe(30 * 60_000);
+    // 8h minus the two unpaid 15-minute breaks; the paid lunch counts.
+    expect(getEffectiveHours(shift, paid)).toBe(7.5);
   });
 
   it("docks nothing but still deducts unpaid breaks when docking is off", () => {

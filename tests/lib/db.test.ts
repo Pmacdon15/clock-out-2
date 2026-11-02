@@ -263,6 +263,9 @@ describe("break settings", () => {
     expect(textOf(2)).toContain(
       "ADD COLUMN IF NOT EXISTS max_paid_break_minutes INTEGER",
     );
+    expect(textOf(2)).toContain(
+      "ADD COLUMN IF NOT EXISTS paid_lunch BOOLEAN NOT NULL DEFAULT FALSE",
+    );
   });
 
   it("ensureBreakSettingsTable only runs once per instance", async () => {
@@ -329,7 +332,7 @@ describe("break settings", () => {
     expect(textOf(3)).toContain("INSERT INTO settings");
     expect(valuesOf(3)).toEqual(["o1"]);
     expect(textOf(4)).toContain("INSERT INTO break_settings");
-    // No limits passed: the stored limits are kept (keepLimits = true).
+    // No limits or lunch pay passed: the stored ones are kept.
     expect(valuesOf(4)).toEqual([
       "o1",
       true,
@@ -338,6 +341,7 @@ describe("break settings", () => {
       null,
       null,
       null,
+      false,
       true,
       30,
       5,
@@ -347,6 +351,8 @@ describe("break settings", () => {
       null,
       true,
       null,
+      true,
+      false,
     ]);
   });
 
@@ -359,6 +365,7 @@ describe("break settings", () => {
       .mockResolvedValueOnce([{ org_id: "o1", max_paid_break_minutes: 15 }]);
     await db.dbUpdateBreakSettings("o1", false, 30, 5, {
       unpaid_meal: 45,
+      paid_meal: 45,
       unpaid_rest: null,
       paid_rest: 15,
     });
@@ -372,6 +379,7 @@ describe("break settings", () => {
       null,
       15,
       false,
+      false,
       30,
       5,
       false,
@@ -380,6 +388,42 @@ describe("break settings", () => {
       null,
       false,
       15,
+      true,
+      false,
+    ]);
+  });
+
+  it("dbUpdateBreakSettings saves whether lunch is paid when it is passed", async () => {
+    sql.mockResolvedValue([]);
+    await db.ensureBreakSettingsTable();
+    sql.mockReset();
+    sql
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ org_id: "o1", paid_lunch: true }]);
+    await expect(
+      db.dbUpdateBreakSettings("o1", false, 30, 5, undefined, true),
+    ).resolves.toEqual({ org_id: "o1", paid_lunch: true });
+    expect(textOf(1)).toContain("paid_lunch = CASE WHEN");
+    expect(valuesOf(1)).toEqual([
+      "o1",
+      false,
+      30,
+      5,
+      null,
+      null,
+      null,
+      true,
+      false,
+      30,
+      5,
+      true,
+      null,
+      true,
+      null,
+      true,
+      null,
+      false,
+      true,
     ]);
   });
 
@@ -402,6 +446,7 @@ describe("break settings", () => {
       null,
       null,
       false,
+      false,
       45,
       6,
       true,
@@ -410,6 +455,8 @@ describe("break settings", () => {
       null,
       true,
       null,
+      true,
+      false,
     ]);
   });
 });
@@ -422,17 +469,23 @@ describe("breaks", () => {
   it("ensureTimeEntryBreaksTable creates the table and its indexes", async () => {
     sql.mockResolvedValue([]);
     await db.ensureTimeEntryBreaksTable();
-    expect(sql).toHaveBeenCalledTimes(3);
+    expect(sql).toHaveBeenCalledTimes(4);
     expect(textOf(0)).toContain("CREATE TABLE IF NOT EXISTS time_entry_breaks");
     expect(textOf(0)).toContain(
       "REFERENCES time_entries(id) ON DELETE CASCADE",
     );
     expect(textOf(0)).toContain(
-      "CHECK (break_type IN ('unpaid_meal', 'unpaid_rest', 'paid_rest'))",
+      "CHECK (break_type IN ('unpaid_meal', 'paid_meal', 'unpaid_rest', 'paid_rest'))",
     );
     expect(textOf(1)).toContain("idx_time_entry_breaks_entry");
     expect(textOf(2)).toContain("idx_time_entry_breaks_one_open");
     expect(textOf(2)).toContain("WHERE break_end IS NULL");
+    // Older tables get their break_type check widened to the paid meal period.
+    expect(textOf(3)).toContain("NOT LIKE '%paid_meal%'");
+    expect(textOf(3)).toContain("DROP CONSTRAINT");
+    expect(textOf(3)).toContain(
+      "CHECK (break_type IN ('unpaid_meal', 'paid_meal', 'unpaid_rest', 'paid_rest'))",
+    );
   });
 
   it("ensureTimeEntryBreaksTable only runs once, and retries after a failure", async () => {
@@ -441,7 +494,7 @@ describe("breaks", () => {
       db.ensureTimeEntryBreaksTable(),
       db.ensureTimeEntryBreaksTable(),
     ]);
-    expect(sql).toHaveBeenCalledTimes(3);
+    expect(sql).toHaveBeenCalledTimes(4);
 
     db.resetTimeEntryBreaksTableCheck();
     sql.mockReset();
@@ -450,7 +503,7 @@ describe("breaks", () => {
     sql.mockReset();
     sql.mockResolvedValue([]);
     await db.ensureTimeEntryBreaksTable();
-    expect(sql).toHaveBeenCalledTimes(3);
+    expect(sql).toHaveBeenCalledTimes(4);
   });
 
   it("dbGetBreaksForEntries skips the query for an empty id list", async () => {
@@ -463,16 +516,18 @@ describe("breaks", () => {
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ id: 1, time_entry_id: 3 }]);
     await expect(db.dbGetBreaksForEntries([3, 4])).resolves.toEqual([
       { id: 1, time_entry_id: 3 },
     ]);
-    expect(textOf(3)).toContain("SELECT * FROM time_entry_breaks");
-    expect(valuesOf(3)).toEqual([[3, 4]]);
+    expect(textOf(4)).toContain("SELECT * FROM time_entry_breaks");
+    expect(valuesOf(4)).toEqual([[3, 4]]);
   });
 
   it("attachBreaks groups the breaks onto their entries", async () => {
     sql
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
@@ -551,7 +606,7 @@ describe("breaks", () => {
     // LEAST skips the NULL cap, so an unlimited break ends at NOW().
     expect(textOf()).toContain("SET break_end = LEAST( NOW(),");
     expect(textOf()).toContain("WHERE break_end IS NULL");
-    expect(valuesOf()).toEqual([null, null, null, "u1", "o1"]);
+    expect(valuesOf()).toEqual([null, null, null, null, "u1", "o1"]);
   });
 
   it("dbEndOpenBreak caps each break type at its limit", async () => {
@@ -561,12 +616,14 @@ describe("breaks", () => {
     sql.mockResolvedValue([{ id: 2 }]);
     await db.dbEndOpenBreak("u1", "o1", {
       unpaid_meal: 30,
+      paid_meal: 45,
       unpaid_rest: null,
       paid_rest: 15,
     });
     expect(textOf()).toContain("break_start + make_interval(mins => (CASE");
     expect(textOf()).toContain("WHEN 'paid_rest' THEN ?::INTEGER");
-    expect(valuesOf()).toEqual([30, null, 15, "u1", "o1"]);
+    expect(textOf()).toContain("WHEN 'paid_meal' THEN ?::INTEGER");
+    expect(valuesOf()).toEqual([30, 45, null, 15, "u1", "o1"]);
   });
 
   it("dbGetBreakWithEntry joins the shift it belongs to", async () => {

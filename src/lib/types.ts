@@ -1,10 +1,15 @@
 /**
- * Break kinds recorded against a time entry. `paid_rest` is a paid rest
- * break (recorded, never deducted); the two `unpaid_*` kinds are unpaid and
- * are subtracted from worked hours. `unpaid_meal` is the jurisdictional meal
- * period many labour codes require a record of.
+ * Break kinds recorded against a time entry. The `paid_*` kinds are paid
+ * (recorded, never deducted); the `unpaid_*` kinds are unpaid and are
+ * subtracted from worked hours. `unpaid_meal` and `paid_meal` are the meal
+ * period (lunch) many labour codes require a record of; which one the clock
+ * offers depends on the org's `paid_lunch` setting.
  */
-export type BreakType = "unpaid_meal" | "unpaid_rest" | "paid_rest";
+export type BreakType =
+  | "unpaid_meal"
+  | "paid_meal"
+  | "unpaid_rest"
+  | "paid_rest";
 
 export type TimeEntryBreak = {
   id: number;
@@ -65,9 +70,15 @@ export type BreakSettingsData = {
   lunch_duration_minutes: number;
   lunch_min_shift_hours: number;
   /**
+   * Whether lunch (the meal period) is paid. When true the clock offers a
+   * paid meal period instead of an unpaid one, and lunch is never docked.
+   */
+  paid_lunch?: boolean;
+  /**
    * Longest each kind of break may run, in minutes. Null/absent means no
    * limit. A break that reaches its limit is ended automatically (the member
    * is put back on the clock) and recorded as ending exactly at the limit.
+   * `max_meal_break_minutes` covers both the paid and unpaid meal period.
    */
   max_meal_break_minutes?: number | null;
   max_unpaid_rest_break_minutes?: number | null;
