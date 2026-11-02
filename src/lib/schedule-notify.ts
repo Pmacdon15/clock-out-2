@@ -324,10 +324,9 @@ export function describeUpcomingShift(
     1,
     Math.round((start.getTime() - now.getTime()) / MINUTE_MS),
   );
+  // Reminders go out at most SHIFT_REMINDER_MINUTES (one hour) ahead.
   const startsIn =
-    minutes >= 60 && minutes % 60 === 0
-      ? `${minutes / 60} hour${minutes === 60 ? "" : "s"}`
-      : `${minutes} minute${minutes === 1 ? "" : "s"}`;
+    minutes >= 60 ? "1 hour" : `${minutes} minute${minutes === 1 ? "" : "s"}`;
   const time = `${formatInTimeZone(start, zone.tz, "h:mm a")}${zone.known ? "" : ` ${zone.tz}`}`;
   const range = formatShiftRange(start, end, zone);
   const note = shift.note ? ` Note: ${shift.note}` : "";

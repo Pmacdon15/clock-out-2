@@ -418,6 +418,10 @@ describe("upcoming shift reminders", () => {
     );
     expect(msg.title).toBe("Your shift starts at 3:00 PM UTC");
     expect(msg.body).toContain("starting in 45 minutes. Note: Front desk");
+    expect(
+      describeUpcomingShift(soon, REGINA, new Date("2026-11-02T14:59:10Z"))
+        .body,
+    ).toContain("starting in 1 minute.");
   });
 
   it("does nothing without shifts due", async () => {
