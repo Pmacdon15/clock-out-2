@@ -349,6 +349,17 @@ describe("runWeeklyScheduleDigests", () => {
     expect(mocks.dbGetAlertSettingsFor).not.toHaveBeenCalled();
   });
 
+  it("sends no digest for an org without the notifications feature", async () => {
+    mocks.dbGetScheduledShiftsBetween.mockResolvedValue([due]);
+    const hasNotifications = vi.fn(async () => false);
+    await expect(
+      runWeeklyScheduleDigests(sundayEvening, hasNotifications),
+    ).resolves.toEqual({ digests: 0, emails: 0, pushes: 0 });
+    expect(hasNotifications).toHaveBeenCalledWith("org_1");
+    expect(mocks.loadOrgMembers).not.toHaveBeenCalled();
+    expect(mocks.deliver).not.toHaveBeenCalled();
+  });
+
   it("sends each due digest once, skipping leavers, opted-out orgs and failing orgs", async () => {
     mocks.dbGetScheduledShiftsBetween.mockResolvedValue([
       due,
@@ -448,6 +459,17 @@ describe("upcoming shift reminders", () => {
       describeUpcomingShift(soon, REGINA, new Date("2026-11-02T14:59:10Z"))
         .body,
     ).toContain("starting in 1 minute.");
+  });
+
+  it("sends no reminder for an org without the notifications feature", async () => {
+    mocks.dbGetScheduledShiftsBetween.mockResolvedValue([soon]);
+    const hasNotifications = vi.fn(async () => false);
+    await expect(
+      runUpcomingShiftReminders(now, hasNotifications),
+    ).resolves.toEqual({ reminders: 0, emails: 0, pushes: 0 });
+    expect(hasNotifications).toHaveBeenCalledWith("org_1");
+    expect(mocks.loadOrgMembers).not.toHaveBeenCalled();
+    expect(mocks.deliver).not.toHaveBeenCalled();
   });
 
   it("does nothing without shifts due", async () => {
