@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   dbGetScheduledShifts: vi.fn(),
   dbCreateScheduledShift: vi.fn(),
   dbDeleteScheduledShift: vi.fn(),
+  dbGetScheduledShiftById: vi.fn(),
+  dbUpdateScheduledShift: vi.fn(),
   dbGetOrgTimeEntries: vi.fn(),
   dbGetTimeEntries: vi.fn(),
   dbGetApprovedTimeOffForPeriod: vi.fn(),
@@ -30,6 +32,8 @@ vi.mock("@/lib/db", () => ({
   dbGetScheduledShifts: mocks.dbGetScheduledShifts,
   dbCreateScheduledShift: mocks.dbCreateScheduledShift,
   dbDeleteScheduledShift: mocks.dbDeleteScheduledShift,
+  dbGetScheduledShiftById: mocks.dbGetScheduledShiftById,
+  dbUpdateScheduledShift: mocks.dbUpdateScheduledShift,
   dbGetOrgTimeEntries: mocks.dbGetOrgTimeEntries,
   dbGetTimeEntries: mocks.dbGetTimeEntries,
   dbGetApprovedTimeOffForPeriod: mocks.dbGetApprovedTimeOffForPeriod,
@@ -39,6 +43,7 @@ import {
   createScheduledShiftDal,
   deleteScheduledShiftDal,
   getSchedule,
+  updateScheduledShiftDal,
 } from "@/lib/dal";
 
 const member = { userId: "user_1", orgId: "org_1", orgRole: "org:member" };
@@ -324,5 +329,113 @@ describe("deleteScheduledShiftDal", () => {
     expect((await deleteScheduledShiftDal(1))._unsafeUnwrapErr()).toEqual({
       reason: "Failed to delete shift",
     });
+  });
+});
+
+describe("updateScheduledShiftDal", () => {
+  const later = new Date("2026-01-06T10:00:00Z");
+  const laterEnd = new Date("2026-01-06T18:00:00Z");
+
+  beforeEach(() => {
+    mocks.dbGetScheduledShiftById.mockResolvedValue(shift);
+  });
+
+  it.each([
+    ["no user", noUser],
+    ["no org", noOrg],
+    ["a non-admin", member],
+  ])("rejects %s", async (_label, session) => {
+    mocks.protect.mockResolvedValue(session);
+    expect(
+      (await updateScheduledShiftDal(1, later, laterEnd))._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Unauthorized" });
+    expect(mocks.dbUpdateScheduledShift).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid times and long notes", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    expect(
+      (await updateScheduledShiftDal(1, laterEnd, later))._unsafeUnwrapErr()
+        .reason,
+    ).toBeTruthy();
+    expect(
+      (
+        await updateScheduledShiftDal(1, later, laterEnd, "x".repeat(501))
+      )._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Note is too long" });
+    expect(mocks.dbUpdateScheduledShift).not.toHaveBeenCalled();
+  });
+
+  it("moves the shift with a trimmed note", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbUpdateScheduledShift.mockResolvedValue({ ...shift, note: "Desk" });
+    expect(
+      (
+        await updateScheduledShiftDal(1, later, laterEnd, "  Desk ", {
+          start: "2026-01-06",
+          end: "2026-01-06",
+        })
+      )._unsafeUnwrap(),
+    ).toMatchObject({ note: "Desk" });
+    expect(mocks.dbGetScheduledShiftById).toHaveBeenCalledWith(1, "org_1");
+    expect(mocks.dbGetApprovedTimeOffForPeriod).toHaveBeenCalledWith(
+      "user_1",
+      "org_1",
+      "2026-01-06",
+      "2026-01-06",
+    );
+    expect(mocks.dbUpdateScheduledShift).toHaveBeenCalledWith(
+      1,
+      "org_1",
+      later,
+      laterEnd,
+      "Desk",
+    );
+    await updateScheduledShiftDal(1, later, laterEnd);
+    expect(mocks.dbUpdateScheduledShift.mock.calls[1][4]).toBeNull();
+  });
+
+  it("reports a shift that is not in this org", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbGetScheduledShiftById.mockResolvedValue(undefined);
+    expect(
+      (await updateScheduledShiftDal(1, later, laterEnd))._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Shift not found" });
+    mocks.dbGetScheduledShiftById.mockResolvedValue(shift);
+    mocks.dbUpdateScheduledShift.mockResolvedValue(undefined);
+    expect(
+      (await updateScheduledShiftDal(1, later, laterEnd))._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Shift not found" });
+  });
+
+  it("refuses moving the shift onto approved time off", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbGetApprovedTimeOffForPeriod.mockResolvedValue([
+      {
+        id: 4,
+        request_type: "vacation",
+        start_date: "2026-01-06",
+        end_date: "2026-01-06",
+      },
+    ]);
+    expect(
+      (await updateScheduledShiftDal(1, later, laterEnd))._unsafeUnwrapErr()
+        .reason,
+    ).toMatch(/^This member has approved time off on /);
+    expect(mocks.dbUpdateScheduledShift).not.toHaveBeenCalled();
+  });
+
+  it("reports failed reads and writes", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.dbGetScheduledShiftById.mockRejectedValue(new Error("db"));
+    expect(
+      (await updateScheduledShiftDal(1, later, laterEnd))._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Failed to update shift" });
+    mocks.dbGetScheduledShiftById.mockResolvedValue(shift);
+    mocks.dbUpdateScheduledShift.mockRejectedValue(new Error("db"));
+    expect(
+      (await updateScheduledShiftDal(1, later, laterEnd))._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Failed to update shift" });
   });
 });

@@ -10,12 +10,14 @@ import { renderWithClient, resolved } from "../utils";
 const mocks = vi.hoisted(() => ({
   createScheduledShiftAction: vi.fn(),
   deleteScheduledShiftAction: vi.fn(),
+  updateScheduledShiftAction: vi.fn(),
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
 vi.mock("@/lib/actions", () => ({
   createScheduledShiftAction: mocks.createScheduledShiftAction,
   deleteScheduledShiftAction: mocks.deleteScheduledShiftAction,
+  updateScheduledShiftAction: mocks.updateScheduledShiftAction,
 }));
 vi.mock("sonner", () => ({ toast: mocks.toast }));
 
@@ -387,5 +389,101 @@ describe("Schedule", () => {
     fireEvent.click(publish);
     await waitFor(() => expect(publish).toBeDisabled());
     expect(publish.querySelector(".animate-spin")).not.toBeNull();
+  });
+
+  it("edits a shift's times and note, then closes the form", async () => {
+    mocks.updateScheduledShiftAction.mockResolvedValue({
+      success: true,
+      data: {},
+    });
+    const s = shift("scheduled", { note: "Desk" });
+    renderSchedule([s]);
+    fireEvent.click(screen.getByLabelText("Edit shift"));
+    const row = screen
+      .getByRole("button", { name: "Save shift" })
+      .closest("li") as HTMLElement;
+    const scoped = within(row);
+    expect(scoped.getByLabelText("Date")).toHaveValue("2026-01-05");
+    expect(scoped.getByLabelText("Start")).toHaveValue("09:00");
+    expect(scoped.getByLabelText("End")).toHaveValue("17:00");
+    expect(scoped.getByLabelText("Note")).toHaveValue("Desk");
+
+    fireEvent.change(scoped.getByLabelText("Date"), {
+      target: { value: "2026-01-06" },
+    });
+    fireEvent.change(scoped.getByLabelText("Start"), {
+      target: { value: "10:00" },
+    });
+    fireEvent.change(scoped.getByLabelText("End"), {
+      target: { value: "18:00" },
+    });
+    fireEvent.change(scoped.getByLabelText("Note"), {
+      target: { value: "Till" },
+    });
+    fireEvent.click(scoped.getByRole("button", { name: "Save shift" }));
+
+    await waitFor(() =>
+      expect(mocks.toast.success).toHaveBeenCalledWith("Shift updated"),
+    );
+    expect(mocks.updateScheduledShiftAction).toHaveBeenCalledWith(
+      s.id,
+      "2026-01-06T10:00:00.000Z",
+      "2026-01-06T18:00:00.000Z",
+      "Till",
+      Intl.DateTimeFormat().resolvedOptions().timeZone,
+      { start: "2026-01-06", end: "2026-01-06" },
+    );
+    expect(screen.queryByRole("button", { name: "Save shift" })).toBeNull();
+  });
+
+  it("keeps the edit form open and shows the error when saving fails", async () => {
+    mocks.updateScheduledShiftAction.mockResolvedValue({
+      success: false,
+      error: "This member has approved time off on Jan 6",
+    });
+    renderSchedule([shift("scheduled")]);
+    fireEvent.click(screen.getByLabelText("Edit shift"));
+    fireEvent.submit(screen.getByRole("button", { name: "Save shift" }));
+    await waitFor(() =>
+      expect(mocks.toast.error).toHaveBeenCalledWith(
+        "This member has approved time off on Jan 6",
+      ),
+    );
+    expect(screen.getByRole("button", { name: "Save shift" })).toBeVisible();
+  });
+
+  it("starts the edit form with a blank note and can cancel or toggle it", () => {
+    renderSchedule([shift("scheduled")]);
+    fireEvent.click(screen.getByLabelText("Edit shift"));
+    const row = screen
+      .getByRole("button", { name: "Save shift" })
+      .closest("li") as HTMLElement;
+    expect(within(row).getByLabelText("Note")).toHaveValue("");
+    fireEvent.change(within(row).getByLabelText("Date"), {
+      target: { value: "" },
+    });
+    expect(screen.getByRole("button", { name: "Save shift" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("button", { name: "Save shift" })).toBeNull();
+    fireEvent.click(screen.getByLabelText("Edit shift"));
+    fireEvent.click(screen.getByLabelText("Edit shift"));
+    expect(screen.queryByRole("button", { name: "Save shift" })).toBeNull();
+    expect(mocks.updateScheduledShiftAction).not.toHaveBeenCalled();
+  });
+
+  it("disables the edit form while saving", async () => {
+    mocks.updateScheduledShiftAction.mockReturnValue(new Promise(() => {}));
+    renderSchedule([shift("scheduled")]);
+    fireEvent.click(screen.getByLabelText("Edit shift"));
+    const save = screen.getByRole("button", { name: "Save shift" });
+    fireEvent.click(save);
+    await waitFor(() => expect(save).toBeDisabled());
+    expect(save.querySelector(".animate-spin")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+  });
+
+  it("hides the edit button from members", () => {
+    renderSchedule([shift("scheduled")], false);
+    expect(screen.queryByLabelText("Edit shift")).toBeNull();
   });
 });

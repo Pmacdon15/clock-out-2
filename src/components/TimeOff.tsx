@@ -65,7 +65,18 @@ function useTimeOffMutation<A>(
   });
 }
 
-function RequestForm() {
+/** Who the form files time off for: "" is the signed-in person. */
+const SELF = "";
+
+function RequestForm({
+  isAdmin,
+  members,
+}: {
+  isAdmin: boolean;
+  members: Member[];
+}) {
+  const [memberId, setMemberId] = useState(SELF);
+  const [approve, setApprove] = useState(true);
   const [type, setType] = useState<TimeOffType>("vacation");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -74,21 +85,30 @@ function RequestForm() {
   );
   const [note, setNote] = useState("");
 
-  const { mutate, isPending } = useTimeOffMutation(async () => {
-    const res = await createTimeOffRequestAction(
-      type,
-      startDate,
-      endDate || startDate,
-      hoursPerDay,
-      note,
-    );
-    if (res.success) {
-      setStartDate("");
-      setEndDate("");
-      setNote("");
-    }
-    return res;
-  }, "Time off requested");
+  const { mutate, isPending } = useTimeOffMutation(
+    async () => {
+      const args = [
+        type,
+        startDate,
+        endDate || startDate,
+        hoursPerDay,
+        note,
+      ] as const;
+      const res = await (isAdmin
+        ? createTimeOffRequestAction(...args, {
+            memberId: memberId || null,
+            approve,
+          })
+        : createTimeOffRequestAction(...args));
+      if (res.success) {
+        setStartDate("");
+        setEndDate("");
+        setNote("");
+      }
+      return res;
+    },
+    isAdmin && approve ? "Time off added" : "Time off requested",
+  );
 
   return (
     <form
@@ -98,6 +118,26 @@ function RequestForm() {
         mutate(undefined);
       }}
     >
+      {isAdmin && (
+        <div className="space-y-1.5 sm:col-span-2">
+          <label className="font-medium text-sm" htmlFor="timeOffMember">
+            For
+          </label>
+          <select
+            className={inputClass}
+            id="timeOffMember"
+            onChange={(e) => setMemberId(e.target.value)}
+            value={memberId}
+          >
+            <option value={SELF}>Myself</option>
+            {members.map((member) => (
+              <option key={member.id} value={member.id}>
+                {member.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       <div className="space-y-1.5">
         <label className="font-medium text-sm" htmlFor="timeOffType">
           Type
@@ -167,6 +207,16 @@ function RequestForm() {
           value={note}
         />
       </div>
+      {isAdmin && (
+        <label className="flex items-center gap-2 text-sm sm:col-span-2">
+          <input
+            checked={approve}
+            onChange={(e) => setApprove(e.target.checked)}
+            type="checkbox"
+          />
+          Approve right away
+        </label>
+      )}
       <div className="sm:col-span-2">
         <Button
           className="w-full sm:w-auto"
@@ -174,7 +224,7 @@ function RequestForm() {
           type="submit"
         >
           {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          Request time off
+          {isAdmin && approve ? "Add time off" : "Request time off"}
         </Button>
       </div>
     </form>
@@ -320,12 +370,13 @@ export default function TimeOff({
           <div>
             <h3 className="font-bold text-2xl tracking-tight">Time off</h3>
             <p className="text-muted-foreground text-sm">
-              Request vacation or sick days. Once an admin approves them they
-              show in the Hours view and in hours reports.
+              {isAdmin
+                ? "Add vacation or sick days for yourself or any member, and approve, deny or revoke requests. Approved time off shows in the Hours view and in hours reports."
+                : "Request vacation or sick days. Once an admin approves them they show in the Hours view and in hours reports."}
             </p>
           </div>
         </div>
-        <RequestForm />
+        <RequestForm isAdmin={isAdmin} members={members} />
       </Card>
 
       {isAdmin && (
