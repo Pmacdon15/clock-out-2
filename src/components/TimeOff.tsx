@@ -8,12 +8,16 @@ import {
   cancelTimeOffRequestAction,
   createTimeOffRequestAction,
   reviewTimeOffRequestAction,
+  setTimeOffAllowanceAction,
 } from "@/lib/actions";
 import {
   DEFAULT_TIME_OFF_HOURS_PER_DAY,
+  formatDays,
   formatTimeOffDates,
   formatTimeOffHours,
+  MAX_PTO_DAYS,
   MAX_TIME_OFF_NOTE_LENGTH,
+  ptoDaysUsed,
   TIME_OFF_STATUS_LABELS,
   TIME_OFF_TYPE_LABELS,
   TIME_OFF_TYPES,
@@ -21,6 +25,7 @@ import {
 } from "@/lib/time-off-utils";
 import type {
   SerializableResult,
+  TimeOffAllowance,
   TimeOffRequest,
   TimeOffStatus,
   TimeOffType,
@@ -33,9 +38,32 @@ interface TimeOffProps {
   timeOffPromise: Promise<
     SerializableResult<TimeOffRequest[], { reason: string }>
   >;
+  /** Yearly PTO days per member; members without one have no limit. */
+  allowancesPromise?: Promise<
+    SerializableResult<TimeOffAllowance[], { reason: string }>
+  >;
   membersPromise?: Promise<Member[]>;
   currentUserIdPromise: Promise<string | null | undefined>;
   isAdmin: boolean;
+}
+
+/** A member's PTO for one calendar year, in days. */
+type PtoBalance = {
+  allowance: number;
+  used: number;
+  pending: number;
+  left: number;
+};
+
+function ptoBalance(
+  requests: TimeOffRequest[],
+  userId: string,
+  allowance: number,
+  year: number,
+): PtoBalance {
+  const used = ptoDaysUsed(requests, userId, year, ["approved"]);
+  const pending = ptoDaysUsed(requests, userId, year, ["pending"]);
+  return { allowance, used, pending, left: allowance - used - pending };
 }
 
 export const TIME_OFF_STATUS_STYLES: Record<TimeOffStatus, string> = {
@@ -65,7 +93,7 @@ function useTimeOffMutation<A>(
   });
 }
 
-function RequestForm() {
+function RequestForm({ ptoHint }: { ptoHint?: string }) {
   const [type, setType] = useState<TimeOffType>("vacation");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -114,6 +142,14 @@ function RequestForm() {
             </option>
           ))}
         </select>
+        {type === "vacation" && ptoHint && (
+          <p className="text-muted-foreground text-xs">{ptoHint}</p>
+        )}
+        {type === "unpaid" && (
+          <p className="text-muted-foreground text-xs">
+            Unpaid time off doesn't use your PTO and isn't paid.
+          </p>
+        )}
       </div>
       <div className="space-y-1.5">
         <label className="font-medium text-sm" htmlFor="timeOffHours">
@@ -262,13 +298,147 @@ function RequestRow({
   );
 }
 
+function PtoBalanceCard({
+  balance,
+  year,
+}: {
+  balance: PtoBalance;
+  year: number;
+}) {
+  return (
+    <Card className="p-6 sm:p-8">
+      <h4 className="mb-4 font-bold text-lg">My PTO for {year}</h4>
+      <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        {[
+          ["Per year", balance.allowance],
+          ["Used", balance.used],
+          ["Pending", balance.pending],
+          ["Left", Math.max(0, balance.left)],
+        ].map(([label, days]) => (
+          <div key={label}>
+            <dt className="text-muted-foreground text-xs uppercase">{label}</dt>
+            <dd className="font-bold text-2xl tabular-nums">
+              {formatDays(days as number)}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </Card>
+  );
+}
+
+function AllowanceRow({
+  member,
+  allowance,
+  balance,
+}: {
+  member: Member;
+  allowance: number | null;
+  balance: PtoBalance | null;
+}) {
+  const [value, setValue] = useState(allowance === null ? "" : `${allowance}`);
+  const save = useTimeOffMutation(
+    (days: number | null) => setTimeOffAllowanceAction(member.id, days),
+    "PTO allowance saved",
+  );
+  const trimmed = value.trim();
+  const days = trimmed === "" ? null : Number(trimmed);
+  const unchanged = days === allowance;
+  const inputId = `pto-${member.id}`;
+
+  return (
+    <li className="flex flex-col gap-2 border-zinc-100 border-b py-4 last:border-0 sm:flex-row sm:items-center sm:justify-between dark:border-zinc-800">
+      <div>
+        <label className="font-bold" htmlFor={inputId}>
+          {member.name}
+        </label>
+        <p className="text-muted-foreground text-xs">
+          {balance
+            ? `${formatDays(balance.used)} used · ${formatDays(balance.pending)} pending · ${formatDays(Math.max(0, balance.left))} left`
+            : "No PTO limit"}
+        </p>
+      </div>
+      <form
+        className="flex items-center gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          save.mutate(days);
+        }}
+      >
+        <input
+          aria-label={`PTO days per year for ${member.name}`}
+          className={`${inputClass} w-28`}
+          id={inputId}
+          max={MAX_PTO_DAYS}
+          min={0}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder="No limit"
+          step={0.5}
+          type="number"
+          value={value}
+        />
+        <span className="text-muted-foreground text-sm">days/yr</span>
+        <Button disabled={unchanged || save.isPending} size="sm" type="submit">
+          {save.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
+          Save
+        </Button>
+      </form>
+    </li>
+  );
+}
+
+function AllowancesCard({
+  members,
+  allowances,
+  requests,
+  year,
+}: {
+  members: Member[];
+  allowances: Map<string, number>;
+  requests: TimeOffRequest[];
+  year: number;
+}) {
+  return (
+    <Card className="p-6 sm:p-8">
+      <h4 className="font-bold text-lg">PTO days per employee</h4>
+      <p className="mb-2 text-muted-foreground text-sm">
+        Paid vacation days each member gets per calendar year ({year} shown).
+        Leave blank for no limit. Sick days and unpaid time off don't use PTO.
+      </p>
+      {members.length === 0 ? (
+        <p className="py-4 text-muted-foreground text-sm">No members yet.</p>
+      ) : (
+        <ul>
+          {members.map((member) => {
+            const allowance = allowances.get(member.id) ?? null;
+            return (
+              <AllowanceRow
+                allowance={allowance}
+                balance={
+                  allowance === null
+                    ? null
+                    : ptoBalance(requests, member.id, allowance, year)
+                }
+                key={`${member.id}:${allowance}`}
+                member={member}
+              />
+            );
+          })}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
 export default function TimeOff({
   timeOffPromise,
+  allowancesPromise,
   membersPromise,
   currentUserIdPromise,
   isAdmin,
 }: TimeOffProps) {
   const result = use(timeOffPromise);
+  const allowancesResult = allowancesPromise ? use(allowancesPromise) : null;
   const members = membersPromise ? use(membersPromise) : [];
   const currentUserId = use(currentUserIdPromise);
 
@@ -280,6 +450,19 @@ export default function TimeOff({
       </Card>
     );
   }
+
+  const year = new Date().getFullYear();
+  const allowances = new Map(
+    (allowancesResult?.ok ? allowancesResult.value : []).map((a) => [
+      a.user_id,
+      Number(a.pto_days),
+    ]),
+  );
+  const myAllowance = currentUserId ? allowances.get(currentUserId) : undefined;
+  const myBalance =
+    currentUserId && myAllowance !== undefined
+      ? ptoBalance(result.value, currentUserId, myAllowance, year)
+      : null;
 
   const memberNames = new Map(members.map((m) => [m.id, m.name]));
   const nameOf = (request: TimeOffRequest) =>
@@ -320,13 +503,22 @@ export default function TimeOff({
           <div>
             <h3 className="font-bold text-2xl tracking-tight">Time off</h3>
             <p className="text-muted-foreground text-sm">
-              Request vacation or sick days. Once an admin approves them they
-              show in the Hours view and in hours reports.
+              Request vacation (PTO), sick days or unpaid time off. Once an
+              admin approves them they show in the Hours view and in hours
+              reports.
             </p>
           </div>
         </div>
-        <RequestForm />
+        <RequestForm
+          ptoHint={
+            myBalance
+              ? `${formatDays(Math.max(0, myBalance.left))} of PTO left for ${year}`
+              : undefined
+          }
+        />
       </Card>
+
+      {myBalance && <PtoBalanceCard balance={myBalance} year={year} />}
 
       {isAdmin && (
         <Card className="p-6 sm:p-8">
@@ -339,6 +531,15 @@ export default function TimeOff({
             renderRows(pending)
           )}
         </Card>
+      )}
+
+      {isAdmin && allowancesResult?.ok && (
+        <AllowancesCard
+          allowances={allowances}
+          members={members}
+          requests={result.value}
+          year={year}
+        />
       )}
 
       <Card className="p-6 sm:p-8">

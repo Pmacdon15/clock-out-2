@@ -6,26 +6,48 @@ const mocks = vi.hoisted(() => ({
   dbCreateTimeOffRequest: vi.fn(),
   dbReviewTimeOffRequest: vi.fn(),
   dbCancelTimeOffRequest: vi.fn(),
+  dbGetTimeOffRequest: vi.fn(),
+  dbGetTimeOffAllowance: vi.fn(),
+  dbGetTimeOffAllowances: vi.fn(),
+  dbGetPtoRequestsForPeriod: vi.fn(),
+  dbSetTimeOffAllowance: vi.fn(),
+  fetchAllPages: vi.fn(),
+  getProcessedMembers: vi.fn(),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({
   auth: { protect: mocks.protect },
-  clerkClient: vi.fn(),
+  clerkClient: vi.fn(async () => ({
+    organizations: { getOrganizationMembershipList: vi.fn() },
+  })),
 }));
-vi.mock("@/lib/utils-clerk", () => ({}));
+vi.mock("@/lib/clerk-pagination", () => ({
+  fetchAllPages: mocks.fetchAllPages,
+}));
+vi.mock("@/lib/utils-clerk", () => ({
+  getProcessedMembers: mocks.getProcessedMembers,
+  isOverMemberShipLimit: vi.fn(),
+}));
 vi.mock("@/lib/geoapify", () => ({ reverseGeocode: vi.fn() }));
 vi.mock("@/lib/db", () => ({
   dbGetTimeOffRequests: mocks.dbGetTimeOffRequests,
   dbCreateTimeOffRequest: mocks.dbCreateTimeOffRequest,
   dbReviewTimeOffRequest: mocks.dbReviewTimeOffRequest,
   dbCancelTimeOffRequest: mocks.dbCancelTimeOffRequest,
+  dbGetTimeOffRequest: mocks.dbGetTimeOffRequest,
+  dbGetTimeOffAllowance: mocks.dbGetTimeOffAllowance,
+  dbGetTimeOffAllowances: mocks.dbGetTimeOffAllowances,
+  dbGetPtoRequestsForPeriod: mocks.dbGetPtoRequestsForPeriod,
+  dbSetTimeOffAllowance: mocks.dbSetTimeOffAllowance,
 }));
 
 import {
   cancelTimeOffRequestDal,
   createTimeOffRequestDal,
+  getTimeOffAllowances,
   getTimeOffRequests,
   reviewTimeOffRequestDal,
+  setTimeOffAllowanceDal,
 } from "@/lib/dal";
 
 const member = { userId: "user_1", orgId: "org_1", orgRole: "org:member" };
@@ -39,7 +61,25 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-03-01T12:00:00Z"));
   vi.spyOn(console, "error").mockImplementation(() => {});
+  mocks.dbGetTimeOffAllowance.mockResolvedValue(null);
+  mocks.dbGetPtoRequestsForPeriod.mockResolvedValue([]);
+  mocks.dbGetTimeOffRequest.mockResolvedValue(undefined);
+  mocks.fetchAllPages.mockResolvedValue([]);
+  mocks.getProcessedMembers.mockResolvedValue([{ id: "user_1", name: "Sam" }]);
 });
+
+/** A vacation request as the PTO checks read it. */
+function pto(id: number, start: string, end: string, status = "approved") {
+  return {
+    id,
+    org_id: "org_1",
+    user_id: "user_1",
+    request_type: "vacation",
+    start_date: start,
+    end_date: end,
+    status,
+  };
+}
 
 describe("getTimeOffRequests", () => {
   it.each([
@@ -136,6 +176,55 @@ describe("createTimeOffRequestDal", () => {
     });
   });
 
+  it("doesn't look up an allowance for sick or unpaid days", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbCreateTimeOffRequest.mockResolvedValue(request);
+    await createTimeOffRequestDal("unpaid", "2026-03-02", "2026-03-04", 8);
+    await createTimeOffRequestDal("sick", "2026-03-02", "2026-03-04", 8);
+    expect(mocks.dbGetTimeOffAllowance).not.toHaveBeenCalled();
+    expect(mocks.dbCreateTimeOffRequest).toHaveBeenCalledTimes(2);
+  });
+
+  it("files vacation that fits the PTO allowance, counting pending days", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetTimeOffAllowance.mockResolvedValue(5);
+    mocks.dbGetPtoRequestsForPeriod.mockResolvedValue([
+      pto(1, "2026-01-05", "2026-01-05"),
+      pto(2, "2026-02-02", "2026-02-02", "pending"),
+    ]);
+    mocks.dbCreateTimeOffRequest.mockResolvedValue(request);
+    expect((await create())._unsafeUnwrap()).toEqual(request);
+    expect(mocks.dbGetTimeOffAllowance).toHaveBeenCalledWith("user_1", "org_1");
+    expect(mocks.dbGetPtoRequestsForPeriod).toHaveBeenCalledWith(
+      "user_1",
+      "org_1",
+      "2026-01-01",
+      "2026-12-31",
+      ["pending", "approved"],
+    );
+  });
+
+  it("refuses vacation beyond the PTO allowance", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetTimeOffAllowance.mockResolvedValue(4);
+    mocks.dbGetPtoRequestsForPeriod.mockResolvedValue([
+      pto(1, "2026-01-05", "2026-01-06", "pending"),
+    ]);
+    expect((await create())._unsafeUnwrapErr()).toEqual({
+      reason: "Not enough PTO for 2026: 2 days left, 3 days asked for",
+    });
+    expect(mocks.dbCreateTimeOffRequest).not.toHaveBeenCalled();
+  });
+
+  it("reports a failed allowance check", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetTimeOffAllowance.mockRejectedValue(new Error("db"));
+    expect((await create())._unsafeUnwrapErr()).toEqual({
+      reason: "Failed to request time off",
+    });
+    expect(mocks.dbCreateTimeOffRequest).not.toHaveBeenCalled();
+  });
+
   it("reports a failed insert", async () => {
     mocks.protect.mockResolvedValue(member);
     mocks.dbCreateTimeOffRequest.mockRejectedValue(new Error("db"));
@@ -179,6 +268,56 @@ describe("reviewTimeOffRequestDal", () => {
       "denied",
       "admin_1",
     );
+  });
+
+  it("approves vacation that fits the allowance, counting only approved days", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    const pending = pto(3, "2026-03-02", "2026-03-04", "pending");
+    mocks.dbGetTimeOffRequest.mockResolvedValue(pending);
+    mocks.dbGetTimeOffAllowance.mockResolvedValue(5);
+    mocks.dbGetPtoRequestsForPeriod.mockResolvedValue([
+      pto(1, "2026-01-05", "2026-01-06"),
+    ]);
+    mocks.dbReviewTimeOffRequest.mockResolvedValue(request);
+    expect(
+      (await reviewTimeOffRequestDal(3, "approved"))._unsafeUnwrap(),
+    ).toEqual(request);
+    expect(mocks.dbGetTimeOffRequest).toHaveBeenCalledWith(3, "org_1");
+    expect(mocks.dbGetPtoRequestsForPeriod.mock.calls[0][4]).toEqual([
+      "approved",
+    ]);
+  });
+
+  it("won't approve vacation beyond the allowance", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbGetTimeOffRequest.mockResolvedValue(
+      pto(3, "2026-03-02", "2026-03-04", "pending"),
+    );
+    mocks.dbGetTimeOffAllowance.mockResolvedValue(4);
+    mocks.dbGetPtoRequestsForPeriod.mockResolvedValue([
+      pto(1, "2026-01-05", "2026-01-06"),
+    ]);
+    expect(
+      (await reviewTimeOffRequestDal(3, "approved"))._unsafeUnwrapErr(),
+    ).toEqual({
+      reason: "Not enough PTO for 2026: 2 days left, 3 days asked for",
+    });
+    expect(mocks.dbReviewTimeOffRequest).not.toHaveBeenCalled();
+  });
+
+  it("denies without checking the allowance", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbReviewTimeOffRequest.mockResolvedValue(request);
+    await reviewTimeOffRequestDal(3, "denied");
+    expect(mocks.dbGetTimeOffRequest).not.toHaveBeenCalled();
+  });
+
+  it("reports a failed allowance check on approval", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbGetTimeOffRequest.mockRejectedValue(new Error("db"));
+    expect(
+      (await reviewTimeOffRequestDal(3, "approved"))._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Failed to review request" });
   });
 
   it("reports a request that is gone or already reviewed", async () => {
@@ -238,5 +377,102 @@ describe("cancelTimeOffRequestDal", () => {
     expect((await cancelTimeOffRequestDal(3))._unsafeUnwrapErr()).toEqual({
       reason: "Failed to cancel request",
     });
+  });
+});
+
+describe("getTimeOffAllowances", () => {
+  it.each([
+    ["no user", noUser],
+    ["no org", noOrg],
+  ])("rejects %s", async (_label, session) => {
+    mocks.protect.mockResolvedValue(session);
+    await expect(getTimeOffAllowances()).resolves.toEqual({
+      ok: false,
+      error: { reason: "Unauthorized or no organization selected" },
+    });
+  });
+
+  it("gives admins every member's allowance and members their own", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbGetTimeOffAllowances.mockResolvedValue([{ user_id: "user_1" }]);
+    await expect(getTimeOffAllowances()).resolves.toEqual({
+      ok: true,
+      value: [{ user_id: "user_1" }],
+    });
+    expect(mocks.dbGetTimeOffAllowances).toHaveBeenCalledWith("org_1", null);
+
+    mocks.protect.mockResolvedValue(member);
+    await getTimeOffAllowances();
+    expect(mocks.dbGetTimeOffAllowances).toHaveBeenLastCalledWith(
+      "org_1",
+      "user_1",
+    );
+  });
+
+  it("reports a failed read", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetTimeOffAllowances.mockRejectedValue(new Error("db"));
+    await expect(getTimeOffAllowances()).resolves.toEqual({
+      ok: false,
+      error: { reason: "Error fetching PTO allowances" },
+    });
+  });
+});
+
+describe("setTimeOffAllowanceDal", () => {
+  it.each([
+    ["no user", noUser],
+    ["no org", noOrg],
+    ["a non-admin", member],
+  ])("rejects %s", async (_label, session) => {
+    mocks.protect.mockResolvedValue(session);
+    expect(
+      (await setTimeOffAllowanceDal("user_1", 10))._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Unauthorized" });
+    expect(mocks.dbSetTimeOffAllowance).not.toHaveBeenCalled();
+  });
+
+  it("validates the days", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    expect(
+      (await setTimeOffAllowanceDal("user_1", -1))._unsafeUnwrapErr(),
+    ).toEqual({ reason: "PTO days must be between 0 and 365" });
+    expect(mocks.dbSetTimeOffAllowance).not.toHaveBeenCalled();
+  });
+
+  it("only sets allowances for org members", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    expect(
+      (await setTimeOffAllowanceDal("stranger", 10))._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Member not found" });
+    expect(mocks.dbSetTimeOffAllowance).not.toHaveBeenCalled();
+  });
+
+  it("saves days, or clears the limit with null", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    const saved = { org_id: "org_1", user_id: "user_1", pto_days: 10 };
+    mocks.dbSetTimeOffAllowance.mockResolvedValue(saved);
+    expect(
+      (await setTimeOffAllowanceDal("user_1", 10))._unsafeUnwrap(),
+    ).toEqual(saved);
+    expect(mocks.dbSetTimeOffAllowance).toHaveBeenCalledWith(
+      "org_1",
+      "user_1",
+      10,
+    );
+    await setTimeOffAllowanceDal("user_1", null);
+    expect(mocks.dbSetTimeOffAllowance).toHaveBeenLastCalledWith(
+      "org_1",
+      "user_1",
+      null,
+    );
+  });
+
+  it("reports a failed save", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbSetTimeOffAllowance.mockRejectedValue(new Error("db"));
+    expect(
+      (await setTimeOffAllowanceDal("user_1", 10))._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Failed to save PTO allowance" });
   });
 });

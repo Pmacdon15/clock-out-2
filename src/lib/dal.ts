@@ -33,13 +33,18 @@ import {
   dbGetLocationSettings,
   dbGetOrgTimeEntries,
   dbGetOvertimeSettings,
+  dbGetPtoRequestsForPeriod,
   dbGetReportingSettings,
   dbGetScheduledShifts,
   dbGetSites,
   dbGetSitesForEnforcement,
   dbGetTimeEntries,
+  dbGetTimeOffAllowance,
+  dbGetTimeOffAllowances,
+  dbGetTimeOffRequest,
   dbGetTimeOffRequests,
   dbReviewTimeOffRequest,
+  dbSetTimeOffAllowance,
   dbStartBreak,
   dbUpdateBreak,
   dbUpdateBreakSettings,
@@ -69,8 +74,10 @@ import {
 } from "./schedule-utils";
 import {
   formatTimeOffDates,
+  invalidAllowanceReason,
   invalidTimeOffReason,
   MAX_TIME_OFF_NOTE_LENGTH,
+  ptoOverAllowanceReason,
   shiftCalendarDays,
 } from "./time-off-utils";
 import type {
@@ -86,7 +93,9 @@ import type {
   SiteData,
   TimeEntry,
   TimeEntryBreak,
+  TimeOffAllowance,
   TimeOffRequest,
+  TimeOffStatus,
   TimeOffType,
 } from "./types";
 import { getProcessedMembers, isOverMemberShipLimit } from "./utils-clerk";
@@ -1367,6 +1376,31 @@ export async function getTimeOffRequests(): Promise<
     });
 }
 
+/**
+ * Why a vacation request would go over the member's PTO allowance, counting
+ * their other requests with one of `statuses`; null when it fits.
+ */
+async function ptoAllowanceProblem(
+  orgId: string,
+  request: Pick<
+    TimeOffRequest,
+    "user_id" | "request_type" | "start_date" | "end_date"
+  > & { id?: number },
+  statuses: TimeOffStatus[],
+) {
+  if (request.request_type !== "vacation") return null;
+  const allowance = await dbGetTimeOffAllowance(request.user_id, orgId);
+  if (allowance === null) return null;
+  const existing = await dbGetPtoRequestsForPeriod(
+    request.user_id,
+    orgId,
+    `${request.start_date.slice(0, 4)}-01-01`,
+    `${request.end_date.slice(0, 4)}-12-31`,
+    statuses,
+  );
+  return ptoOverAllowanceReason(request, allowance, existing, statuses);
+}
+
 /** Any member can ask for time off for themselves. */
 export async function createTimeOffRequestDal(
   type: TimeOffType,
@@ -1392,6 +1426,25 @@ export async function createTimeOffRequestDal(
   const trimmedNote = note?.trim() || null;
   if (trimmedNote && trimmedNote.length > MAX_TIME_OFF_NOTE_LENGTH) {
     return errAsync({ reason: "Note is too long" } as const);
+  }
+
+  // Pending requests count too, so a member can't queue up more PTO than
+  // they have while waiting for approval.
+  const overAllowance = await ptoAllowanceProblem(
+    orgId,
+    {
+      user_id: userId,
+      request_type: type,
+      start_date: startDate,
+      end_date: endDate,
+    },
+    ["pending", "approved"],
+  ).catch((e) => {
+    console.error("Error checking PTO allowance: ", e);
+    return "Failed to request time off";
+  });
+  if (overAllowance) {
+    return errAsync({ reason: overAllowance });
   }
 
   return await dbCreateTimeOffRequest(
@@ -1435,6 +1488,20 @@ export async function reviewTimeOffRequestDal(
   }
   if (decision !== "approved" && decision !== "denied") {
     return errAsync({ reason: "Invalid decision" } as const);
+  }
+
+  if (decision === "approved") {
+    const overAllowance = await dbGetTimeOffRequest(id, orgId)
+      .then((request) =>
+        request ? ptoAllowanceProblem(orgId, request, ["approved"]) : null,
+      )
+      .catch((e) => {
+        console.error("Error checking PTO allowance: ", e);
+        return "Failed to review request";
+      });
+    if (overAllowance) {
+      return errAsync({ reason: overAllowance });
+    }
   }
 
   return await dbReviewTimeOffRequest(id, orgId, decision, userId)
@@ -1493,5 +1560,56 @@ export async function cancelTimeOffRequestDal(id: number) {
     .catch((e) => {
       console.error("Error cancelling time off: ", e);
       return errAsync({ reason: "Failed to cancel request" } as const);
+    });
+}
+
+/**
+ * Yearly PTO allowances. Admins see every member's; members see their own.
+ */
+export async function getTimeOffAllowances(): Promise<
+  SerializableResult<TimeOffAllowance[], { reason: string }>
+> {
+  const { userId, orgId, orgRole } = await auth.protect();
+  if (!userId || !orgId) {
+    return {
+      error: { reason: "Unauthorized or no organization selected" },
+      ok: false,
+    };
+  }
+  return await dbGetTimeOffAllowances(
+    orgId,
+    orgRole === "org:admin" ? null : userId,
+  )
+    .then((allowances) => ({ value: allowances, ok: true as const }))
+    .catch((e) => {
+      console.error("Error fetching PTO allowances: ", e);
+      return { error: { reason: "Error fetching PTO allowances" }, ok: false };
+    });
+}
+
+/** Admins set how many PTO days a member gets per year; null = no limit. */
+export async function setTimeOffAllowanceDal(
+  memberId: string,
+  ptoDays: number | null,
+) {
+  const { userId, orgId, orgRole } = await auth.protect();
+  if (!userId || !orgId || orgRole !== "org:admin") {
+    return errAsync({ reason: "Unauthorized" } as const);
+  }
+  if (ptoDays !== null) {
+    const invalid = invalidAllowanceReason(ptoDays);
+    if (invalid) return errAsync({ reason: invalid });
+  }
+
+  const members = await getOrgMembers();
+  if (!members.some((member) => member.id === memberId)) {
+    return errAsync({ reason: "Member not found" } as const);
+  }
+
+  return await dbSetTimeOffAllowance(orgId, memberId, ptoDays)
+    .then((saved) => okAsync(saved))
+    .catch((e) => {
+      console.error("Error saving PTO allowance: ", e);
+      return errAsync({ reason: "Failed to save PTO allowance" } as const);
     });
 }
