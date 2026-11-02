@@ -255,7 +255,8 @@ describe("NotificationSettings", () => {
       await screen.findByRole("button", { name: /Turn off/ }, SLOW),
     );
     await waitFor(() => expect(second.unsubscribe).toHaveBeenCalled(), SLOW);
-  });
+    // Several SLOW waits in a row: the default 5s test cap times out on CI.
+  }, 20_000);
 
   it("sends a test notification and summarises what went out", async () => {
     renderSettings();
