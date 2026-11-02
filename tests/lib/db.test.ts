@@ -342,6 +342,8 @@ describe("break settings", () => {
       null,
       null,
       false,
+      null,
+      null,
       true,
       30,
       5,
@@ -353,6 +355,10 @@ describe("break settings", () => {
       null,
       true,
       false,
+      true,
+      null,
+      true,
+      null,
     ]);
   });
 
@@ -379,6 +385,8 @@ describe("break settings", () => {
       null,
       15,
       false,
+      null,
+      null,
       false,
       30,
       5,
@@ -390,6 +398,10 @@ describe("break settings", () => {
       15,
       true,
       false,
+      true,
+      null,
+      true,
+      null,
     ]);
   });
 
@@ -413,6 +425,8 @@ describe("break settings", () => {
       null,
       null,
       true,
+      null,
+      null,
       false,
       30,
       5,
@@ -424,6 +438,52 @@ describe("break settings", () => {
       null,
       false,
       true,
+      true,
+      null,
+      true,
+      null,
+    ]);
+  });
+
+  it("dbUpdateBreakSettings overwrites the per-shift break counts when they are passed", async () => {
+    sql.mockResolvedValue([]);
+    await db.ensureBreakSettingsTable();
+    sql.mockReset();
+    sql
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ org_id: "o1", max_paid_breaks_per_shift: 2 }]);
+    await db.dbUpdateBreakSettings("o1", false, 30, 5, undefined, undefined, {
+      paid: 2,
+      unpaid: null,
+    });
+    expect(textOf(1)).toContain("max_paid_breaks_per_shift = CASE WHEN");
+    expect(textOf(1)).toContain("max_unpaid_breaks_per_shift = CASE WHEN");
+    expect(valuesOf(1)).toEqual([
+      "o1",
+      false,
+      30,
+      5,
+      null,
+      null,
+      null,
+      false,
+      2,
+      null,
+      false,
+      30,
+      5,
+      true,
+      null,
+      true,
+      null,
+      true,
+      null,
+      true,
+      false,
+      false,
+      2,
+      false,
+      null,
     ]);
   });
 
@@ -446,6 +506,8 @@ describe("break settings", () => {
       null,
       null,
       false,
+      null,
+      null,
       false,
       45,
       6,
@@ -457,6 +519,10 @@ describe("break settings", () => {
       null,
       true,
       false,
+      true,
+      null,
+      true,
+      null,
     ]);
   });
 });

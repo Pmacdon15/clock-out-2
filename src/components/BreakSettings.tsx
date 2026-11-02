@@ -5,6 +5,7 @@ import {
   Check,
   Coffee,
   DollarSign,
+  Hash,
   Loader2,
   Timer,
   XCircle,
@@ -13,16 +14,25 @@ import { startTransition, useState } from "react";
 import { toast } from "sonner";
 import { updateBreakSettingAction } from "@/lib/actions";
 import {
+  BREAK_COUNT_LIMIT_FIELDS,
   BREAK_LIMIT_FIELDS,
   BREAK_TYPE_VALUES,
   BREAK_TYPES,
+  getBreakCountLimits,
   getBreakLimits,
   getOfferedBreakTypes,
   isMealBreakType,
+  isValidBreakCountLimit,
   isValidBreakLimit,
+  MAX_BREAK_COUNT_LIMIT,
   MAX_BREAK_LIMIT_MINUTES,
 } from "@/lib/break-utils";
-import type { BreakLimits, BreakSettingsData, BreakType } from "@/lib/types";
+import type {
+  BreakCountLimits,
+  BreakLimits,
+  BreakSettingsData,
+  BreakType,
+} from "@/lib/types";
 import { Button, Card } from "./ui";
 
 interface BreakSettingsProps {
@@ -58,6 +68,17 @@ const lunchPayOptions = [
     description: "Lunch counts as worked time and is never docked",
   },
 ] as const;
+type BreakKind = keyof BreakCountLimits;
+
+const BREAK_KINDS: readonly BreakKind[] = ["paid", "unpaid"];
+
+/** Starting value offered when an admin first switches a count limit on. */
+const DEFAULT_COUNT_LIMIT: Record<BreakKind, number> = { paid: 2, unpaid: 1 };
+
+const BREAK_KIND_LABELS: Record<BreakKind, string> = {
+  paid: "Paid breaks",
+  unpaid: "Unpaid breaks",
+};
 
 const options = [
   {
@@ -120,6 +141,26 @@ export default function BreakSettings({
     : limitEnabled.unpaid_meal
       ? limitMinutes.unpaid_meal
       : null;
+  const savedCounts = getBreakCountLimits({
+    max_paid_breaks_per_shift: initialData?.max_paid_breaks_per_shift,
+    max_unpaid_breaks_per_shift: initialData?.max_unpaid_breaks_per_shift,
+  });
+  const [countEnabled, setCountEnabled] = useState<Record<BreakKind, boolean>>(
+    () => ({
+      paid: savedCounts.paid !== null,
+      unpaid: savedCounts.unpaid !== null,
+    }),
+  );
+  const [countValues, setCountValues] = useState<Record<BreakKind, number>>(
+    () => ({
+      paid: savedCounts.paid ?? DEFAULT_COUNT_LIMIT.paid,
+      unpaid: savedCounts.unpaid ?? DEFAULT_COUNT_LIMIT.unpaid,
+    }),
+  );
+  const countLimits: BreakCountLimits = {
+    paid: countEnabled.paid ? countValues.paid : null,
+    unpaid: countEnabled.unpaid ? countValues.unpaid : null,
+  };
   const limits: BreakLimits = {
     unpaid_meal: mealLimit,
     paid_meal: mealLimit,
@@ -134,12 +175,14 @@ export default function BreakSettings({
       minHours,
       breakLimits,
       paid,
+      breakCountLimits,
     }: {
       dock: boolean;
       duration: number;
       minHours: number;
       breakLimits: BreakLimits;
       paid: boolean;
+      breakCountLimits: BreakCountLimits;
     }) => {
       return updateBreakSettingAction(
         dock,
@@ -147,6 +190,7 @@ export default function BreakSettings({
         minHours,
         breakLimits,
         paid,
+        breakCountLimits,
       );
     },
     onSuccess: (res) => {
@@ -163,12 +207,13 @@ export default function BreakSettings({
     dockLunch !== initialData.dock_lunch ||
     paidLunch !== savedPaidLunch ||
     BREAK_TYPE_VALUES.some((type) => limits[type] !== savedLimits[type]) ||
+    BREAK_KINDS.some((kind) => countLimits[kind] !== savedCounts[kind]) ||
     (dockLunch &&
       (durationMinutes !== initialData.lunch_duration_minutes ||
         minShiftHours !== initialData.lunch_min_shift_hours));
-  const limitsInvalid = BREAK_TYPE_VALUES.some(
-    (type) => !isValidBreakLimit(limits[type]),
-  );
+  const limitsInvalid =
+    BREAK_TYPE_VALUES.some((type) => !isValidBreakLimit(limits[type])) ||
+    BREAK_KINDS.some((kind) => !isValidBreakCountLimit(countLimits[kind]));
 
   return (
     <Card className="p-8">
@@ -405,6 +450,77 @@ export default function BreakSettings({
         })}
       </div>
 
+      <div className="mt-8 space-y-4 rounded-2xl border-2 border-zinc-200 p-6 dark:border-zinc-800">
+        <div>
+          <h4 className="flex items-center gap-2 font-bold text-lg">
+            <Hash className="h-5 w-5" />
+            Breaks Per Shift
+          </h4>
+          <p className="text-muted-foreground text-sm">
+            Cap how many paid and unpaid breaks a member can take in a single
+            shift. Once they reach the limit, they can't start another break of
+            that kind until their next shift. Meal periods count as paid or
+            unpaid to match the lunch pay setting.
+          </p>
+        </div>
+        {BREAK_KINDS.map((kind) => {
+          const checkboxId = `count-limit-${kind}`;
+          const inputId = BREAK_COUNT_LIMIT_FIELDS[kind];
+          const invalid = !isValidBreakCountLimit(countLimits[kind]);
+          return (
+            <div className="space-y-2" key={kind}>
+              <label
+                className="flex cursor-pointer items-center gap-3"
+                htmlFor={checkboxId}
+              >
+                <input
+                  checked={countEnabled[kind]}
+                  className="h-4 w-4 accent-zinc-900 dark:accent-zinc-100"
+                  id={checkboxId}
+                  onChange={(e) =>
+                    setCountEnabled((prev) => ({
+                      ...prev,
+                      [kind]: e.target.checked,
+                    }))
+                  }
+                  type="checkbox"
+                />
+                <span className="font-medium">
+                  Limit {kind} breaks per shift
+                </span>
+              </label>
+              {countEnabled[kind] && (
+                <div className="space-y-1 pl-7">
+                  <label className="font-medium text-sm" htmlFor={inputId}>
+                    Max {BREAK_KIND_LABELS[kind].toLowerCase()} per shift
+                  </label>
+                  <input
+                    className="h-12 w-full rounded-xl border-2 border-zinc-200 bg-white px-4 dark:border-zinc-800 dark:bg-zinc-950"
+                    id={inputId}
+                    max={MAX_BREAK_COUNT_LIMIT}
+                    min={1}
+                    onChange={(e) =>
+                      setCountValues((prev) => ({
+                        ...prev,
+                        [kind]: Number(e.target.value),
+                      }))
+                    }
+                    step={1}
+                    type="number"
+                    value={countValues[kind]}
+                  />
+                  {invalid && (
+                    <p className="text-red-600 text-sm dark:text-red-400">
+                      {`Enter a whole number between 1 and ${MAX_BREAK_COUNT_LIMIT}.`}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
       <div className="mt-8 flex justify-end">
         <Button
           className="h-12 px-8 font-bold"
@@ -421,6 +537,8 @@ export default function BreakSettings({
                   max_meal_break_minutes: limits.unpaid_meal,
                   max_unpaid_rest_break_minutes: limits.unpaid_rest,
                   max_paid_break_minutes: limits.paid_rest,
+                  max_paid_breaks_per_shift: countLimits.paid,
+                  max_unpaid_breaks_per_shift: countLimits.unpaid,
                 });
               }
 
@@ -430,6 +548,7 @@ export default function BreakSettings({
                 minHours: minShiftHours,
                 breakLimits: limits,
                 paid: paidLunch,
+                breakCountLimits: countLimits,
               });
             });
           }}

@@ -39,6 +39,10 @@ ALTER TABLE break_settings ADD COLUMN IF NOT EXISTS max_paid_break_minutes INTEG
 -- Whether lunch (the meal period) is paid. When TRUE the clock offers a paid
 -- meal period ('paid_meal') instead of an unpaid one and lunch is never docked.
 ALTER TABLE break_settings ADD COLUMN IF NOT EXISTS paid_lunch BOOLEAN NOT NULL DEFAULT FALSE;
+-- How many paid / unpaid breaks a member may start in one shift. NULL = no
+-- limit. A meal period counts toward whichever kind lunch is (paid_lunch).
+ALTER TABLE break_settings ADD COLUMN IF NOT EXISTS max_paid_breaks_per_shift INTEGER;
+ALTER TABLE break_settings ADD COLUMN IF NOT EXISTS max_unpaid_breaks_per_shift INTEGER;
 
 -- Overtime thresholds in hours. NULL turns that threshold off. Daily
 -- overtime is hours past the daily threshold on one day; weekly overtime is

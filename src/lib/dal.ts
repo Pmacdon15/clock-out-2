@@ -4,11 +4,14 @@ import { fromZonedTime } from "date-fns-tz";
 import { errAsync, okAsync, type ResultAsync } from "neverthrow";
 import {
   BREAK_TYPE_VALUES,
+  breakCountLimitMessage,
   getBreakLimits,
   getMealBreakType,
+  isBreakCountReached,
   isBreakOverLimit,
   isBreakType,
   isMealBreakType,
+  isValidBreakCountLimit,
   isValidBreakLimit,
   validateBreak,
 } from "./break-utils";
@@ -89,6 +92,7 @@ import {
   shiftCalendarDays,
 } from "./time-off-utils";
 import type {
+  BreakCountLimits,
   BreakLimits,
   BreakSettingsData,
   BreakType,
@@ -581,6 +585,8 @@ export async function updateBreakSettingsDal(
   limits?: BreakLimits,
   /** Whether lunch is paid; undefined keeps the stored choice. */
   paidLunch?: boolean,
+  /** Per-shift paid / unpaid break counts (null = none); undefined keeps them. */
+  countLimits?: BreakCountLimits,
 ) {
   const authUser = await auth.protect();
   if (!authUser.userId || !authUser.orgId || authUser.orgRole !== "org:admin") {
@@ -595,7 +601,12 @@ export async function updateBreakSettingsDal(
     minShiftHours > 24 ||
     (limits !== undefined &&
       !BREAK_TYPE_VALUES.every((type) => isValidBreakLimit(limits[type]))) ||
-    (paidLunch !== undefined && typeof paidLunch !== "boolean")
+    (paidLunch !== undefined && typeof paidLunch !== "boolean") ||
+    (countLimits !== undefined &&
+      !(
+        isValidBreakCountLimit(countLimits.paid) &&
+        isValidBreakCountLimit(countLimits.unpaid)
+      ))
   ) {
     return errAsync({ reason: "Invalid break settings" } as const);
   }
@@ -606,6 +617,7 @@ export async function updateBreakSettingsDal(
     minShiftHours,
     limits,
     paidLunch,
+    countLimits,
   )
     .then((updated) => {
       return okAsync(updated);
@@ -845,6 +857,12 @@ export async function startBreak(requestedType?: BreakType) {
   }
   if (activeEntry === null) {
     return errAsync({ reason: "Not clocked in" } as const);
+  }
+  // The org may cap how many paid / unpaid breaks fit in one shift.
+  if (isBreakCountReached(activeEntry, breakType, breakSettings)) {
+    return errAsync({
+      reason: breakCountLimitMessage(breakType, breakSettings),
+    });
   }
   const runningBreak = (activeEntry.breaks ?? []).find((brk) => !brk.break_end);
   if (runningBreak) {

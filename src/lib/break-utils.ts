@@ -1,4 +1,9 @@
-import type { BreakLimits, BreakSettingsData, BreakType } from "./types";
+import type {
+  BreakCountLimits,
+  BreakLimits,
+  BreakSettingsData,
+  BreakType,
+} from "./types";
 
 /** A break record, loose enough for rows that still carry string dates. */
 export type BreakLike = {
@@ -199,6 +204,95 @@ export function isBreakOverLimit(
   if (brk.break_end) return false;
   const deadline = getBreakDeadlineMs(brk, breakSettings);
   return deadline !== null && nowMs >= deadline;
+}
+
+/** Upper bound accepted for a per-shift break count limit. */
+export const MAX_BREAK_COUNT_LIMIT = 20;
+
+/** The `break_settings` column holding each kind's per-shift count limit. */
+export const BREAK_COUNT_LIMIT_FIELDS = {
+  paid: "max_paid_breaks_per_shift",
+  unpaid: "max_unpaid_breaks_per_shift",
+} as const satisfies Record<keyof BreakCountLimits, keyof BreakSettingsData>;
+
+type BreakCountLimitSettings = Partial<
+  Pick<
+    BreakSettingsData,
+    (typeof BREAK_COUNT_LIMIT_FIELDS)[keyof BreakCountLimits]
+  >
+>;
+
+const normalizeCountLimit = (value: unknown): number | null => {
+  const count = Number(value);
+  return value !== null && Number.isInteger(count) && count > 0 ? count : null;
+};
+
+/**
+ * The org's per-shift count limits for paid and unpaid breaks. Zero,
+ * negative and non-integer values all mean "no limit".
+ */
+export function getBreakCountLimits(
+  breakSettings?: BreakCountLimitSettings | null,
+): BreakCountLimits {
+  return {
+    paid: normalizeCountLimit(breakSettings?.max_paid_breaks_per_shift),
+    unpaid: normalizeCountLimit(breakSettings?.max_unpaid_breaks_per_shift),
+  };
+}
+
+/** Whether a count limit is acceptable to store (null clears it). */
+export function isValidBreakCountLimit(value: unknown): boolean {
+  return (
+    value === null ||
+    (Number.isInteger(value) &&
+      (value as number) >= 1 &&
+      (value as number) <= MAX_BREAK_COUNT_LIMIT)
+  );
+}
+
+/** How many breaks of one kind (paid or unpaid) a shift already has. */
+export function countBreaksOfKind(
+  entry: { breaks?: BreakLike[] | null } | null | undefined,
+  paid: boolean,
+): number {
+  return (entry?.breaks ?? []).filter(
+    (brk) => isPaidBreakType(brk.break_type) === paid,
+  ).length;
+}
+
+/**
+ * How many more breaks of this type's kind the shift allows, or null when
+ * the org sets no count limit for that kind.
+ */
+export function getRemainingBreakCount(
+  entry: { breaks?: BreakLike[] | null } | null | undefined,
+  type: BreakType | string,
+  breakSettings?: BreakCountLimitSettings | null,
+): number | null {
+  const paid = isPaidBreakType(type);
+  const limit = getBreakCountLimits(breakSettings)[paid ? "paid" : "unpaid"];
+  if (limit === null) return null;
+  return Math.max(0, limit - countBreaksOfKind(entry, paid));
+}
+
+/** Whether the shift has used up its breaks of this type's kind. */
+export function isBreakCountReached(
+  entry: { breaks?: BreakLike[] | null } | null | undefined,
+  type: BreakType | string,
+  breakSettings?: BreakCountLimitSettings | null,
+): boolean {
+  return getRemainingBreakCount(entry, type, breakSettings) === 0;
+}
+
+/** The message shown when a member has no breaks of a kind left. */
+export function breakCountLimitMessage(
+  type: BreakType | string,
+  breakSettings?: BreakCountLimitSettings | null,
+): string {
+  const paid = isPaidBreakType(type);
+  const limit = getBreakCountLimits(breakSettings)[paid ? "paid" : "unpaid"];
+  const kind = paid ? "paid" : "unpaid";
+  return `You've used all ${limit ?? 0} ${kind} break${limit === 1 ? "" : "s"} allowed this shift.`;
 }
 
 const shiftBounds = (entry: ShiftLike, nowMs: number) => ({

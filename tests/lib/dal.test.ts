@@ -736,6 +736,7 @@ describe("updateBreakSettingsDal", () => {
       5,
       undefined,
       undefined,
+      undefined,
     );
   });
 
@@ -751,6 +752,7 @@ describe("updateBreakSettingsDal", () => {
       5,
       undefined,
       undefined,
+      undefined,
     );
     expect(has).not.toHaveBeenCalled();
   });
@@ -764,6 +766,7 @@ describe("updateBreakSettingsDal", () => {
       true,
       45,
       6,
+      undefined,
       undefined,
       undefined,
     );
@@ -788,6 +791,7 @@ describe("updateBreakSettingsDal", () => {
       5,
       limits,
       undefined,
+      undefined,
     );
   });
 
@@ -804,6 +808,7 @@ describe("updateBreakSettingsDal", () => {
       5,
       undefined,
       true,
+      undefined,
     );
   });
 
@@ -835,6 +840,50 @@ describe("updateBreakSettingsDal", () => {
       unpaid_rest: null,
       paid_rest: value,
     });
+    expect(result._unsafeUnwrapErr()).toEqual({
+      reason: "Invalid break settings",
+    });
+    expect(mocks.dbUpdateBreakSettings).not.toHaveBeenCalled();
+  });
+
+  it("saves per-shift break count limits", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbUpdateBreakSettings.mockResolvedValue({ org_id: "org_1" });
+    const counts = { paid: 2, unpaid: null };
+    expect(
+      (
+        await updateBreakSettingsDal(false, 30, 5, undefined, undefined, counts)
+      ).isOk(),
+    ).toBe(true);
+    expect(mocks.dbUpdateBreakSettings).toHaveBeenCalledWith(
+      "org_1",
+      false,
+      30,
+      5,
+      undefined,
+      undefined,
+      counts,
+    );
+  });
+
+  it.each([
+    ["a zero count", 0],
+    ["a fractional count", 1.5],
+    ["an excessive count", 21],
+    ["a NaN count", Number.NaN],
+  ])("rejects %s", async (_label, value) => {
+    mocks.protect.mockResolvedValue(admin);
+    const result = await updateBreakSettingsDal(
+      true,
+      30,
+      5,
+      undefined,
+      undefined,
+      {
+        paid: null,
+        unpaid: value,
+      },
+    );
     expect(result._unsafeUnwrapErr()).toEqual({
       reason: "Invalid break settings",
     });
@@ -978,6 +1027,69 @@ describe("startBreak", () => {
       reason: "Error starting break.",
     });
     expect(mocks.dbStartBreak).not.toHaveBeenCalled();
+  });
+
+  it("refuses a break once the shift has used up its paid breaks", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetActiveEntry.mockResolvedValue({
+      id: 1,
+      breaks: [
+        { id: 2, break_type: "paid_rest", break_end: new Date() },
+        { id: 3, break_type: "paid_rest", break_end: new Date() },
+      ],
+    });
+    mocks.dbGetBreakSettings.mockResolvedValue({
+      max_paid_breaks_per_shift: 2,
+    });
+    expect((await startBreak("paid_rest"))._unsafeUnwrapErr()).toEqual({
+      reason: "You've used all 2 paid breaks allowed this shift.",
+    });
+    expect(mocks.dbStartBreak).not.toHaveBeenCalled();
+  });
+
+  it("counts meal periods and unpaid rest breaks against the unpaid limit", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetActiveEntry.mockResolvedValue({
+      id: 1,
+      breaks: [{ id: 2, break_type: "unpaid_meal", break_end: new Date() }],
+    });
+    mocks.dbGetBreakSettings.mockResolvedValue({
+      max_unpaid_breaks_per_shift: 1,
+    });
+    expect((await startBreak("unpaid_rest"))._unsafeUnwrapErr()).toEqual({
+      reason: "You've used all 1 unpaid break allowed this shift.",
+    });
+    expect(mocks.dbStartBreak).not.toHaveBeenCalled();
+  });
+
+  it("still allows the other kind of break when one kind is used up", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetActiveEntry.mockResolvedValue({
+      id: 1,
+      breaks: [{ id: 2, break_type: "unpaid_meal", break_end: new Date() }],
+    });
+    mocks.dbGetBreakSettings.mockResolvedValue({
+      max_unpaid_breaks_per_shift: 1,
+      max_paid_breaks_per_shift: 2,
+    });
+    mocks.dbStartBreak.mockResolvedValue({ id: 9, time_entry_id: 1 });
+    expect((await startBreak("paid_rest")).isOk()).toBe(true);
+    expect(mocks.dbStartBreak).toHaveBeenCalledWith(
+      "user_1",
+      "org_1",
+      "paid_rest",
+    );
+  });
+
+  it("allows a break when the break settings lookup fails", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetActiveEntry.mockResolvedValue({
+      id: 1,
+      breaks: [{ id: 2, break_type: "paid_rest", break_end: new Date() }],
+    });
+    mocks.dbGetBreakSettings.mockRejectedValue(new Error("db"));
+    mocks.dbStartBreak.mockResolvedValue({ id: 9, time_entry_id: 1 });
+    expect((await startBreak("paid_rest")).isOk()).toBe(true);
   });
 
   it("starts the break and returns it with its owner", async () => {

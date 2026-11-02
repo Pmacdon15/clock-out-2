@@ -290,6 +290,7 @@ describe("updateBreakSettingAction", () => {
       5,
       undefined,
       undefined,
+      undefined,
     );
     expect(mocks.updateTag).toHaveBeenCalledWith("break-settings-org_1");
   });
@@ -301,6 +302,7 @@ describe("updateBreakSettingAction", () => {
       true,
       45,
       6,
+      undefined,
       undefined,
       undefined,
     );
@@ -321,6 +323,7 @@ describe("updateBreakSettingAction", () => {
       5,
       limits,
       true,
+      undefined,
     );
   });
 

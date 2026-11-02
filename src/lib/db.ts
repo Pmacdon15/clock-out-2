@@ -2,6 +2,7 @@ import { neon } from "@neondatabase/serverless";
 import { cacheLife, cacheTag } from "next/cache";
 import type { StoredLocation } from "./geo";
 import type {
+  BreakCountLimits,
   BreakLimits,
   BreakSettingsData,
   BreakType,
@@ -292,7 +293,9 @@ export function ensureBreakSettingsTable(): Promise<void> {
 			ADD COLUMN IF NOT EXISTS max_meal_break_minutes INTEGER,
 			ADD COLUMN IF NOT EXISTS max_unpaid_rest_break_minutes INTEGER,
 			ADD COLUMN IF NOT EXISTS max_paid_break_minutes INTEGER,
-			ADD COLUMN IF NOT EXISTS paid_lunch BOOLEAN NOT NULL DEFAULT FALSE
+			ADD COLUMN IF NOT EXISTS paid_lunch BOOLEAN NOT NULL DEFAULT FALSE,
+			ADD COLUMN IF NOT EXISTS max_paid_breaks_per_shift INTEGER,
+			ADD COLUMN IF NOT EXISTS max_unpaid_breaks_per_shift INTEGER
 	`;
   })().catch((error) => {
     breakSettingsTableReady = null;
@@ -330,6 +333,11 @@ export async function dbUpdateBreakSettings(
   limits?: BreakLimits,
   /** Whether lunch is paid. Omit (undefined) to keep the stored choice. */
   paidLunch?: boolean,
+  /**
+   * Per-shift paid / unpaid break count limits (null clears one). Omit
+   * (undefined) to keep the stored ones, like `limits`.
+   */
+  countLimits?: BreakCountLimits,
 ) {
   await ensureBreakSettingsTable();
   await sql`
@@ -344,16 +352,21 @@ export async function dbUpdateBreakSettings(
   const paidRest = limits?.paid_rest ?? null;
   const keepPaidLunch = paidLunch === undefined;
   const paid = paidLunch ?? false;
+  const keepCounts = countLimits === undefined;
+  const paidCount = countLimits?.paid ?? null;
+  const unpaidCount = countLimits?.unpaid ?? null;
   const [updated] = await sql`
 		INSERT INTO break_settings (
 			org_id, dock_lunch, lunch_duration_minutes, lunch_min_shift_hours,
 			max_meal_break_minutes, max_unpaid_rest_break_minutes, max_paid_break_minutes,
-			paid_lunch, updated_at
+			paid_lunch, max_paid_breaks_per_shift, max_unpaid_breaks_per_shift,
+			updated_at
 		)
 		VALUES (
 			${orgId}, ${dockLunch}, ${durationMinutes}, ${minShiftHours},
 			${meal}, ${unpaidRest}, ${paidRest},
-			${paid}, NOW()
+			${paid}, ${paidCount}, ${unpaidCount},
+			NOW()
 		)
 		ON CONFLICT (org_id)
 		DO UPDATE SET
@@ -372,6 +385,12 @@ export async function dbUpdateBreakSettings(
             paid_lunch = CASE WHEN ${keepPaidLunch}
                 THEN break_settings.paid_lunch
                 ELSE ${paid}::BOOLEAN END,
+            max_paid_breaks_per_shift = CASE WHEN ${keepCounts}
+                THEN break_settings.max_paid_breaks_per_shift
+                ELSE ${paidCount}::INTEGER END,
+            max_unpaid_breaks_per_shift = CASE WHEN ${keepCounts}
+                THEN break_settings.max_unpaid_breaks_per_shift
+                ELSE ${unpaidCount}::INTEGER END,
             updated_at = NOW()
 		RETURNING *
 	`;
