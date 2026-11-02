@@ -22,6 +22,7 @@ export default function DashboardTabs({
   breakSettingsPromise,
   locationSettingsPromise,
   overtimeSettingsPromise,
+  payRatesPromise,
   sitesPromise,
   alertSettingsPromise,
   notificationSettingsPromise,
@@ -64,6 +65,8 @@ export default function DashboardTabs({
   const overtimeSettings = overtimeSettingsResult?.ok
     ? overtimeSettingsResult.value
     : null;
+  const payRatesResult = payRatesPromise ? use(payRatesPromise) : null;
+  const payRates = payRatesResult?.ok ? payRatesResult.value : [];
   const locationSettingsResult = locationSettingsPromise
     ? use(locationSettingsPromise)
     : null;
@@ -133,6 +136,7 @@ export default function DashboardTabs({
             membersPromise={membersPromise}
             orgTimeEntriesPromise={orgTimeEntriesPromise}
             overtimeSettings={overtimeSettings}
+            payRates={payRates}
             selectedMonthPromise={selectedMonthPromise}
             selectedUserIdPromise={selectedUserIdPromise}
             selectedWeekPromise={selectedWeekPromise}
@@ -186,8 +190,10 @@ export default function DashboardTabs({
               hasGeofencing={hasGeofencing}
               hasReporting={hasReporting}
               locationSettingsPromise={locationSettingsPromise}
+              membersPromise={membersPromise}
               orgSettingsPromise={orgSettingsPromise}
               overtimeSettingsPromise={overtimeSettingsPromise}
+              payRates={payRates}
               sitesPromise={sitesPromise}
             />
           </Suspense>

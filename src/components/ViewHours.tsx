@@ -3,6 +3,7 @@
 import { useUser } from "@clerk/nextjs";
 import { use, useMemo, useState } from "react";
 import { computeEntryOvertime, isOvertimeEnabled } from "@/lib/overtime";
+import { payRateMap } from "@/lib/pay";
 import type { ViewHoursProps } from "@/lib/types";
 import { DaysWorkedBreakdown } from "./ViewHours/DaysWorkedBreakdown";
 import { EntryList } from "./ViewHours/EntryList";
@@ -10,6 +11,7 @@ import { HoursBarChart } from "./ViewHours/HoursBarChart";
 import { HoursLineChart } from "./ViewHours/HoursLineChart";
 import { MemberToggles } from "./ViewHours/MemberToggles";
 import { OvertimeSummary } from "./ViewHours/OvertimeSummary";
+import { PaySummary } from "./ViewHours/PaySummary";
 import {
   TimeframeSelector,
   type TimeframeValue,
@@ -23,6 +25,7 @@ export default function ViewHours({
   isAdmin = false,
   breakSettings,
   overtimeSettings,
+  payRates,
   membersPromise,
   orgTimeEntriesPromise,
   timeOffPromise,
@@ -114,6 +117,18 @@ export default function ViewHours({
     [overtimeEnabled, displayEntries, overtimeSettings, breakSettings],
   );
 
+  // Pay needs every entry's regular/overtime split, overtime tracked or not
+  // (with it off, every hour is regular).
+  const rates = useMemo(() => payRateMap(payRates), [payRates]);
+  const splitsByEntry = useMemo(
+    () =>
+      rates.size > 0
+        ? (overtimeByEntry ??
+          computeEntryOvertime(displayEntries, overtimeSettings, breakSettings))
+        : undefined,
+    [rates, overtimeByEntry, displayEntries, overtimeSettings, breakSettings],
+  );
+
   // Previous total hours calculation placeholder
   const previousTotalHours = 0;
 
@@ -150,6 +165,7 @@ export default function ViewHours({
             isViewingAll={isViewingAll}
             members={members}
             overtimeSettings={overtimeSettings}
+            payRates={rates}
             startDate={startDate}
           />
         )}
@@ -228,6 +244,15 @@ export default function ViewHours({
               members={members}
               overtimeByEntry={overtimeByEntry}
               overtimeSettings={overtimeSettings}
+            />
+          )}
+          {splitsByEntry && (
+            <PaySummary
+              entries={displayEntries}
+              isViewingAll={isViewingAll}
+              members={members}
+              payRates={rates}
+              splitsByEntry={splitsByEntry}
             />
           )}
           <TimeOffSummary

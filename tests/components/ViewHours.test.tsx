@@ -39,6 +39,9 @@ vi.mock("@/components/ViewHours/EntryList", () => ({
 vi.mock("@/components/ViewHours/OvertimeSummary", () => ({
   OvertimeSummary: (p: Captured) => capture("OvertimeSummary")(p),
 }));
+vi.mock("@/components/ViewHours/PaySummary", () => ({
+  PaySummary: (p: Captured) => capture("PaySummary")(p),
+}));
 vi.mock("@/components/ViewHours/TimeOffSummary", () => ({
   TimeOffSummary: (p: Captured) => capture("TimeOffSummary")(p),
 }));
@@ -341,6 +344,54 @@ describe("ViewHours overtime", () => {
     const summary = latest("OvertimeSummary");
     expect(summary.entries).toBe(orgEntries);
     expect(summary.isViewingAll).toBe(true);
+  });
+});
+
+describe("ViewHours pay", () => {
+  const payRates = [
+    { org_id: "org_1", user_id: "me", hourly_rate: 20, overtime_multiplier: 2 },
+  ];
+
+  it("shows no pay panel without any pay rates", () => {
+    renderView({ payRates: [] });
+    expect(screen.queryByTestId("PaySummary")).not.toBeInTheDocument();
+    renderView();
+    expect(screen.queryByTestId("PaySummary")).not.toBeInTheDocument();
+  });
+
+  it("splits every hour as regular when overtime is off", () => {
+    renderView({ payRates, timeframePromise: resolved("custom") });
+    const summary = latest("PaySummary");
+    expect(summary).toMatchObject({
+      entries: myEntries,
+      isViewingAll: false,
+      members,
+    });
+    const rates = summary.payRates as Map<string, unknown>;
+    expect(rates.get("me")).toEqual({ hourlyRate: 20, overtimeMultiplier: 2 });
+    const splits = summary.splitsByEntry as Map<
+      unknown,
+      { regularHours: number; overtimeHours: number }
+    >;
+    expect(splits.get(myEntries[0])).toMatchObject({
+      regularHours: 8,
+      overtimeHours: 0,
+    });
+    expect(latest("TimesheetExport").payRates).toBe(rates);
+  });
+
+  it("reuses the overtime splits when overtime is tracked", () => {
+    renderView({
+      payRates,
+      overtimeSettings: {
+        org_id: "org_1",
+        daily_threshold_hours: 6,
+        weekly_threshold_hours: null,
+      },
+    });
+    expect(latest("PaySummary").splitsByEntry).toBe(
+      latest("OvertimeSummary").overtimeByEntry,
+    );
   });
 });
 

@@ -11,6 +11,14 @@ import {
 } from "./break-utils";
 import { formatCoordinates } from "./geo";
 import { allocateOvertime, isOvertimeEnabled } from "./overtime";
+import {
+  computePay,
+  formatMoney,
+  formatMultiplier,
+  type PayBreakdown,
+  type PayRate,
+  sumPay,
+} from "./pay";
 import type { PdfImage } from "./pdf-image";
 import type { BreakSettingsData, OvertimeSettingsData } from "./types";
 
@@ -76,6 +84,13 @@ export type ExportRow = {
    * on every row when the org tracks overtime, absent when it doesn't.
    */
   overtimeHours?: number;
+  /** The employee's pay rate, when one is set. */
+  payRate?: PayRate;
+  /**
+   * Estimated pay for this shift (regular hours at the rate, overtime at
+   * rate × multiplier). Present only when the employee has a pay rate.
+   */
+  pay?: PayBreakdown;
 };
 
 export type ExportMeta = {
@@ -101,12 +116,23 @@ export type EmployeeSummaryRow = {
   overtimeHours: number;
 };
 
+/** One employee's estimated gross pay for the whole report. */
+export type PaySummaryRow = {
+  employee: string;
+  payRate: PayRate;
+  regularHours: number;
+  overtimeHours: number;
+  pay: PayBreakdown;
+};
+
 export type PeriodSection = {
   key: string;
   label: string;
   rows: ExportRow[];
   totalHours: number;
   overtimeHours: number;
+  /** Estimated pay of the rows that have a pay rate. */
+  pay: PayBreakdown;
   shiftsCount: number;
   daysWorked: number;
 };
@@ -200,6 +226,7 @@ export function buildExportRows(
   timezone?: string,
   breakSettings?: BreakSettingsData | null,
   overtimeSettings?: Partial<OvertimeSettingsData> | null,
+  getPayRate?: (userId: string) => PayRate | null | undefined,
 ): ExportRow[] {
   const rows = entries
     .map((entry) => ({
@@ -239,6 +266,7 @@ export function buildExportRows(
       const unpaidBreakHours =
         (getUnpaidBreakMs(entry) + dockedMinutes * 60_000) / 3_600_000;
       const paidBreakHours = getPaidBreakMs(entry) / 3_600_000;
+      const payRate = getPayRate?.(entry.user_id) ?? null;
 
       return {
         employee: getEmployeeName(entry.user_id),
@@ -257,9 +285,57 @@ export function buildExportRows(
           : {}),
         // Absent, not empty, for orgs that capture no location at all.
         ...(location ? { location } : {}),
+        ...(payRate ? { payRate } : {}),
       };
     });
-  return applyOvertime(rows, overtimeSettings);
+  return applyPay(applyOvertime(rows, overtimeSettings));
+}
+
+/**
+ * Adds each row's estimated pay, for rows whose employee has a pay rate.
+ * Run after `applyOvertime`, so overtime hours are paid at the multiplier.
+ */
+export function applyPay(rows: ExportRow[]): ExportRow[] {
+  return rows.map((row) => {
+    if (!row.payRate) return row;
+    const hours = row.hours ?? 0;
+    const overtimeHours = row.overtimeHours ?? 0;
+    return {
+      ...row,
+      pay: computePay(
+        { regularHours: hours - overtimeHours, overtimeHours },
+        row.payRate,
+      ),
+    };
+  });
+}
+
+/** Whether any row carries estimated pay. */
+export const hasPay = (rows: ExportRow[]) => rows.some((row) => row.pay);
+
+/** Estimated pay summed over the rows that have it. */
+export const totalPay = (rows: ExportRow[]): PayBreakdown =>
+  sumPay(rows.flatMap((row) => (row.pay ? [row.pay] : [])));
+
+/** Estimated gross pay per employee with a pay rate, in report order. */
+export function buildPaySummary(rows: ExportRow[]): PaySummaryRow[] {
+  const map = new Map<string, PaySummaryRow>();
+  for (const row of rows) {
+    if (!row.pay || !row.payRate) continue;
+    const existing = map.get(row.employee) ?? {
+      employee: row.employee,
+      payRate: row.payRate,
+      regularHours: 0,
+      overtimeHours: 0,
+      pay: { regularPay: 0, overtimePay: 0, grossPay: 0 },
+    };
+    const overtimeHours = row.overtimeHours ?? 0;
+    existing.regularHours += (row.hours ?? 0) - overtimeHours;
+    existing.overtimeHours += overtimeHours;
+    existing.pay = sumPay([existing.pay, row.pay]);
+    map.set(row.employee, existing);
+  }
+  return Array.from(map.values());
 }
 
 /**
@@ -380,6 +456,7 @@ export function buildPeriodSections(
         rows,
         totalHours: totalHours(rows),
         overtimeHours: totalOvertime(rows),
+        pay: totalPay(rows),
         shiftsCount: rows.length,
         daysWorked: days.size,
       },
@@ -408,6 +485,7 @@ export function buildPeriodSections(
         rows: group.rows,
         totalHours: totalHours(group.rows),
         overtimeHours: totalOvertime(group.rows),
+        pay: totalPay(group.rows),
         shiftsCount: group.rows.length,
         daysWorked: days.size,
       };
@@ -559,15 +637,18 @@ const STYLE = {
   hours: 3,
   boldHours: 4,
   header: 5,
+  money: 6,
+  boldMoney: 7,
 };
 
 const STYLES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<numFmts count="1"><numFmt numFmtId="164" formatCode="&quot;$&quot;#,##0.00"/></numFmts>
 <fonts count="3"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="16"/><name val="Calibri"/></font></fonts>
 <fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>
 <borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left/><right/><top/><bottom style="thin"/><diagonal/></border></borders>
 <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-<cellXfs count="6"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="2" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="2" fontId="1" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/><xf numFmtId="0" fontId="1" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1"/></cellXfs>
+<cellXfs count="8"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="2" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="2" fontId="1" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/><xf numFmtId="0" fontId="1" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1"/><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="164" fontId="1" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/></cellXfs>
 <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
 </styleSheet>`;
 
@@ -835,6 +916,72 @@ export function buildSheetXml(rows: ExportRow[], meta: ExportMeta): string {
         ]);
       }
     }
+
+    const paySummary = buildPaySummary(rows);
+    if (paySummary.length > 0) {
+      const pay = totalPay(rows);
+      grid.push([]);
+      grid.push(
+        [
+          "Estimated Gross Pay",
+          "Hourly Rate",
+          "OT Multiplier",
+          "Regular Hours",
+          "Overtime Hours",
+          "Regular Pay",
+          "Overtime Pay",
+          "Gross Pay",
+        ].map((text) => ({ text, style: STYLE.header })),
+      );
+      for (const emp of paySummary) {
+        grid.push([
+          { text: emp.employee },
+          { number: emp.payRate.hourlyRate, style: STYLE.money },
+          { text: formatMultiplier(emp.payRate.overtimeMultiplier) },
+          { number: emp.regularHours, style: STYLE.hours },
+          { number: emp.overtimeHours, style: STYLE.hours },
+          { number: emp.pay.regularPay, style: STYLE.money },
+          { number: emp.pay.overtimePay, style: STYLE.money },
+          { number: emp.pay.grossPay, style: STYLE.boldMoney },
+        ]);
+      }
+      grid.push([
+        { text: "Total gross pay", style: STYLE.bold },
+        null,
+        null,
+        null,
+        null,
+        { number: pay.regularPay, style: STYLE.boldMoney },
+        { number: pay.overtimePay, style: STYLE.boldMoney },
+        { number: pay.grossPay, style: STYLE.boldMoney },
+      ]);
+
+      if (sections.length > 1) {
+        grid.push([]);
+        grid.push([
+          { text: "Gross Pay by Period", style: STYLE.header },
+          null,
+          null,
+          null,
+          null,
+          { text: "Regular Pay", style: STYLE.header },
+          { text: "Overtime Pay", style: STYLE.header },
+          { text: "Gross Pay", style: STYLE.header },
+        ]);
+        for (const sec of sections) {
+          grid.push([
+            { text: sec.label },
+            null,
+            null,
+            null,
+            null,
+            { number: sec.pay.regularPay, style: STYLE.money },
+            { number: sec.pay.overtimePay, style: STYLE.money },
+            { number: sec.pay.grossPay, style: STYLE.boldMoney },
+          ]);
+        }
+      }
+    }
   }
 
   const sheetRows = grid
@@ -967,6 +1114,17 @@ const BREAK_COLUMNS = [
   { title: "End", x: 418, width: 60 },
   { title: "Paid", x: 482, width: 44 },
   { title: "Hours", x: PAGE_WIDTH - MARGIN, width: 0, alignRight: true },
+];
+
+/** The estimated gross pay table: its own columns, like the break records. */
+const PAY_COLUMNS: PdfColumn[] = [
+  { title: "Employee", x: MARGIN, width: 130 },
+  { title: "Rate", x: 250, width: 0, alignRight: true },
+  { title: "OT x", x: 290, width: 0, alignRight: true },
+  { title: "Reg Hrs", x: 345, width: 0, alignRight: true },
+  { title: "OT Hrs", x: 400, width: 0, alignRight: true },
+  { title: "OT Pay", x: 480, width: 0, alignRight: true },
+  { title: "Gross Pay", x: PAGE_WIDTH - MARGIN, width: 0, alignRight: true },
 ];
 
 /** Escape PDF string delimiters and keep to the WinAnsi (Latin-1) range. */
@@ -1250,6 +1408,74 @@ export function layoutPdfPages(rows: ExportRow[], meta: ExportMeta): string[] {
     }
   }
 
+  // Estimated gross pay, for employees with a pay rate.
+  const paySummary = buildPaySummary(rows);
+  if (paySummary.length > 0) {
+    const writePayRow = (cells: string[], atY: number, bold = false) => {
+      for (const [i, text] of cells.entries()) {
+        writeCell(pen, PAY_COLUMNS[i], text, atY, bold);
+      }
+    };
+    const payRow = (label: string, pay: PayBreakdown) => [
+      label,
+      "",
+      "",
+      "",
+      "",
+      formatMoney(pay.overtimePay),
+      formatMoney(pay.grossPay),
+    ];
+    ensureSpace(paySummary.length + 5);
+    write(pen, "Estimated Gross Pay", MARGIN, y, 10, true);
+    line(pen, y - 5, 0.3);
+    y -= ROW_HEIGHT;
+    writePayRow(
+      PAY_COLUMNS.map((c) => c.title),
+      y,
+      true,
+    );
+    line(pen, y - 6, 0.2);
+    y -= ROW_HEIGHT;
+    for (const emp of paySummary) {
+      ensureSpace(2);
+      writePayRow(
+        [
+          emp.employee,
+          formatMoney(emp.payRate.hourlyRate),
+          formatMultiplier(emp.payRate.overtimeMultiplier),
+          formatHours(emp.regularHours),
+          formatHours(emp.overtimeHours),
+          formatMoney(emp.pay.overtimePay),
+          formatMoney(emp.pay.grossPay),
+        ],
+        y,
+      );
+      line(pen, y - 6);
+      y -= ROW_HEIGHT;
+    }
+    ensureSpace(2);
+    writePayRow(payRow("Total gross pay", totalPay(rows)), y, true);
+    y -= ROW_HEIGHT + 4;
+
+    if (sections.length > 1) {
+      for (const sec of sections) {
+        ensureSpace(2);
+        writePayRow(payRow(sec.label, sec.pay), y);
+        line(pen, y - 6);
+        y -= ROW_HEIGHT;
+      }
+    }
+    ensureSpace(2);
+    write(
+      pen,
+      "Estimate only: regular hours at the hourly rate plus overtime at rate x multiplier, before deductions.",
+      MARGIN,
+      y,
+      8,
+    );
+    y -= ROW_HEIGHT;
+  }
+
   return pages.map((p, i) => {
     write(p, `Page ${i + 1} of ${pages.length}`, MARGIN, MARGIN / 2, 8);
     return p.join("\n");
@@ -1412,17 +1638,36 @@ export function buildCsvRows(rows: ExportRow[], meta: ExportMeta): CsvCell[][] {
 
   const showLocation = rows.some((r) => Boolean(r.location));
   const showOvertime = hasOvertime(rows);
+  const showPay = hasPay(rows);
   const headers: CsvCell[] = [
     ...CSV_COLUMNS,
     ...(showOvertime ? ["Overtime Hours"] : []),
+    ...(showPay ? ["Hourly Rate", "OT Multiplier", "Gross Pay"] : []),
     ...(showLocation ? ["Location"] : []),
   ];
   const out: CsvCell[][] = [headers];
-  /** The optional trailing columns: overtime, then location. */
-  const extra = (overtime: number, location: string | null = null) => [
+  const money = (amount: number) => amount.toFixed(2);
+  /** The optional trailing columns: overtime, pay, then location. */
+  const extra = (
+    overtime: number,
+    location: string | null = null,
+    pay: { rate?: PayRate; gross?: number | null } = {},
+  ) => [
     ...(showOvertime ? [formatHours(overtime)] : []),
+    ...(showPay
+      ? [
+          pay.rate ? money(pay.rate.hourlyRate) : null,
+          pay.rate ? String(pay.rate.overtimeMultiplier) : null,
+          pay.gross === undefined || pay.gross === null
+            ? null
+            : money(pay.gross),
+        ]
+      : []),
     ...(showLocation ? [location] : []),
   ];
+  const payByEmployee = new Map(
+    buildPaySummary(rows).map((emp) => [emp.employee, emp]),
+  );
   let globalRowIdx = 0;
 
   for (const section of sections) {
@@ -1444,7 +1689,10 @@ export function buildCsvRows(rows: ExportRow[], meta: ExportMeta): CsvCell[][] {
         null,
         null,
         null,
-        ...extra(r.overtimeHours ?? 0, r.location ?? ""),
+        ...extra(r.overtimeHours ?? 0, r.location ?? "", {
+          rate: r.payRate,
+          gross: r.pay && r.hours !== null ? r.pay.grossPay : null,
+        }),
       ]);
       globalRowIdx += 1;
     }
@@ -1463,7 +1711,9 @@ export function buildCsvRows(rows: ExportRow[], meta: ExportMeta): CsvCell[][] {
         section.daysWorked,
         section.shiftsCount,
         null,
-        ...extra(section.overtimeHours),
+        ...extra(section.overtimeHours, null, {
+          gross: showPay ? section.pay.grossPay : null,
+        }),
       ]);
     }
   }
@@ -1481,7 +1731,9 @@ export function buildCsvRows(rows: ExportRow[], meta: ExportMeta): CsvCell[][] {
     new Set(rows.map((r) => r.date)).size,
     rows.length,
     null,
-    ...extra(totalOvertime(rows)),
+    ...extra(totalOvertime(rows), null, {
+      gross: showPay ? totalPay(rows).grossPay : null,
+    }),
   ]);
 
   for (const emp of buildEmployeeSummary(rows)) {
@@ -1498,7 +1750,10 @@ export function buildCsvRows(rows: ExportRow[], meta: ExportMeta): CsvCell[][] {
       emp.daysWorked,
       emp.shiftsCount,
       formatHours(emp.totalHours / emp.daysWorked),
-      ...extra(emp.overtimeHours),
+      ...extra(emp.overtimeHours, null, {
+        rate: payByEmployee.get(emp.employee)?.payRate,
+        gross: payByEmployee.get(emp.employee)?.pay.grossPay ?? null,
+      }),
     ]);
   }
 
@@ -1517,7 +1772,9 @@ export function buildCsvRows(rows: ExportRow[], meta: ExportMeta): CsvCell[][] {
         sec.daysWorked,
         sec.shiftsCount,
         null,
-        ...extra(sec.overtimeHours),
+        ...extra(sec.overtimeHours, null, {
+          gross: showPay ? sec.pay.grossPay : null,
+        }),
       ]);
     }
   }

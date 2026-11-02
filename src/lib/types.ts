@@ -89,6 +89,18 @@ export type OvertimeSettingsData = {
   updated_at?: Date;
 };
 
+/**
+ * A member's pay rate. Gross pay is regular hours × `hourly_rate` plus
+ * overtime hours × `hourly_rate` × `overtime_multiplier`.
+ */
+export type PayRateData = {
+  org_id: string;
+  user_id: string;
+  hourly_rate: number;
+  overtime_multiplier: number;
+  updated_at?: Date;
+};
+
 export type LocationSettingsData = {
   org_id: string;
   /** 'off' | 'optional' | 'required' */
@@ -147,6 +159,10 @@ export interface DashboardTabsProps {
   overtimeSettingsPromise?: Promise<
     SerializableResult<OvertimeSettingsData | null, { reason: string }>
   >;
+  /** Admins get every member's rate; members get only their own. */
+  payRatesPromise?: Promise<
+    SerializableResult<PayRateData[], { reason: string }>
+  >;
   sitesPromise?: Promise<SerializableResult<SiteData[], { reason: string }>>;
   alertSettingsPromise?: Promise<
     SerializableResult<AlertSettingsData, { reason: string }>
@@ -191,6 +207,8 @@ export interface ViewHoursProps {
   isAdmin?: boolean;
   breakSettings?: BreakSettingsData | null;
   overtimeSettings?: OvertimeSettingsData | null;
+  /** Rates the viewer may see; gross pay is estimated for these members. */
+  payRates?: PayRateData[];
   membersPromise?: Promise<
     {
       id: string;

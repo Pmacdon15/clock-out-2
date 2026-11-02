@@ -36,6 +36,7 @@ import {
   type StoredLocation,
 } from "@/lib/geo";
 import { reverseGeocode, searchAddress } from "@/lib/geoapify";
+import { payRateMap } from "@/lib/pay";
 import { loadPdfImage } from "@/lib/pdf-image";
 import { orgHasReportingFeature, sendWeeklyReports } from "@/lib/reports";
 import {
@@ -50,10 +51,12 @@ import {
   formatHours,
   formatPeriod,
   hasOvertime,
+  hasPay,
   toCsv,
   toPdf,
   totalHours,
   totalOvertime,
+  totalPay,
   toXlsx,
   XLSX_MIME,
 } from "@/lib/timesheet-export";
@@ -80,6 +83,7 @@ import {
   dbGetOrgActiveEntries,
   dbGetOrgTimeEntries,
   dbGetOvertimeSettings,
+  dbGetPayRates,
   dbGetReportingSettings,
   dbGetSites,
   dbGetTimeEntries,
@@ -2488,6 +2492,8 @@ export type GeneratedTimesheetExport = {
   totalHours: number;
   /** Null when the org tracks no overtime. */
   overtimeHours: number | null;
+  /** Null when no exported member has a pay rate. */
+  estimatedGrossPay: number | null;
   downloadUrl: string;
   periodSections: ReturnType<typeof buildPeriodSections>;
   employeeSummaries: ReturnType<typeof buildEmployeeSummary>;
@@ -2641,6 +2647,16 @@ export async function generateTimesheetExport(
       console.error("Error fetching overtime settings: ", error);
       return undefined;
     });
+  // Same for pay rates: without them the export just has no pay figures.
+  // Only the exported entries' members are looked up, and a non-admin can
+  // only ever export their own entries.
+  const payRates = await Promise.resolve()
+    .then(() => dbGetPayRates(org.orgId))
+    .then(payRateMap)
+    .catch((error) => {
+      console.error("Error fetching pay rates: ", error);
+      return new Map();
+    });
   const rows = buildExportRows(
     entries,
     (userId) =>
@@ -2650,6 +2666,7 @@ export async function generateTimesheetExport(
     tz,
     undefined,
     overtimeSettings,
+    (userId) => payRates.get(userId),
   );
   const orgLogo = await loadPdfImage(org.orgImageUrl);
   const meta: ExportMeta = {
@@ -2680,6 +2697,9 @@ export async function generateTimesheetExport(
   const hours = Number(totalHours(rows).toFixed(2));
   const overtimeHours = hasOvertime(rows)
     ? Number(totalOvertime(rows).toFixed(2))
+    : null;
+  const estimatedGrossPay = hasPay(rows)
+    ? Number(totalPay(rows).grossPay.toFixed(2))
     : null;
   const daysWorked = new Set(rows.map((r) => r.date)).size;
   const periodSections = buildPeriodSections(rows, meta);
@@ -2744,6 +2764,7 @@ export async function generateTimesheetExport(
       daysWorked,
       totalHours: hours,
       overtimeHours,
+      estimatedGrossPay,
       downloadUrl,
       periodSections,
       employeeSummaries,
@@ -2783,6 +2804,7 @@ export async function exportTimesheetTool(
     daysWorked,
     totalHours: hours,
     overtimeHours,
+    estimatedGrossPay,
     downloadUrl,
     periodSections,
     employeeSummaries,
@@ -2827,6 +2849,9 @@ export async function exportTimesheetTool(
       days_worked: daysWorked,
       total_hours: hours,
       ...(overtimeHours === null ? {} : { overtime_hours: overtimeHours }),
+      ...(estimatedGrossPay === null
+        ? {}
+        : { estimated_gross_pay: estimatedGrossPay }),
       download_url: downloadUrl,
       pdf: {
         file_name: pdfFileName,
@@ -2849,6 +2874,9 @@ export async function exportTimesheetTool(
         shifts_count: s.shiftsCount,
         total_hours: Number(s.totalHours.toFixed(2)),
         ...withOvertime(s.overtimeHours),
+        ...(estimatedGrossPay === null
+          ? {}
+          : { estimated_gross_pay: Number(s.pay.grossPay.toFixed(2)) }),
       })),
       employee_breakdown: employeeSummaries.map((e) => ({
         employee: e.employee,

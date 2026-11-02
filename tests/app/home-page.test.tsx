@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   getOrgLocationSettings: vi.fn(),
   getOrgMembers: vi.fn(),
   getOrgOvertimeSettings: vi.fn(),
+  getOrgPayRates: vi.fn(),
   getOrgReportingSettings: vi.fn(),
   getOrgSites: vi.fn(),
   getOrgTimeEntries: vi.fn(),
@@ -40,6 +41,7 @@ vi.mock("@/lib/dal", () => ({
   getOrgLocationSettings: mocks.getOrgLocationSettings,
   getOrgMembers: mocks.getOrgMembers,
   getOrgOvertimeSettings: mocks.getOrgOvertimeSettings,
+  getOrgPayRates: mocks.getOrgPayRates,
   getOrgReportingSettings: mocks.getOrgReportingSettings,
   getOrgSites: mocks.getOrgSites,
   getOrgTimeEntries: mocks.getOrgTimeEntries,
@@ -94,6 +96,7 @@ function renderHome() {
   mocks.getOrgOvertimeSettings.mockReturnValue(
     Promise.resolve("overtime_settings"),
   );
+  mocks.getOrgPayRates.mockReturnValue(Promise.resolve("pay_rates"));
   mocks.getOrgSites.mockReturnValue(Promise.resolve("sites"));
   mocks.getOrgAlertSettings.mockReturnValue(Promise.resolve("alerts"));
   mocks.getMyNotificationSettings.mockReturnValue(
@@ -192,6 +195,7 @@ describe("Home page", () => {
     await expect(props.overtimeSettingsPromise).resolves.toBe(
       "overtime_settings",
     );
+    await expect(props.payRatesPromise).resolves.toBe("pay_rates");
     await expect(props.orgIdPromise).resolves.toBe("org_1");
     await expect(props.userIdPromise).resolves.toBe("user_1");
 

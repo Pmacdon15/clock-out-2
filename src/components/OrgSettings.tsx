@@ -7,6 +7,7 @@ import type {
   LocationSettingsData,
   OrgSettingsData,
   OvertimeSettingsData,
+  PayRateData,
   ReportingSettingsData,
   SerializableResult,
   SiteData,
@@ -15,6 +16,7 @@ import AlertSettings from "./AlertSettings";
 import BreakSettings from "./BreakSettings";
 import LocationSettings from "./LocationSettings";
 import OvertimeSettings from "./OvertimeSettings";
+import PayRateSettings from "./PayRateSettings";
 import ReportingSettings from "./ReportingSettings";
 
 interface OrgSettingsProps {
@@ -45,6 +47,9 @@ interface OrgSettingsProps {
   overtimeSettingsPromise?: Promise<
     SerializableResult<OvertimeSettingsData | null, { reason: string }>
   >;
+  /** Every member's pay rate (this view is admin-only). */
+  payRates?: PayRateData[];
+  membersPromise?: Promise<{ id: string; name: string }[]>;
   sitesPromise?: Promise<SerializableResult<SiteData[], { reason: string }>>;
   alertSettingsPromise?: Promise<
     SerializableResult<AlertSettingsData, { reason: string }>
@@ -60,9 +65,12 @@ export default function OrgSettings({
   breakSettingsPromise,
   locationSettingsPromise,
   overtimeSettingsPromise,
+  payRates = [],
+  membersPromise,
   sitesPromise,
   alertSettingsPromise,
 }: OrgSettingsProps) {
+  const members = membersPromise ? use(membersPromise) : [];
   const settingsResult = use(orgSettingsPromise);
   const breakSettingsResult = breakSettingsPromise
     ? use(breakSettingsPromise)
@@ -134,6 +142,7 @@ export default function OrgSettings({
         initialData={optimisticOvertimeSettings}
         onUpdateOptimistic={(next) => setOptimisticOvertimeSettings(next)}
       />
+      <PayRateSettings initialRates={payRates} members={members} />
       <LocationSettings
         hasGeofencing={hasGeofencing}
         initialData={optimisticLocationSettings}

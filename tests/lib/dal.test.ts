@@ -7,6 +7,9 @@ const mocks = vi.hoisted(() => ({
   dbClockIn: vi.fn(),
   dbClockOut: vi.fn(),
   dbDeleteBreak: vi.fn(),
+  dbDeletePayRate: vi.fn(),
+  dbGetPayRates: vi.fn(),
+  dbUpsertPayRate: vi.fn(),
   dbCreateSite: vi.fn(),
   dbDeleteSite: vi.fn(),
   dbDeleteTimeEntry: vi.fn(),
@@ -50,6 +53,9 @@ vi.mock("@/lib/db", () => ({
   dbClockIn: mocks.dbClockIn,
   dbClockOut: mocks.dbClockOut,
   dbDeleteBreak: mocks.dbDeleteBreak,
+  dbDeletePayRate: mocks.dbDeletePayRate,
+  dbGetPayRates: mocks.dbGetPayRates,
+  dbUpsertPayRate: mocks.dbUpsertPayRate,
   dbCreateSite: mocks.dbCreateSite,
   dbDeleteSite: mocks.dbDeleteSite,
   dbDeleteTimeEntry: mocks.dbDeleteTimeEntry,
@@ -99,6 +105,7 @@ import {
   getOrgLocationSettings,
   getOrgMembers,
   getOrgOvertimeSettings,
+  getOrgPayRates,
   getOrgReportingSettings,
   getOrgSites,
   getOrgTimeEntries,
@@ -107,6 +114,7 @@ import {
   updateBreakDal,
   updateBreakSettingsDal,
   updateLocationSettingsDal,
+  updateMemberPayRateDal,
   updateOvertimeSettingsDal,
   updateReportingSettingsDal,
   updateSiteDal,
@@ -1924,5 +1932,138 @@ describe("getOrgOvertimeSettings", () => {
       ok: false,
       error: { reason: "Error fetching overtime settings." },
     });
+  });
+});
+
+describe("getOrgPayRates", () => {
+  const rates = [
+    {
+      org_id: "org_1",
+      user_id: "user_1",
+      hourly_rate: 20,
+      overtime_multiplier: 1.5,
+    },
+    {
+      org_id: "org_1",
+      user_id: "user_2",
+      hourly_rate: 30,
+      overtime_multiplier: 2,
+    },
+  ];
+
+  it("rejects requests without a user or org", async () => {
+    mocks.protect.mockResolvedValue(noOrg);
+    expect((await getOrgPayRates()).ok).toBe(false);
+    mocks.protect.mockResolvedValue(noUser);
+    expect((await getOrgPayRates()).ok).toBe(false);
+    expect(mocks.dbGetPayRates).not.toHaveBeenCalled();
+  });
+
+  it("gives admins every rate", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbGetPayRates.mockResolvedValue(rates);
+    expect(await getOrgPayRates()).toEqual({ ok: true, value: rates });
+    expect(mocks.dbGetPayRates).toHaveBeenCalledWith("org_1");
+  });
+
+  it("gives members only their own rate", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetPayRates.mockResolvedValue(rates);
+    expect(await getOrgPayRates()).toEqual({ ok: true, value: [rates[0]] });
+  });
+
+  it("returns an error when the read fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetPayRates.mockRejectedValue(new Error("db"));
+    expect(await getOrgPayRates()).toEqual({
+      ok: false,
+      error: { reason: "Error fetching pay rates." },
+    });
+  });
+});
+
+describe("updateMemberPayRateDal", () => {
+  const withMembers = () => {
+    mocks.getOrganizationMembershipList.mockResolvedValue({ data: ["raw"] });
+    mocks.getProcessedMembers.mockReturnValue([{ id: "user_2", name: "Bo" }]);
+  };
+
+  it.each([
+    ["no user", noUser],
+    ["no org", noOrg],
+    ["a non-admin", member],
+  ])("rejects %s", async (_label, session) => {
+    mocks.protect.mockResolvedValue(session);
+    expect(
+      (await updateMemberPayRateDal("user_2", 20, 1.5))._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Unauthorized" });
+    expect(mocks.dbUpsertPayRate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a negative rate", -1, 1.5],
+    ["a NaN rate", Number.NaN, 1.5],
+    ["a multiplier under 1", 20, 0.5],
+    ["a multiplier over 5", 20, 6],
+  ])("rejects %s", async (_label, rate, multiplier) => {
+    mocks.protect.mockResolvedValue(admin);
+    expect(
+      (
+        await updateMemberPayRateDal("user_2", rate, multiplier)
+      )._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Invalid pay rate" });
+    expect(mocks.dbUpsertPayRate).not.toHaveBeenCalled();
+  });
+
+  it("rejects someone who isn't a member of the org", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    withMembers();
+    expect(
+      (await updateMemberPayRateDal("user_9", 20, 1.5))._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Member not found" });
+    expect(mocks.dbUpsertPayRate).not.toHaveBeenCalled();
+  });
+
+  it("saves a rate for a member", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    withMembers();
+    const saved = {
+      org_id: "org_1",
+      user_id: "user_2",
+      hourly_rate: 20,
+      overtime_multiplier: 1.5,
+    };
+    mocks.dbUpsertPayRate.mockResolvedValue(saved);
+    expect(
+      (await updateMemberPayRateDal("user_2", 20, 1.5))._unsafeUnwrap(),
+    ).toEqual({ ...saved, cleared: false });
+    expect(mocks.dbUpsertPayRate).toHaveBeenCalledWith(
+      "org_1",
+      "user_2",
+      20,
+      1.5,
+    );
+  });
+
+  it("clears a rate when given null", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    withMembers();
+    mocks.dbDeletePayRate.mockResolvedValue(undefined);
+    expect(
+      (await updateMemberPayRateDal("user_2", null, 1.5))._unsafeUnwrap(),
+    ).toEqual({ org_id: "org_1", user_id: "user_2", cleared: true });
+    expect(mocks.dbDeletePayRate).toHaveBeenCalledWith("org_1", "user_2");
+    expect(mocks.dbUpsertPayRate).not.toHaveBeenCalled();
+  });
+
+  it("returns an error when the save fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.protect.mockResolvedValue(admin);
+    withMembers();
+    mocks.dbUpsertPayRate.mockRejectedValue(new Error("db"));
+    expect(
+      (await updateMemberPayRateDal("user_2", 20, 1.5))._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Failed to update pay rate" });
   });
 });
