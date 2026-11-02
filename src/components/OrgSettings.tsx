@@ -5,7 +5,6 @@ import type {
   AlertSettingsData,
   BreakSettingsData,
   LocationSettingsData,
-  OrgSettingsData,
   OvertimeSettingsData,
   ReportingSettingsData,
   SerializableResult,
@@ -78,13 +77,19 @@ export default function OrgSettings({
   const alertSettingsResult = alertSettingsPromise
     ? use(alertSettingsPromise)
     : null;
-  const [optimisticSettings, setOptimisticSettings] = useOptimistic(
-    settingsResult?.ok ? settingsResult.value : null,
-    (state: OrgSettingsData | null, next: Partial<OrgSettingsData>) => {
-      if (!state) return state;
-      return { ...state, ...next };
-    },
-  );
+  // The reporting read returns the flat reporting_settings row, so the
+  // optimistic state is that row itself (not a nested `reporting` field).
+  const [optimisticReportingSettings, setOptimisticReportingSettings] =
+    useOptimistic(
+      settingsResult?.ok ? settingsResult.value : null,
+      (
+        state: ReportingSettingsData | null,
+        next: Partial<ReportingSettingsData>,
+      ) => {
+        if (!state) return state;
+        return { ...state, ...next };
+      },
+    );
   const [optimisticBreakSettings, setOptimisticBreakSettings] = useOptimistic(
     breakSettingsResult?.ok ? breakSettingsResult.value : null,
     (state: BreakSettingsData | null, next: Partial<BreakSettingsData>) => {
@@ -142,15 +147,8 @@ export default function OrgSettings({
       />
       <ReportingSettings
         hasReporting={hasReporting}
-        initialData={optimisticSettings?.reporting ?? null}
-        onUpdateOptimistic={(next) =>
-          setOptimisticSettings({
-            reporting: {
-              ...optimisticSettings?.reporting,
-              ...next,
-            } as ReportingSettingsData,
-          })
-        }
+        initialData={optimisticReportingSettings}
+        onUpdateOptimistic={(next) => setOptimisticReportingSettings(next)}
       />
     </div>
   );

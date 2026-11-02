@@ -285,12 +285,13 @@ describe("OrgSettings", () => {
         orgSettingsPromise={resolved({ ok: true, value })}
       />,
     );
-    // The loaded row has no nested `reporting` object, so nothing is passed yet.
-    expect(latest().initialData).toBeNull();
+    // The loaded row is passed straight down, so the saved values survive a refresh.
+    expect(latest().initialData).toEqual(value);
     expect(latestBreak().initialData).toEqual(breakValue);
 
     updateOptimistically({ report_frequency: "custom", report_day: "Friday" });
     expect(latest().initialData).toEqual({
+      ...value,
       report_frequency: "custom",
       report_day: "Friday",
     });
