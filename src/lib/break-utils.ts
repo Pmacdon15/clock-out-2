@@ -22,6 +22,7 @@ type ShiftLike = {
  */
 export const BREAK_TYPES = {
   unpaid_meal: { label: "Meal period", paid: false },
+  paid_meal: { label: "Paid meal period", paid: true },
   unpaid_rest: { label: "Unpaid rest break", paid: false },
   paid_rest: { label: "Paid rest break", paid: true },
 } as const satisfies Record<BreakType, { label: string; paid: boolean }>;
@@ -48,6 +49,39 @@ export function breakTypeLabel(type: BreakType | string): string {
   return isBreakType(type) ? BREAK_TYPES[type].label : "Break";
 }
 
+/** The two meal-period (lunch) kinds: one unpaid, one paid. */
+export const MEAL_BREAK_TYPES = [
+  "unpaid_meal",
+  "paid_meal",
+] as const satisfies readonly BreakType[];
+
+export function isMealBreakType(type: BreakType | string): boolean {
+  return (MEAL_BREAK_TYPES as readonly string[]).includes(type);
+}
+
+/**
+ * The meal-period kind the org uses for lunch: a paid meal period when the
+ * org has made lunch paid, otherwise the (default) unpaid one.
+ */
+export function getMealBreakType(
+  breakSettings?: Pick<BreakSettingsData, "paid_lunch"> | null,
+): BreakType {
+  return breakSettings?.paid_lunch ? "paid_meal" : "unpaid_meal";
+}
+
+/**
+ * The break kinds a member can start from the clock, lunch first: the org's
+ * meal period (paid or unpaid, never both) plus both kinds of rest break.
+ */
+export function getOfferedBreakTypes(
+  breakSettings?: Pick<BreakSettingsData, "paid_lunch"> | null,
+): BreakType[] {
+  const meal = getMealBreakType(breakSettings);
+  return BREAK_TYPE_VALUES.filter(
+    (type) => type === meal || !isMealBreakType(type),
+  );
+}
+
 /** The still-running break of an entry, if any. */
 export function getOpenBreak<T extends BreakLike>(
   entry: { breaks?: T[] | null } | null | undefined,
@@ -61,6 +95,8 @@ export const MAX_BREAK_LIMIT_MINUTES = 480;
 /** The `break_settings` column holding each break type's limit. */
 export const BREAK_LIMIT_FIELDS = {
   unpaid_meal: "max_meal_break_minutes",
+  // One meal-period limit covers lunch whether it is paid or unpaid.
+  paid_meal: "max_meal_break_minutes",
   unpaid_rest: "max_unpaid_rest_break_minutes",
   paid_rest: "max_paid_break_minutes",
 } as const satisfies Record<BreakType, keyof BreakSettingsData>;
@@ -70,6 +106,7 @@ type BreakLimitSettings = Partial<
     BreakSettingsData,
     | (typeof BREAK_LIMIT_FIELDS)[BreakType]
     | "dock_lunch"
+    | "paid_lunch"
     | "lunch_duration_minutes"
   >
 >;
@@ -83,13 +120,15 @@ const normalizeLimit = (value: unknown): number | null => {
 
 /**
  * Whether the meal-period limit comes from the lunch deduction: when the org
- * docks lunch, a meal period may last exactly as long as the deduction.
+ * docks (unpaid) lunch, a meal period may last exactly as long as the
+ * deduction. A paid lunch is never docked, so it keeps its own limit.
  */
 export function isMealLimitFromDeduction(
   breakSettings?: BreakLimitSettings | null,
 ): boolean {
   return (
     Boolean(breakSettings?.dock_lunch) &&
+    !breakSettings?.paid_lunch &&
     normalizeLimit(breakSettings?.lunch_duration_minutes) !== null
   );
 }
@@ -117,6 +156,7 @@ export function getBreakLimits(
 ): BreakLimits {
   return {
     unpaid_meal: getBreakLimitMinutes("unpaid_meal", breakSettings),
+    paid_meal: getBreakLimitMinutes("paid_meal", breakSettings),
     unpaid_rest: getBreakLimitMinutes("unpaid_rest", breakSettings),
     paid_rest: getBreakLimitMinutes("paid_rest", breakSettings),
   };
@@ -236,13 +276,19 @@ export function hasUnpaidBreakRecord(entry: ShiftLike): boolean {
  * subtracted and the org-wide lunch dock no longer applies, so a meal period
  * is never deducted twice. Shifts with only paid breaks recorded still get
  * the automatic dock, since no unpaid time was logged for them.
+ *
+ * An org that pays for lunch (`paid_lunch`) never has lunch docked.
  */
 export function getDockedMinutes(
   entry: ShiftLike,
   breakSettings?: BreakSettingsData | null,
   nowMs: number = Date.now(),
 ): number {
-  if (!breakSettings?.dock_lunch || entry.skip_lunch) {
+  if (
+    !breakSettings?.dock_lunch ||
+    breakSettings.paid_lunch ||
+    entry.skip_lunch
+  ) {
     return 0;
   }
 

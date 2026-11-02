@@ -1080,6 +1080,7 @@ describe("manage_break_settings", () => {
     expect(res.data.settings).toEqual({
       org_id: "org_1",
       dock_lunch: false,
+      paid_lunch: false,
       lunch_duration_minutes: 30,
       lunch_min_shift_hours: 5,
       max_meal_break_minutes: null,
@@ -1109,8 +1110,71 @@ describe("manage_break_settings", () => {
       true,
       30,
       5,
-      { unpaid_meal: null, unpaid_rest: 15, paid_rest: 10 },
+      { unpaid_meal: null, paid_meal: null, unpaid_rest: 15, paid_rest: 10 },
+      undefined,
     );
+  });
+
+  it("lets admins make lunch paid, keeping the stored limits", async () => {
+    mockDbUpdateBreakSettings.mockImplementation(
+      async (
+        orgId: string,
+        dock_lunch: boolean,
+        lunch_duration_minutes: number,
+        lunch_min_shift_hours: number,
+        _limits?: unknown,
+        paid_lunch?: boolean,
+      ) => ({
+        org_id: orgId,
+        dock_lunch,
+        paid_lunch: paid_lunch ?? false,
+        lunch_duration_minutes,
+        lunch_min_shift_hours,
+      }),
+    );
+    const res = await manageBreakSettingsTool(caller, {
+      action: "update",
+      paid_lunch: true,
+    });
+    expect(res.data.status).toBe("updated");
+    expect(res.summary).toContain("lunch is paid");
+    expect(mockDbUpdateBreakSettings).toHaveBeenCalledWith(
+      "org_1",
+      false,
+      30,
+      5,
+      undefined,
+      true,
+    );
+  });
+
+  it("saves lunch pay together with a new meal limit", async () => {
+    const res = await manageBreakSettingsTool(caller, {
+      action: "update",
+      paid_lunch: true,
+      max_meal_break_minutes: 30,
+    });
+    expect(res.data.status).toBe("updated");
+    expect(mockDbUpdateBreakSettings).toHaveBeenCalledWith(
+      "org_1",
+      false,
+      30,
+      5,
+      { unpaid_meal: 30, paid_meal: 30, unpaid_rest: null, paid_rest: null },
+      true,
+    );
+  });
+
+  it("describes an unpaid lunch that is docked", async () => {
+    mockDbGetBreakSettings.mockResolvedValue({
+      org_id: "org_1",
+      dock_lunch: true,
+      paid_lunch: false,
+      lunch_duration_minutes: 30,
+      lunch_min_shift_hours: 5,
+    } as never);
+    const res = await manageBreakSettingsTool(caller, {});
+    expect(res.summary).toContain("lunch is unpaid, deducting 30 min");
   });
 
   it("does not require the paid reporting feature", async () => {
@@ -1224,6 +1288,7 @@ describe("toggle_break and manage_breaks", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockDbGetBreakSettings.mockResolvedValue(undefined);
     mockGetUserOrgMemberships.mockResolvedValue({ data: [adminMembership] });
     mockGetOrgMemberships.mockResolvedValue({
       data: [
@@ -1324,6 +1389,65 @@ describe("toggle_break and manage_breaks", () => {
     );
   });
 
+  it("starts the org's paid lunch by default and refuses an unpaid one", async () => {
+    mockDbGetBreakSettings.mockResolvedValue({
+      org_id: "org_1",
+      paid_lunch: true,
+    } as never);
+    mockDbGetActiveEntry.mockResolvedValue({
+      id: 42,
+      user_id: "user_admin",
+      org_id: "org_1",
+      clock_in: new Date("2026-10-06T14:00:00.000Z"),
+      clock_out: null,
+      breaks: [],
+    });
+    mockDbStartBreak.mockResolvedValue({
+      id: 103,
+      time_entry_id: 42,
+      org_id: "org_1",
+      break_start: new Date("2026-10-06T18:00:00.000Z"),
+      break_end: null,
+      break_type: "paid_meal",
+    });
+
+    const res = await toggleBreakTool(adminCaller, {});
+    expect(res.data.status).toBe("break_started");
+    expect(mockDbStartBreak).toHaveBeenCalledWith(
+      "user_admin",
+      "org_1",
+      "paid_meal",
+    );
+
+    mockDbStartBreak.mockClear();
+    const unpaidRes = await toggleBreakTool(adminCaller, {
+      action: "start",
+      break_type: "unpaid_meal",
+    });
+    expect(unpaidRes.isError).toBe(true);
+    expect(unpaidRes.data.status).toBe("meal_type_not_allowed");
+    expect(unpaidRes.data.meal_break_type).toBe("paid_meal");
+    expect(mockDbStartBreak).not.toHaveBeenCalled();
+  });
+
+  it("refuses a paid lunch while the org's lunch is unpaid", async () => {
+    mockDbGetActiveEntry.mockResolvedValue({
+      id: 42,
+      user_id: "user_admin",
+      org_id: "org_1",
+      clock_in: new Date("2026-10-06T14:00:00.000Z"),
+      clock_out: null,
+      breaks: [],
+    });
+    const res = await toggleBreakTool(adminCaller, {
+      action: "start",
+      break_type: "paid_meal",
+    });
+    expect(res.isError).toBe(true);
+    expect(res.summary).toContain("Lunch is unpaid");
+    expect(mockDbStartBreak).not.toHaveBeenCalled();
+  });
+
   it("toggles a running break off when one is already open", async () => {
     mockDbGetActiveEntry.mockResolvedValue({
       id: 42,
@@ -1407,7 +1531,7 @@ describe("toggle_break and manage_breaks", () => {
     expect(memberRes.data.status).toBe("forbidden");
   });
 
-  it("allows an admin to add breaks of all 3 kinds (unpaid_meal, unpaid_rest, paid_rest) to a shift", async () => {
+  it("allows an admin to add breaks of all 4 kinds (unpaid_meal, paid_meal, unpaid_rest, paid_rest) to a shift", async () => {
     const shift = {
       id: 77,
       user_id: "user_adam",
@@ -1438,6 +1562,7 @@ describe("toggle_break and manage_breaks", () => {
 
     for (const breakType of [
       "unpaid_meal",
+      "paid_meal",
       "unpaid_rest",
       "paid_rest",
     ] as const) {
@@ -1455,11 +1580,11 @@ describe("toggle_break and manage_breaks", () => {
         entry_id: 77,
         break_type: breakType,
         duration_minutes: 30,
-        paid: breakType === "paid_rest",
+        paid: breakType.startsWith("paid_"),
       });
     }
 
-    expect(mockDbInsertBreak).toHaveBeenCalledTimes(3);
+    expect(mockDbInsertBreak).toHaveBeenCalledTimes(4);
     expect(mockInvalidateTimeEntryCache).toHaveBeenCalledWith(
       "user_adam",
       "org_1",
@@ -1505,6 +1630,51 @@ describe("toggle_break and manage_breaks", () => {
     expect(res.data.break).toMatchObject({
       break_type: "paid_rest",
       duration_minutes: 15,
+      paid: true,
+    });
+  });
+
+  it("adds the org's paid lunch, 30 minutes long, when no kind is given", async () => {
+    mockDbGetBreakSettings.mockResolvedValue({
+      org_id: "org_1",
+      paid_lunch: true,
+    } as never);
+    mockDbGetTimeEntryById.mockResolvedValue({
+      id: 77,
+      user_id: "user_adam",
+      org_id: "org_1",
+      clock_in: new Date("2026-10-06T14:00:00.000Z"),
+      clock_out: new Date("2026-10-06T22:00:00.000Z"),
+      breaks: [],
+    });
+    mockDbGetEntryBreaks.mockResolvedValue([]);
+    mockDbInsertBreak.mockImplementation(
+      async (
+        timeEntryId: number,
+        orgId: string,
+        breakStart: Date,
+        breakEnd: Date,
+        breakType: string,
+      ) => ({
+        id: 220,
+        time_entry_id: timeEntryId,
+        org_id: orgId,
+        break_start: breakStart,
+        break_end: breakEnd,
+        break_type: breakType,
+      }),
+    );
+
+    const res = await manageBreaksTool(adminCaller, {
+      action: "add",
+      entry_id: 77,
+      break_start: "12:00",
+      timezone: "America/Edmonton",
+    });
+    expect(res.isError).toBeUndefined();
+    expect(res.data.break).toMatchObject({
+      break_type: "paid_meal",
+      duration_minutes: 30,
       paid: true,
     });
   });
@@ -1600,6 +1770,59 @@ describe("toggle_break and manage_breaks", () => {
     expect(mockInvalidateTimeEntryCache).toHaveBeenCalledWith(
       "user_adam",
       "org_1",
+    );
+  });
+
+  it("changes a recorded break to a different kind, keeping its times", async () => {
+    const existingBreak = {
+      id: 303,
+      time_entry_id: 77,
+      org_id: "org_1",
+      break_start: new Date("2026-10-06T18:00:00.000Z"),
+      break_end: new Date("2026-10-06T18:30:00.000Z"),
+      break_type: "unpaid_meal" as const,
+      user_id: "user_adam",
+      clock_in: new Date("2026-10-06T14:00:00.000Z"),
+      clock_out: new Date("2026-10-06T22:00:00.000Z"),
+    };
+    mockDbGetBreakWithEntry.mockResolvedValue(existingBreak);
+    mockDbGetEntryBreaks.mockResolvedValue([existingBreak] as never);
+    mockDbUpdateBreak.mockImplementation(
+      async (
+        breakId: number,
+        orgId: string,
+        breakStart: Date,
+        breakEnd: Date | null,
+        breakType: string,
+      ) => ({
+        id: breakId,
+        time_entry_id: 77,
+        org_id: orgId,
+        break_start: breakStart,
+        break_end: breakEnd,
+        break_type: breakType,
+      }),
+    );
+
+    const res = await manageBreaksTool(adminCaller, {
+      action: "update",
+      break_id: 303,
+      break_type: "paid_meal",
+    });
+
+    expect(res.isError).toBeUndefined();
+    expect(res.data.break).toMatchObject({
+      break_id: 303,
+      break_type: "paid_meal",
+      duration_minutes: 30,
+      paid: true,
+    });
+    expect(mockDbUpdateBreak).toHaveBeenCalledWith(
+      303,
+      "org_1",
+      new Date("2026-10-06T18:00:00.000Z"),
+      new Date("2026-10-06T18:30:00.000Z"),
+      "paid_meal",
     );
   });
 

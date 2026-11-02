@@ -24,6 +24,23 @@ describe("getBreakLimitMinutes", () => {
     expect(getBreakLimitMinutes("paid_rest", settings)).toBe(15);
   });
 
+  it("gives a paid lunch the same meal limit as an unpaid one", () => {
+    const settings = { paid_lunch: true, max_meal_break_minutes: 30 };
+    expect(getBreakLimitMinutes("paid_meal", settings)).toBe(30);
+    expect(getBreakLimitMinutes("unpaid_meal", settings)).toBe(30);
+  });
+
+  it("never takes a paid lunch's limit from the lunch deduction", () => {
+    const settings = {
+      dock_lunch: true,
+      paid_lunch: true,
+      lunch_duration_minutes: 30,
+      max_meal_break_minutes: 45,
+    };
+    expect(isMealLimitFromDeduction(settings)).toBe(false);
+    expect(getBreakLimitMinutes("paid_meal", settings)).toBe(45);
+  });
+
   it.each([
     ["no settings", undefined],
     ["null settings", null],
@@ -81,9 +98,15 @@ describe("getBreakLimits", () => {
         lunch_duration_minutes: 30,
         max_paid_break_minutes: 15,
       }),
-    ).toEqual({ unpaid_meal: 30, unpaid_rest: null, paid_rest: 15 });
+    ).toEqual({
+      unpaid_meal: 30,
+      paid_meal: null,
+      unpaid_rest: null,
+      paid_rest: 15,
+    });
     expect(getBreakLimits(null)).toEqual({
       unpaid_meal: null,
+      paid_meal: null,
       unpaid_rest: null,
       paid_rest: null,
     });
