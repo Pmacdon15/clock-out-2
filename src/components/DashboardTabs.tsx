@@ -1,5 +1,6 @@
 "use client";
 
+import { CalendarDays, Plane } from "lucide-react";
 import { Suspense, use, useOptimistic } from "react";
 import TimeClock from "@/components/time-clock";
 import { timeEntriesReducer } from "@/lib/reducers/time-entries";
@@ -9,6 +10,7 @@ import { ViewHoursFallback } from "./fallbacks/view-hours-fallback";
 import NotificationSettings from "./NotificationSettings";
 import OrgSettings from "./OrgSettings";
 import { useOrgSwitcher } from "./OrgSwitcher";
+import { PremiumFeatureCard } from "./PremiumFeatureCard";
 import Schedule from "./Schedule";
 import TimeOff from "./TimeOff";
 import TimezoneSync from "./TimezoneSync";
@@ -43,6 +45,8 @@ export default function DashboardTabs({
   isAdminPromise,
   hasReportingPromise,
   hasGeofencingPromise,
+  hasSchedulingPromise,
+  hasTimeOffPromise,
   userIdPromise,
   orgIdPromise,
 }: DashboardTabsProps) {
@@ -51,6 +55,8 @@ export default function DashboardTabs({
   const hasGeofencing = hasGeofencingPromise
     ? use(hasGeofencingPromise)
     : false;
+  const hasScheduling = use(hasSchedulingPromise);
+  const hasTimeOff = use(hasTimeOffPromise);
   const isAdmin = use(isAdminPromise);
   const result = use(entriesPromise);
   const recentEntriesResult = use(recentEntriesPromise);
@@ -161,26 +167,40 @@ export default function DashboardTabs({
         </TabsContent>
       )}
       <TabsContent className="mt-0" value="schedule">
-        <Suspense fallback={<ViewHoursFallback />}>
-          <Schedule
-            isAdmin={isAdmin}
-            membersPromise={membersPromise}
-            schedulePromise={schedulePromise}
-            timeOffPromise={timeOffPromise}
+        {hasScheduling ? (
+          <Suspense fallback={<ViewHoursFallback />}>
+            <Schedule
+              isAdmin={isAdmin}
+              membersPromise={membersPromise}
+              schedulePromise={schedulePromise}
+              timeOffPromise={timeOffPromise}
+            />
+          </Suspense>
+        ) : (
+          <PremiumFeatureCard
+            description="Scheduling shifts is only available on paid plans. Upgrade your organization to unlock this feature."
+            icon={CalendarDays}
           />
-        </Suspense>
+        )}
       </TabsContent>
 
       <TabsContent className="mt-0" value="time-off">
-        <Suspense fallback={<ViewHoursFallback />}>
-          <TimeOff
-            currentUserIdPromise={userIdPromise}
-            isAdmin={isAdmin}
-            allowancesPromise={timeOffAllowancesPromise}
-            membersPromise={membersPromise}
-            timeOffPromise={timeOffPromise}
+        {hasTimeOff ? (
+          <Suspense fallback={<ViewHoursFallback />}>
+            <TimeOff
+              allowancesPromise={timeOffAllowancesPromise}
+              currentUserIdPromise={userIdPromise}
+              isAdmin={isAdmin}
+              membersPromise={membersPromise}
+              timeOffPromise={timeOffPromise}
+            />
+          </Suspense>
+        ) : (
+          <PremiumFeatureCard
+            description="Time off requests and PTO tracking are only available on paid plans. Upgrade your organization to unlock this feature."
+            icon={Plane}
           />
-        </Suspense>
+        )}
       </TabsContent>
 
       {isAdmin && (

@@ -78,6 +78,8 @@ function props(
     startDatePromise: resolved(undefined),
     isAdminPromise: resolved(false),
     hasReportingPromise: resolved(false),
+    hasSchedulingPromise: resolved(true),
+    hasTimeOffPromise: resolved(true),
     userIdPromise: resolved("user_1"),
     orgIdPromise: resolved("org_1"),
     ...overrides,
@@ -198,6 +200,23 @@ describe("DashboardTabs", () => {
       timeOffPromise: p.timeOffPromise,
     });
   });
+
+  it.each([
+    ["Schedule", "schedule", { hasSchedulingPromise: resolved(false) }],
+    ["Time Off", "time-off", { hasTimeOffPromise: resolved(false) }],
+  ])(
+    "offers an upgrade in place of %s when the plan lacks it",
+    (tab, testId, overrides) => {
+      render(<DashboardTabs {...props(overrides)} />);
+      fireEvent.click(screen.getByRole("button", { name: tab }));
+      expect(screen.queryByTestId(testId)).not.toBeInTheDocument();
+      expect(screen.getByText("Premium Feature")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "View Plans" })).toHaveAttribute(
+        "href",
+        "/plans",
+      );
+    },
+  );
 
   it("shows settings to admins with reporting and honours the default tab", () => {
     const p = props({

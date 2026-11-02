@@ -13,6 +13,7 @@ import {
 } from "./alerts-db";
 import { loadOrgMembers, type OrgMember } from "./alerts-runner";
 import { deliver } from "./notify";
+import { orgHasPlanFeature, SCHEDULING_FEATURE } from "./plan-features";
 import type { ScheduledShift } from "./types";
 
 const DAY_MS = 86_400_000;
@@ -273,6 +274,8 @@ export async function runWeeklyScheduleDigests(
     ) {
       continue;
     }
+    // No digests or reminders once the org's plan drops Scheduling.
+    if (!(await orgHasPlanFeature(orgId, SCHEDULING_FEATURE))) continue;
     try {
       const members: OrgMember[] = await loadOrgMembers(orgId);
       for (const digest of due.filter((d) => d.orgId === orgId)) {
@@ -384,6 +387,8 @@ export async function runUpcomingShiftReminders(
     ) {
       continue;
     }
+    // No digests or reminders once the org's plan drops Scheduling.
+    if (!(await orgHasPlanFeature(orgId, SCHEDULING_FEATURE))) continue;
     try {
       const [members, open] = await Promise.all([
         loadOrgMembers(orgId),

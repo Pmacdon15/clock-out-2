@@ -201,6 +201,8 @@ export interface DashboardTabsProps {
   isAdminPromise: Promise<boolean>;
   hasReportingPromise: Promise<boolean>;
   hasGeofencingPromise?: Promise<boolean>;
+  hasSchedulingPromise: Promise<boolean>;
+  hasTimeOffPromise: Promise<boolean>;
   userIdPromise: Promise<string | undefined>;
   orgIdPromise: Promise<string | undefined>;
 }

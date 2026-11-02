@@ -73,6 +73,12 @@ import {
 } from "./overtime";
 import { isValidHourlyRate, isValidOvertimeMultiplier } from "./pay";
 import {
+  SCHEDULING_FEATURE,
+  SCHEDULING_UPGRADE_REASON,
+  TIME_OFF_FEATURE,
+  TIME_OFF_UPGRADE_REASON,
+} from "./plan-features";
+import {
   evaluateShifts,
   invalidShiftReason,
   SCHEDULE_FUTURE_DAYS,
@@ -1299,12 +1305,16 @@ const MAX_SHIFT_NOTE_LENGTH = 500;
 export async function getSchedule(): Promise<
   SerializableResult<ScheduledShiftWithStatus[], { reason: string }>
 > {
-  const { userId, orgId, orgRole } = await auth.protect();
+  const { userId, orgId, orgRole, has } = await auth.protect();
   if (!userId || !orgId) {
     return {
       error: { reason: "Unauthorized or no organization selected" },
       ok: false,
     };
+  }
+  // Without the paid feature there is simply no schedule to show.
+  if (!has({ feature: SCHEDULING_FEATURE })) {
+    return { value: [], ok: true };
   }
 
   const isAdmin = orgRole === "org:admin";
@@ -1340,9 +1350,12 @@ export async function createScheduledShiftDal(
   note?: string | null,
   localDays?: { start: string; end: string } | null,
 ) {
-  const { userId, orgId, orgRole } = await auth.protect();
+  const { userId, orgId, orgRole, has } = await auth.protect();
   if (!userId || !orgId || orgRole !== "org:admin") {
     return errAsync({ reason: "Unauthorized" } as const);
+  }
+  if (!has({ feature: SCHEDULING_FEATURE })) {
+    return errAsync({ reason: SCHEDULING_UPGRADE_REASON } as const);
   }
 
   const invalid = invalidShiftReason(shiftStart, shiftEnd);
@@ -1406,9 +1419,12 @@ export async function updateScheduledShiftDal(
   note?: string | null,
   localDays?: { start: string; end: string } | null,
 ) {
-  const { userId, orgId, orgRole } = await auth.protect();
+  const { userId, orgId, orgRole, has } = await auth.protect();
   if (!userId || !orgId || orgRole !== "org:admin") {
     return errAsync({ reason: "Unauthorized" } as const);
+  }
+  if (!has({ feature: SCHEDULING_FEATURE })) {
+    return errAsync({ reason: SCHEDULING_UPGRADE_REASON } as const);
   }
 
   const invalid = invalidShiftReason(shiftStart, shiftEnd);
@@ -1470,9 +1486,12 @@ export async function updateScheduledShiftDal(
 }
 
 export async function deleteScheduledShiftDal(id: number) {
-  const { userId, orgId, orgRole } = await auth.protect();
+  const { userId, orgId, orgRole, has } = await auth.protect();
   if (!userId || !orgId || orgRole !== "org:admin") {
     return errAsync({ reason: "Unauthorized" } as const);
+  }
+  if (!has({ feature: SCHEDULING_FEATURE })) {
+    return errAsync({ reason: SCHEDULING_UPGRADE_REASON } as const);
   }
 
   return await dbDeleteScheduledShift(id, orgId)
@@ -1507,12 +1526,17 @@ const TIME_OFF_LOOKBACK_DAYS = 400;
 export async function getTimeOffRequests(): Promise<
   SerializableResult<TimeOffRequest[], { reason: string }>
 > {
-  const { userId, orgId, orgRole } = await auth.protect();
+  const { userId, orgId, orgRole, has } = await auth.protect();
   if (!userId || !orgId) {
     return {
       error: { reason: "Unauthorized or no organization selected" },
       ok: false,
     };
+  }
+  // Without the paid feature there is no time off, so Hours and reports
+  // don't count any either.
+  if (!has({ feature: TIME_OFF_FEATURE })) {
+    return { value: [], ok: true };
   }
 
   const since = format(
@@ -1569,9 +1593,12 @@ export async function createTimeOffRequestDal(
   note?: string | null,
   options?: { memberId?: string | null; approve?: boolean },
 ) {
-  const { userId, orgId, orgRole } = await auth.protect();
+  const { userId, orgId, orgRole, has } = await auth.protect();
   if (!userId || !orgId) {
     return errAsync({ reason: "Unauthorized" } as const);
+  }
+  if (!has({ feature: TIME_OFF_FEATURE })) {
+    return errAsync({ reason: TIME_OFF_UPGRADE_REASON } as const);
   }
   const targetUserId = options?.memberId || userId;
   const forSomeoneElse = targetUserId !== userId;
@@ -1662,9 +1689,12 @@ export async function reviewTimeOffRequestDal(
   id: number,
   decision: "approved" | "denied",
 ) {
-  const { userId, orgId, orgRole } = await auth.protect();
+  const { userId, orgId, orgRole, has } = await auth.protect();
   if (!userId || !orgId || orgRole !== "org:admin") {
     return errAsync({ reason: "Unauthorized" } as const);
+  }
+  if (!has({ feature: TIME_OFF_FEATURE })) {
+    return errAsync({ reason: TIME_OFF_UPGRADE_REASON } as const);
   }
   if (decision !== "approved" && decision !== "denied") {
     return errAsync({ reason: "Invalid decision" } as const);
@@ -1711,9 +1741,12 @@ export async function reviewTimeOffRequestDal(
  * approved time off.
  */
 export async function cancelTimeOffRequestDal(id: number) {
-  const { userId, orgId, orgRole } = await auth.protect();
+  const { userId, orgId, orgRole, has } = await auth.protect();
   if (!userId || !orgId) {
     return errAsync({ reason: "Unauthorized" } as const);
+  }
+  if (!has({ feature: TIME_OFF_FEATURE })) {
+    return errAsync({ reason: TIME_OFF_UPGRADE_REASON } as const);
   }
 
   return await dbCancelTimeOffRequest(
@@ -1749,12 +1782,16 @@ export async function cancelTimeOffRequestDal(id: number) {
 export async function getTimeOffAllowances(): Promise<
   SerializableResult<TimeOffAllowance[], { reason: string }>
 > {
-  const { userId, orgId, orgRole } = await auth.protect();
+  const { userId, orgId, orgRole, has } = await auth.protect();
   if (!userId || !orgId) {
     return {
       error: { reason: "Unauthorized or no organization selected" },
       ok: false,
     };
+  }
+  // Allowances only matter with the time off feature.
+  if (!has({ feature: TIME_OFF_FEATURE })) {
+    return { value: [], ok: true };
   }
   return await dbGetTimeOffAllowances(
     orgId,
@@ -1772,9 +1809,12 @@ export async function setTimeOffAllowanceDal(
   memberId: string,
   ptoDays: number | null,
 ) {
-  const { userId, orgId, orgRole } = await auth.protect();
+  const { userId, orgId, orgRole, has } = await auth.protect();
   if (!userId || !orgId || orgRole !== "org:admin") {
     return errAsync({ reason: "Unauthorized" } as const);
+  }
+  if (!has({ feature: TIME_OFF_FEATURE })) {
+    return errAsync({ reason: TIME_OFF_UPGRADE_REASON } as const);
   }
   if (ptoDays !== null) {
     const invalid = invalidAllowanceReason(ptoDays);
