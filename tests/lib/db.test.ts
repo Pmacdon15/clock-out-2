@@ -1000,6 +1000,30 @@ describe("scheduled shifts", () => {
     ]);
   });
 
+  it("dbGetScheduledShiftById reads one shift within the org", async () => {
+    sql.mockResolvedValue([]);
+    await db.ensureScheduledShiftsTable();
+    sql.mockReset();
+    sql.mockResolvedValue([{ id: 3 }]);
+    await expect(db.dbGetScheduledShiftById(3, "o1")).resolves.toEqual({
+      id: 3,
+    });
+    expect(textOf(0)).toContain("SELECT * FROM scheduled_shifts");
+    expect(valuesOf(0)).toEqual([3, "o1"]);
+  });
+
+  it("dbUpdateScheduledShift moves the shift within the org", async () => {
+    sql.mockResolvedValue([]);
+    await db.ensureScheduledShiftsTable();
+    sql.mockReset();
+    sql.mockResolvedValue([{ id: 3 }]);
+    await expect(
+      db.dbUpdateScheduledShift(3, "o1", shiftStart, shiftEnd, null),
+    ).resolves.toEqual({ id: 3 });
+    expect(textOf(0)).toContain("UPDATE scheduled_shifts");
+    expect(valuesOf(0)).toEqual([shiftStart, shiftEnd, null, 3, "o1"]);
+  });
+
   it("dbDeleteScheduledShift deletes within the org", async () => {
     sql.mockResolvedValue([]);
     await db.ensureScheduledShiftsTable();
@@ -1098,10 +1122,33 @@ describe("time off requests", () => {
       "2026-01-07",
       8,
       null,
+      "pending",
+      null,
+      null,
       "u1",
       "o1",
       "2026-01-07",
       "2026-01-05",
+    ]);
+
+    sql.mockClear();
+    sql.transaction.mockResolvedValue([[], [{ id: 6 }]]);
+    await expect(
+      db.dbCreateTimeOffRequest(
+        "o1",
+        "u2",
+        "sick",
+        "2026-01-05",
+        "2026-01-05",
+        8,
+        null,
+        "a1",
+      ),
+    ).resolves.toEqual({ id: 6 });
+    expect(valuesOf(1).slice(7, 10)).toEqual([
+      "approved",
+      "a1",
+      expect.any(Date),
     ]);
 
     sql.transaction.mockResolvedValue([[], []]);

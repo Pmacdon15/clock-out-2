@@ -21,6 +21,7 @@ import {
   getUnpaidBreakMs,
   isBreakType,
   isPaidBreakType,
+  MAX_BREAK_LIMIT_MINUTES,
   validateBreak,
 } from "@/lib/break-utils";
 import { fetchAllPages } from "@/lib/clerk-pagination";
@@ -95,6 +96,7 @@ import {
   invalidateReportingSettingsCache,
   invalidateTimeEntryCache,
 } from "@/mcp/db";
+import { describeExtras, loadHoursExtras } from "@/mcp/hours-extras";
 
 export type McpCaller = {
   userId: string;
@@ -633,6 +635,36 @@ export const manageBreakSettingsInputSchema = z.object({
     .describe(
       "Minimum shift length in hours before the deduction applies (0–24). If omitted, the current value is kept (default 5).",
     ),
+  max_meal_break_minutes: z
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_BREAK_LIMIT_MINUTES)
+    .nullable()
+    .optional()
+    .describe(
+      "Longest a meal break ('unpaid_meal') may run, in minutes; the member is put back on the clock when it's reached. null removes the limit; omit to keep it.",
+    ),
+  max_unpaid_rest_break_minutes: z
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_BREAK_LIMIT_MINUTES)
+    .nullable()
+    .optional()
+    .describe(
+      "Longest an unpaid rest break ('unpaid_rest') may run, in minutes. null removes the limit; omit to keep it.",
+    ),
+  max_paid_break_minutes: z
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_BREAK_LIMIT_MINUTES)
+    .nullable()
+    .optional()
+    .describe(
+      "Longest a paid rest break ('paid_rest') may run, in minutes. null removes the limit; omit to keep it.",
+    ),
 });
 
 export const runHoursReportInputSchema = z.object({
@@ -735,7 +767,7 @@ export function formatDurationMs(ms: number) {
   };
 }
 
-function formatTimestampInTz(date: Date | string | null, tz: string) {
+export function formatTimestampInTz(date: Date | string | null, tz: string) {
   if (!date) return null;
   const d = typeof date === "string" ? new Date(date) : date;
   try {
@@ -745,7 +777,7 @@ function formatTimestampInTz(date: Date | string | null, tz: string) {
   }
 }
 
-function validTimezone(tz?: string): string {
+export function validTimezone(tz?: string): string {
   if (!tz) return DEFAULT_TIMEZONE;
   try {
     Intl.DateTimeFormat(undefined, { timeZone: tz });
@@ -823,7 +855,7 @@ export function parseFlexibleDateTime(
   }
 }
 
-async function resolveOrg(
+export async function resolveOrg(
   userId: string,
   requestedOrg?: string,
 ): Promise<{ ok: true; org: OrgContext } | { ok: false; result: ToolResult }> {
@@ -909,7 +941,7 @@ async function resolveOrg(
   };
 }
 
-async function fetchOrgMembers(orgId: string): Promise<OrgMemberInfo[]> {
+export async function fetchOrgMembers(orgId: string): Promise<OrgMemberInfo[]> {
   const client = await clerkClient();
   const data = await fetchAllPages(
     (params) =>
@@ -943,7 +975,7 @@ async function fetchOrgMembers(orgId: string): Promise<OrgMemberInfo[]> {
     .filter((m) => m.userId.length > 0);
 }
 
-function resolveMemberFromList(
+export function resolveMemberFromList(
   members: OrgMemberInfo[],
   callerUserId: string,
   callerIsAdmin: boolean,
@@ -2368,6 +2400,14 @@ export async function getWeeklyTimecardTool(
     entriesByUser.set(entry.user_id, list);
   }
 
+  const extrasFor = await loadHoursExtras(
+    org.orgId,
+    entries,
+    formatInTimeZone(startDate, tz, "yyyy-MM-dd"),
+    formatInTimeZone(endDate, tz, "yyyy-MM-dd"),
+    tz,
+  );
+
   let orgTotalMs = 0;
   const timecards = targetMembers.map((m) => {
     const userEntries = (entriesByUser.get(m.userId) ?? []).sort(
@@ -2432,6 +2472,7 @@ export async function getWeeklyTimecardTool(
       days_worked: dailyBreakdown.length,
       shifts_count: userEntries.length,
       active_shifts: activeShifts,
+      ...extrasFor(m.userId),
       daily_breakdown: dailyBreakdown,
     };
   });
@@ -2440,7 +2481,7 @@ export async function getWeeklyTimecardTool(
 
   const summary =
     timecards.length === 1 && timecards[0]
-      ? `Weekly timecard for ${timecards[0].name} (${periodLabel}): ${timecards[0].formatted_total} across ${timecards[0].days_worked} day${timecards[0].days_worked === 1 ? "" : "s"} (${timecards[0].shifts_count} shift${timecards[0].shifts_count === 1 ? "" : "s"}).`
+      ? `Weekly timecard for ${timecards[0].name} (${periodLabel}): ${timecards[0].formatted_total} across ${timecards[0].days_worked} day${timecards[0].days_worked === 1 ? "" : "s"} (${timecards[0].shifts_count} shift${timecards[0].shifts_count === 1 ? "" : "s"})${describeExtras(timecards[0])}.`
       : `Weekly timecard for ${org.orgName} (${periodLabel}): ${orgTotalDur.formatted} total across ${timecards.length} members (${timecards.map((t) => `${t.name}: ${t.formatted_total}`).join(", ")}).`;
 
   return {
@@ -3898,6 +3939,10 @@ export async function manageReportingSettingsTool(
 const DEFAULT_LUNCH_DURATION_MINUTES = 30;
 const DEFAULT_LUNCH_MIN_SHIFT_HOURS = 5;
 
+function limitOrNull(value: number | null | undefined) {
+  return value === null || value === undefined ? null : Number(value);
+}
+
 function describeBreakSettings(settings: {
   dock_lunch: boolean;
   lunch_duration_minutes: number;
@@ -3930,6 +3975,11 @@ export async function manageBreakSettingsTool(
     lunch_min_shift_hours: Number(
       current?.lunch_min_shift_hours ?? DEFAULT_LUNCH_MIN_SHIFT_HOURS,
     ),
+    max_meal_break_minutes: limitOrNull(current?.max_meal_break_minutes),
+    max_unpaid_rest_break_minutes: limitOrNull(
+      current?.max_unpaid_rest_break_minutes,
+    ),
+    max_paid_break_minutes: limitOrNull(current?.max_paid_break_minutes),
   };
 
   if ((input.action ?? "get") === "get") {
@@ -3955,11 +4005,14 @@ export async function manageBreakSettingsTool(
     input.action !== "toggle" &&
     input.dock_lunch === undefined &&
     input.lunch_duration_minutes === undefined &&
-    input.lunch_min_shift_hours === undefined
+    input.lunch_min_shift_hours === undefined &&
+    input.max_meal_break_minutes === undefined &&
+    input.max_unpaid_rest_break_minutes === undefined &&
+    input.max_paid_break_minutes === undefined
   ) {
     return {
       summary:
-        "Nothing to update. Pass dock_lunch, lunch_duration_minutes, and/or lunch_min_shift_hours.",
+        "Nothing to update. Pass dock_lunch, lunch_duration_minutes, lunch_min_shift_hours, and/or a break limit (max_meal_break_minutes, max_unpaid_rest_break_minutes, max_paid_break_minutes).",
       data: { status: "invalid_input", settings: currentSettings },
       isError: true,
     };
@@ -3971,12 +4024,33 @@ export async function manageBreakSettingsTool(
       ? !currentSettings.dock_lunch
       : currentSettings.dock_lunch);
 
-  const updated = await dbUpdateBreakSettings(
+  // Limits are only sent when one changes, so the stored ones are kept.
+  const limitsChanged =
+    input.max_meal_break_minutes !== undefined ||
+    input.max_unpaid_rest_break_minutes !== undefined ||
+    input.max_paid_break_minutes !== undefined;
+  const lunch = [
     org.orgId,
     nextDockLunch,
     input.lunch_duration_minutes ?? currentSettings.lunch_duration_minutes,
     input.lunch_min_shift_hours ?? currentSettings.lunch_min_shift_hours,
-  );
+  ] as const;
+  const updated = limitsChanged
+    ? await dbUpdateBreakSettings(...lunch, {
+        unpaid_meal:
+          input.max_meal_break_minutes === undefined
+            ? currentSettings.max_meal_break_minutes
+            : input.max_meal_break_minutes,
+        unpaid_rest:
+          input.max_unpaid_rest_break_minutes === undefined
+            ? currentSettings.max_unpaid_rest_break_minutes
+            : input.max_unpaid_rest_break_minutes,
+        paid_rest:
+          input.max_paid_break_minutes === undefined
+            ? currentSettings.max_paid_break_minutes
+            : input.max_paid_break_minutes,
+      })
+    : await dbUpdateBreakSettings(...lunch);
   invalidateBreakSettingsCache(org.orgId);
 
   return {
@@ -4092,6 +4166,14 @@ export async function runHoursReportTool(
     entriesByUser.set(entry.user_id, list);
   }
 
+  const extrasFor = await loadHoursExtras(
+    org.orgId,
+    entries,
+    startStr,
+    endStr,
+    tz,
+  );
+
   let orgNetMs = 0;
   const reports = targetMembers.map((m) => {
     const userEntries = (entriesByUser.get(m.userId) ?? []).sort(
@@ -4157,6 +4239,7 @@ export async function runHoursReportTool(
       days_worked: days.size,
       shifts_count: userEntries.length,
       active_shifts: activeShifts,
+      ...extrasFor(m.userId),
       daily_breakdown: Array.from(days.values()).map((d) => {
         const dayDur = formatDurationMs(d.netMs);
         return {
@@ -4216,7 +4299,7 @@ export async function runHoursReportTool(
   const periodLabel = `${startStr} to ${endStr}`;
   const hoursSummary =
     reports.length === 1 && reports[0]
-      ? `${reports[0].name} worked ${reports[0].formatted_total} (${reports[0].total_hours}h) from ${periodLabel} across ${reports[0].days_worked} day${reports[0].days_worked === 1 ? "" : "s"}.`
+      ? `${reports[0].name} worked ${reports[0].formatted_total} (${reports[0].total_hours}h) from ${periodLabel} across ${reports[0].days_worked} day${reports[0].days_worked === 1 ? "" : "s"}${describeExtras(reports[0])}.`
       : `Hours report for ${org.orgName} (${periodLabel}): ${orgNet.formatted} total — ${reports.map((r) => `${r.name}: ${r.formatted_total}`).join(", ")}.`;
 
   let emailSummary = "";

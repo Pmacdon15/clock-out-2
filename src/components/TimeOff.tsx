@@ -93,7 +93,21 @@ function useTimeOffMutation<A>(
   });
 }
 
-function RequestForm({ ptoHint }: { ptoHint?: string }) {
+/** Who the form files time off for: "" is the signed-in person. */
+const SELF = "";
+
+function RequestForm({
+  isAdmin,
+  members,
+  ptoHint,
+}: {
+  isAdmin: boolean;
+  members: Member[];
+  /** The signed-in person's PTO left; shown only when filing for themselves. */
+  ptoHint?: string;
+}) {
+  const [memberId, setMemberId] = useState(SELF);
+  const [approve, setApprove] = useState(true);
   const [type, setType] = useState<TimeOffType>("vacation");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -102,21 +116,30 @@ function RequestForm({ ptoHint }: { ptoHint?: string }) {
   );
   const [note, setNote] = useState("");
 
-  const { mutate, isPending } = useTimeOffMutation(async () => {
-    const res = await createTimeOffRequestAction(
-      type,
-      startDate,
-      endDate || startDate,
-      hoursPerDay,
-      note,
-    );
-    if (res.success) {
-      setStartDate("");
-      setEndDate("");
-      setNote("");
-    }
-    return res;
-  }, "Time off requested");
+  const { mutate, isPending } = useTimeOffMutation(
+    async () => {
+      const args = [
+        type,
+        startDate,
+        endDate || startDate,
+        hoursPerDay,
+        note,
+      ] as const;
+      const res = await (isAdmin
+        ? createTimeOffRequestAction(...args, {
+            memberId: memberId || null,
+            approve,
+          })
+        : createTimeOffRequestAction(...args));
+      if (res.success) {
+        setStartDate("");
+        setEndDate("");
+        setNote("");
+      }
+      return res;
+    },
+    isAdmin && approve ? "Time off added" : "Time off requested",
+  );
 
   return (
     <form
@@ -126,6 +149,26 @@ function RequestForm({ ptoHint }: { ptoHint?: string }) {
         mutate(undefined);
       }}
     >
+      {isAdmin && (
+        <div className="space-y-1.5 sm:col-span-2">
+          <label className="font-medium text-sm" htmlFor="timeOffMember">
+            For
+          </label>
+          <select
+            className={inputClass}
+            id="timeOffMember"
+            onChange={(e) => setMemberId(e.target.value)}
+            value={memberId}
+          >
+            <option value={SELF}>Myself</option>
+            {members.map((member) => (
+              <option key={member.id} value={member.id}>
+                {member.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       <div className="space-y-1.5">
         <label className="font-medium text-sm" htmlFor="timeOffType">
           Type
@@ -142,7 +185,7 @@ function RequestForm({ ptoHint }: { ptoHint?: string }) {
             </option>
           ))}
         </select>
-        {type === "vacation" && ptoHint && (
+        {type === "vacation" && ptoHint && memberId === SELF && (
           <p className="text-muted-foreground text-xs">{ptoHint}</p>
         )}
         {type === "unpaid" && (
@@ -203,6 +246,16 @@ function RequestForm({ ptoHint }: { ptoHint?: string }) {
           value={note}
         />
       </div>
+      {isAdmin && (
+        <label className="flex items-center gap-2 text-sm sm:col-span-2">
+          <input
+            checked={approve}
+            onChange={(e) => setApprove(e.target.checked)}
+            type="checkbox"
+          />
+          Approve right away
+        </label>
+      )}
       <div className="sm:col-span-2">
         <Button
           className="w-full sm:w-auto"
@@ -210,7 +263,7 @@ function RequestForm({ ptoHint }: { ptoHint?: string }) {
           type="submit"
         >
           {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          Request time off
+          {isAdmin && approve ? "Add time off" : "Request time off"}
         </Button>
       </div>
     </form>
@@ -503,13 +556,15 @@ export default function TimeOff({
           <div>
             <h3 className="font-bold text-2xl tracking-tight">Time off</h3>
             <p className="text-muted-foreground text-sm">
-              Request vacation (PTO), sick days or unpaid time off. Once an
-              admin approves them they show in the Hours view and in hours
-              reports.
+              {isAdmin
+                ? "Add vacation (PTO), sick days or unpaid time off for yourself or any member, and approve, deny or revoke requests. Approved time off shows in the Hours view and in hours reports."
+                : "Request vacation (PTO), sick days or unpaid time off. Once an admin approves them they show in the Hours view and in hours reports."}
             </p>
           </div>
         </div>
         <RequestForm
+          isAdmin={isAdmin}
+          members={members}
           ptoHint={
             myBalance
               ? `${formatDays(Math.max(0, myBalance.left))} of PTO left for ${year}`

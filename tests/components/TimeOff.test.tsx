@@ -267,6 +267,78 @@ describe("TimeOff", () => {
     await waitFor(() => expect(submit).toBeDisabled());
     expect(submit.querySelector(".animate-spin")).not.toBeNull();
   });
+
+  it("lets admins add approved time off for a member", async () => {
+    mocks.createTimeOffRequestAction.mockResolvedValue({
+      success: true,
+      data: {},
+    });
+    renderTimeOff([], true);
+    expect(screen.getByLabelText("Approve right away")).toBeChecked();
+    fireEvent.change(screen.getByLabelText("For"), {
+      target: { value: "u2" },
+    });
+    fireEvent.change(screen.getByLabelText("From"), {
+      target: { value: "2026-03-09" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add time off" }));
+    await waitFor(() =>
+      expect(mocks.toast.success).toHaveBeenCalledWith("Time off added"),
+    );
+    expect(mocks.createTimeOffRequestAction).toHaveBeenCalledWith(
+      "vacation",
+      "2026-03-09",
+      "2026-03-09",
+      8,
+      "",
+      { memberId: "u2", approve: true },
+    );
+  });
+
+  it("lets admins file a pending request for themselves", async () => {
+    mocks.createTimeOffRequestAction.mockResolvedValue({
+      success: true,
+      data: {},
+    });
+    renderTimeOff([], true, false);
+    expect(screen.getByLabelText("For")).toHaveValue("");
+    fireEvent.click(screen.getByLabelText("Approve right away"));
+    fireEvent.change(screen.getByLabelText("From"), {
+      target: { value: "2026-03-09" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Request time off" }));
+    await waitFor(() =>
+      expect(mocks.toast.success).toHaveBeenCalledWith("Time off requested"),
+    );
+    expect(mocks.createTimeOffRequestAction.mock.calls[0][5]).toEqual({
+      memberId: null,
+      approve: false,
+    });
+  });
+
+  it("hides the admin options from members", () => {
+    renderTimeOff([]);
+    expect(screen.queryByLabelText("For")).toBeNull();
+    expect(screen.queryByLabelText("Approve right away")).toBeNull();
+  });
+
+  it("keeps the admin form when adding time off fails", async () => {
+    mocks.createTimeOffRequestAction.mockResolvedValue({
+      success: false,
+      error: "This member already has time off on those dates",
+    });
+    renderTimeOff([], true);
+    fireEvent.change(screen.getByLabelText("From"), {
+      target: { value: "2026-03-09" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add time off" }));
+    await waitFor(() =>
+      expect(mocks.toast.error).toHaveBeenCalledWith(
+        "This member already has time off on those dates",
+      ),
+    );
+    expect(screen.getByLabelText("From")).toHaveValue("2026-03-09");
+  });
 });
 
 describe("TimeOff PTO allowances", () => {

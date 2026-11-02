@@ -163,9 +163,102 @@ describe("createTimeOffRequestDal", () => {
       "2026-03-04",
       8,
       "Trip",
+      null,
     );
     await create();
     expect(mocks.dbCreateTimeOffRequest.mock.calls[1][6]).toBeNull();
+  });
+
+  it.each([
+    ["another member", { memberId: "user_2" }],
+    ["approved", { approve: true }],
+  ])("refuses members filing time off %s", async (_label, options) => {
+    mocks.protect.mockResolvedValue(member);
+    expect(
+      (
+        await createTimeOffRequestDal(
+          "vacation",
+          "2026-03-02",
+          "2026-03-02",
+          8,
+          null,
+          options,
+        )
+      )._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Unauthorized" });
+    expect(mocks.dbCreateTimeOffRequest).not.toHaveBeenCalled();
+  });
+
+  it("lets admins record approved time off for a member", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.getProcessedMembers.mockResolvedValue([{ id: "user_1" }]);
+    mocks.dbCreateTimeOffRequest.mockResolvedValue(request);
+    const res = await createTimeOffRequestDal(
+      "sick",
+      "2026-03-02",
+      "2026-03-02",
+      8,
+      null,
+      { memberId: "user_1", approve: true },
+    );
+    expect(res._unsafeUnwrap()).toEqual(request);
+    expect(mocks.dbCreateTimeOffRequest).toHaveBeenCalledWith(
+      "org_1",
+      "user_1",
+      "sick",
+      "2026-03-02",
+      "2026-03-02",
+      8,
+      null,
+      "admin_1",
+    );
+  });
+
+  it("lets admins file their own pending request with a null member", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbCreateTimeOffRequest.mockResolvedValue(request);
+    await createTimeOffRequestDal("sick", "2026-03-02", "2026-03-02", 8, null, {
+      memberId: null,
+      approve: false,
+    });
+    expect(mocks.dbCreateTimeOffRequest.mock.calls[0][1]).toBe("admin_1");
+    expect(mocks.dbCreateTimeOffRequest.mock.calls[0][7]).toBeNull();
+    expect(mocks.getProcessedMembers).not.toHaveBeenCalled();
+  });
+
+  it("refuses time off for someone outside the org", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.getProcessedMembers.mockResolvedValue([{ id: "user_1" }]);
+    expect(
+      (
+        await createTimeOffRequestDal(
+          "sick",
+          "2026-03-02",
+          "2026-03-02",
+          8,
+          null,
+          { memberId: "user_9" },
+        )
+      )._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Member not found" });
+  });
+
+  it("words the overlap for another member", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.getProcessedMembers.mockResolvedValue([{ id: "user_1" }]);
+    mocks.dbCreateTimeOffRequest.mockResolvedValue(undefined);
+    expect(
+      (
+        await createTimeOffRequestDal(
+          "sick",
+          "2026-03-02",
+          "2026-03-02",
+          8,
+          null,
+          { memberId: "user_1" },
+        )
+      )._unsafeUnwrapErr(),
+    ).toEqual({ reason: "This member already has time off on those dates" });
   });
 
   it("refuses overlapping time off", async () => {
