@@ -288,7 +288,7 @@ export const manageAlertSettingsInputSchema = z.object({
     .boolean()
     .optional()
     .describe(
-      "Tell members about their weekly schedule and about shifts added, changed or cancelled.",
+      "Tell members about their weekly schedule, remind them an hour before each shift, and tell them about shifts added, changed or cancelled.",
     ),
 });
 
@@ -344,6 +344,20 @@ export const manageLocationSettingsInputSchema = z.object({
     .describe(
       "Geofence radius in meters (default 150 for a new site; omit to keep the current radius).",
     ),
+});
+
+export const manageMemberInputSchema = z.object({
+  org_id: orgIdField,
+  action: z
+    .enum(["set_role", "remove"])
+    .describe(
+      "'set_role' makes a member an admin or a regular member; 'remove' removes them from the organization (their recorded hours are kept). Admin-only.",
+    ),
+  member: z.string().describe("The member's name, email, or user_id."),
+  role: z
+    .enum(["org:member", "org:admin", "member", "admin"])
+    .optional()
+    .describe("For 'set_role': the new role."),
 });
 
 /* ---------------------------------------------------------- helpers -- */
@@ -1271,6 +1285,73 @@ export async function manageLocationSettingsTool(
       status: "updated",
       organization: orgInfo(org),
       site: updated ? formatSite(updated) : null,
+    },
+  };
+}
+
+/* ----------------------------------------------------------- members -- */
+
+/**
+ * Change a member's role or remove them, as admins can from the app's
+ * organization settings. An admin can't change or remove themselves here,
+ * so an organization is never left without an admin by accident.
+ */
+export async function manageMemberTool(
+  caller: McpCaller,
+  input: z.infer<typeof manageMemberInputSchema>,
+): Promise<ToolResult> {
+  const orgRes = await resolveOrg(caller.userId, input.org_id);
+  if (!orgRes.ok) return orgRes.result;
+  const { org } = orgRes;
+  if (!org.isAdmin) return forbidden("change roles or remove members");
+
+  const targetRes = await resolveTarget(caller, org, input.member);
+  if (!targetRes.ok) return targetRes.result;
+  const { member } = targetRes;
+  if (member.userId === caller.userId) {
+    return invalid(
+      "You can't change your own role or remove yourself here. Ask another admin, or do it in the Clock Out app.",
+    );
+  }
+
+  const client = await clerkClient();
+  if (input.action === "remove") {
+    await client.organizations.deleteOrganizationMembership({
+      organizationId: org.orgId,
+      userId: member.userId,
+    });
+    return {
+      summary: `Removed ${member.name} from ${org.orgName}. Their recorded hours are kept.`,
+      data: {
+        status: "removed",
+        organization: orgInfo(org),
+        member: { user_id: member.userId, name: member.name },
+      },
+    };
+  }
+
+  if (!input.role) return invalid("Pass role: 'org:admin' or 'org:member'.");
+  const role =
+    input.role === "admin" || input.role === "org:admin"
+      ? "org:admin"
+      : "org:member";
+  if (member.role === role) {
+    return {
+      summary: `${member.name} is already ${role === "org:admin" ? "an admin" : "a member"}.`,
+      data: { status: "unchanged", role },
+    };
+  }
+  await client.organizations.updateOrganizationMembership({
+    organizationId: org.orgId,
+    userId: member.userId,
+    role,
+  });
+  return {
+    summary: `${member.name} is now ${role === "org:admin" ? "an admin" : "a regular member"} of ${org.orgName}.`,
+    data: {
+      status: "updated",
+      organization: orgInfo(org),
+      member: { user_id: member.userId, name: member.name, role },
     },
   };
 }

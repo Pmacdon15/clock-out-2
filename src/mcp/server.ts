@@ -5,6 +5,8 @@ import {
   manageAlertSettingsTool,
   manageLocationSettingsInputSchema,
   manageLocationSettingsTool,
+  manageMemberInputSchema,
+  manageMemberTool,
   manageOvertimeSettingsInputSchema,
   manageOvertimeSettingsTool,
   manageScheduleInputSchema,
@@ -13,6 +15,10 @@ import {
   manageTimeOffTool,
 } from "@/mcp/admin-tools";
 import { MCP_INSTRUCTIONS } from "@/mcp/instructions";
+import {
+  manageNotificationPreferencesInputSchema,
+  manageNotificationPreferencesTool,
+} from "@/mcp/notification-tools";
 import { portable } from "@/mcp/portable-schema";
 import {
   addTimeEntryInputSchema,
@@ -593,6 +599,46 @@ export function registerClockOutTools(server: McpServer) {
     (args, ctx) =>
       run(server, ctx.http?.authInfo, (caller) =>
         manageLocationSettingsTool(caller, args),
+      ),
+  );
+
+  server.registerTool(
+    "manage_notification_preferences",
+    {
+      title: "View or update your own notification settings",
+      description:
+        "Views or updates your personal notification settings: email and push on/off, which alerts you get (shift alerts, break reminders, admin alerts, schedule notices and shift reminders), and your timezone for alert wording. Also sends you a test notification (action: 'send_test'). These settings are personal and shared across your organizations; nobody can change someone else's.",
+      inputSchema: portable(manageNotificationPreferencesInputSchema),
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+    },
+    (args, ctx) =>
+      run(server, ctx.http?.authInfo, (caller) =>
+        manageNotificationPreferencesTool(caller, args),
+      ),
+  );
+
+  server.registerTool(
+    "manage_member",
+    {
+      title: "Change a member's role or remove them",
+      description:
+        "Admin tool ('org:admin') to make a member an admin or a regular member (action: 'set_role' with role) or remove them from the organization (action: 'remove'; their recorded hours are kept). You can't change or remove yourself. Only call this when the admin explicitly asks.",
+      inputSchema: portable(manageMemberInputSchema),
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    (args, ctx) =>
+      run(server, ctx.http?.authInfo, (caller) =>
+        manageMemberTool(caller, args),
       ),
   );
 }

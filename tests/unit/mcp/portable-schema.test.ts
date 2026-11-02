@@ -5,14 +5,17 @@ vi.mock("@/lib/reports", () => ({}));
 vi.mock("@/lib/db", () => ({}));
 vi.mock("@/lib/alerts-db", () => ({}));
 vi.mock("@/lib/schedule-notify", () => ({}));
+vi.mock("@/lib/notify", () => ({}));
 
 import {
   manageAlertSettingsInputSchema,
   manageLocationSettingsInputSchema,
+  manageMemberInputSchema,
   manageOvertimeSettingsInputSchema,
   manageScheduleInputSchema,
   manageTimeOffInputSchema,
 } from "@/mcp/admin-tools";
+import { manageNotificationPreferencesInputSchema } from "@/mcp/notification-tools";
 import { portable, toPortableJsonSchema } from "@/mcp/portable-schema";
 import {
   addTimeEntryInputSchema,
@@ -87,6 +90,8 @@ describe("portable JSON schema", () => {
     manage_overtime_settings: manageOvertimeSettingsInputSchema,
     manage_alert_settings: manageAlertSettingsInputSchema,
     manage_location_settings: manageLocationSettingsInputSchema,
+    manage_notification_preferences: manageNotificationPreferencesInputSchema,
+    manage_member: manageMemberInputSchema,
   };
 
   for (const [name, schema] of Object.entries(schemas)) {

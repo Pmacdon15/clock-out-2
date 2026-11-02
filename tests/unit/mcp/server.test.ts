@@ -105,6 +105,7 @@ vi.mock("@/mcp/db", () => ({
 vi.mock("@/lib/db", () => ({}));
 vi.mock("@/lib/alerts-db", () => ({}));
 vi.mock("@/lib/schedule-notify", () => ({}));
+vi.mock("@/lib/notify", () => ({}));
 
 vi.mock("@/lib/utils-clerk", () => ({
   isOverMemberShipLimit: vi.fn(async () => false),
@@ -190,6 +191,8 @@ describe("Clock Out MCP server", () => {
       "manage_break_settings",
       "manage_breaks",
       "manage_location_settings",
+      "manage_member",
+      "manage_notification_preferences",
       "manage_overtime_settings",
       "manage_reporting_settings",
       "manage_schedule",

@@ -4,6 +4,8 @@ const m = vi.hoisted(() => ({
   getUserOrgMemberships: vi.fn(),
   getOrgMemberships: vi.fn(),
   getBillingSubscription: vi.fn(),
+  updateMembership: vi.fn(),
+  deleteMembership: vi.fn(),
   revalidateTag: vi.fn(),
   notifyScheduleChange: vi.fn(async () => true),
   dbGetScheduledShifts: vi.fn(async () => [] as unknown[]),
@@ -34,7 +36,11 @@ const m = vi.hoisted(() => ({
 vi.mock("@clerk/nextjs/server", () => ({
   clerkClient: vi.fn(async () => ({
     users: { getOrganizationMembershipList: m.getUserOrgMemberships },
-    organizations: { getOrganizationMembershipList: m.getOrgMemberships },
+    organizations: {
+      getOrganizationMembershipList: m.getOrgMemberships,
+      updateOrganizationMembership: m.updateMembership,
+      deleteOrganizationMembership: m.deleteMembership,
+    },
     billing: { getOrganizationBillingSubscription: m.getBillingSubscription },
   })),
 }));
@@ -79,6 +85,7 @@ vi.mock("@/lib/db", () => ({
 import {
   manageAlertSettingsTool,
   manageLocationSettingsTool,
+  manageMemberTool,
   manageOvertimeSettingsTool,
   manageScheduleTool,
   manageTimeOffTool,
@@ -569,5 +576,63 @@ describe("manage_location_settings", () => {
     });
     expect(res.data.status).toBe("forbidden");
     expect(m.dbDeleteSite).not.toHaveBeenCalled();
+  });
+});
+
+describe("manage_member", () => {
+  it("promotes a member to admin", async () => {
+    const res = await manageMemberTool(admin, {
+      action: "set_role",
+      member: "Sam",
+      role: "admin",
+    });
+    expect(res.data.status).toBe("updated");
+    expect(m.updateMembership).toHaveBeenCalledWith({
+      organizationId: "org_1",
+      userId: "user_sam",
+      role: "org:admin",
+    });
+  });
+
+  it("leaves a role that is already set", async () => {
+    const res = await manageMemberTool(admin, {
+      action: "set_role",
+      member: "Sam",
+      role: "org:member",
+    });
+    expect(res.data.status).toBe("unchanged");
+    expect(m.updateMembership).not.toHaveBeenCalled();
+  });
+
+  it("removes a member", async () => {
+    const res = await manageMemberTool(admin, {
+      action: "remove",
+      member: "sam@example.com",
+    });
+    expect(res.data.status).toBe("removed");
+    expect(m.deleteMembership).toHaveBeenCalledWith({
+      organizationId: "org_1",
+      userId: "user_sam",
+    });
+  });
+
+  it("won't change or remove the calling admin", async () => {
+    const res = await manageMemberTool(admin, {
+      action: "remove",
+      member: "Pat",
+    });
+    expect(res.data.status).toBe("invalid_input");
+    expect(m.deleteMembership).not.toHaveBeenCalled();
+  });
+
+  it("forbids members", async () => {
+    asRole("org:member");
+    const res = await manageMemberTool(member, {
+      action: "set_role",
+      member: "Pat",
+      role: "member",
+    });
+    expect(res.data.status).toBe("forbidden");
+    expect(m.updateMembership).not.toHaveBeenCalled();
   });
 });

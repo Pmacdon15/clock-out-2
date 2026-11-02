@@ -96,6 +96,7 @@ import {
   invalidateReportingSettingsCache,
   invalidateTimeEntryCache,
 } from "@/mcp/db";
+import { describeExtras, loadHoursExtras } from "@/mcp/hours-extras";
 
 export type McpCaller = {
   userId: string;
@@ -2399,6 +2400,14 @@ export async function getWeeklyTimecardTool(
     entriesByUser.set(entry.user_id, list);
   }
 
+  const extrasFor = await loadHoursExtras(
+    org.orgId,
+    entries,
+    formatInTimeZone(startDate, tz, "yyyy-MM-dd"),
+    formatInTimeZone(endDate, tz, "yyyy-MM-dd"),
+    tz,
+  );
+
   let orgTotalMs = 0;
   const timecards = targetMembers.map((m) => {
     const userEntries = (entriesByUser.get(m.userId) ?? []).sort(
@@ -2463,6 +2472,7 @@ export async function getWeeklyTimecardTool(
       days_worked: dailyBreakdown.length,
       shifts_count: userEntries.length,
       active_shifts: activeShifts,
+      ...extrasFor(m.userId),
       daily_breakdown: dailyBreakdown,
     };
   });
@@ -2471,7 +2481,7 @@ export async function getWeeklyTimecardTool(
 
   const summary =
     timecards.length === 1 && timecards[0]
-      ? `Weekly timecard for ${timecards[0].name} (${periodLabel}): ${timecards[0].formatted_total} across ${timecards[0].days_worked} day${timecards[0].days_worked === 1 ? "" : "s"} (${timecards[0].shifts_count} shift${timecards[0].shifts_count === 1 ? "" : "s"}).`
+      ? `Weekly timecard for ${timecards[0].name} (${periodLabel}): ${timecards[0].formatted_total} across ${timecards[0].days_worked} day${timecards[0].days_worked === 1 ? "" : "s"} (${timecards[0].shifts_count} shift${timecards[0].shifts_count === 1 ? "" : "s"})${describeExtras(timecards[0])}.`
       : `Weekly timecard for ${org.orgName} (${periodLabel}): ${orgTotalDur.formatted} total across ${timecards.length} members (${timecards.map((t) => `${t.name}: ${t.formatted_total}`).join(", ")}).`;
 
   return {
@@ -4156,6 +4166,14 @@ export async function runHoursReportTool(
     entriesByUser.set(entry.user_id, list);
   }
 
+  const extrasFor = await loadHoursExtras(
+    org.orgId,
+    entries,
+    startStr,
+    endStr,
+    tz,
+  );
+
   let orgNetMs = 0;
   const reports = targetMembers.map((m) => {
     const userEntries = (entriesByUser.get(m.userId) ?? []).sort(
@@ -4221,6 +4239,7 @@ export async function runHoursReportTool(
       days_worked: days.size,
       shifts_count: userEntries.length,
       active_shifts: activeShifts,
+      ...extrasFor(m.userId),
       daily_breakdown: Array.from(days.values()).map((d) => {
         const dayDur = formatDurationMs(d.netMs);
         return {
@@ -4280,7 +4299,7 @@ export async function runHoursReportTool(
   const periodLabel = `${startStr} to ${endStr}`;
   const hoursSummary =
     reports.length === 1 && reports[0]
-      ? `${reports[0].name} worked ${reports[0].formatted_total} (${reports[0].total_hours}h) from ${periodLabel} across ${reports[0].days_worked} day${reports[0].days_worked === 1 ? "" : "s"}.`
+      ? `${reports[0].name} worked ${reports[0].formatted_total} (${reports[0].total_hours}h) from ${periodLabel} across ${reports[0].days_worked} day${reports[0].days_worked === 1 ? "" : "s"}${describeExtras(reports[0])}.`
       : `Hours report for ${org.orgName} (${periodLabel}): ${orgNet.formatted} total — ${reports.map((r) => `${r.name}: ${r.formatted_total}`).join(", ")}.`;
 
   let emailSummary = "";
