@@ -1,5 +1,17 @@
 import type { AuthInfo, McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
+import {
+  manageAlertSettingsInputSchema,
+  manageAlertSettingsTool,
+  manageLocationSettingsInputSchema,
+  manageLocationSettingsTool,
+  manageOvertimeSettingsInputSchema,
+  manageOvertimeSettingsTool,
+  manageScheduleInputSchema,
+  manageScheduleTool,
+  manageTimeOffInputSchema,
+  manageTimeOffTool,
+} from "@/mcp/admin-tools";
 import { MCP_INSTRUCTIONS } from "@/mcp/instructions";
 import { portable } from "@/mcp/portable-schema";
 import {
@@ -481,6 +493,106 @@ export function registerClockOutTools(server: McpServer) {
     (args, ctx) =>
       run(server, ctx.http?.authInfo, (caller) =>
         inviteMemberTool(caller, args),
+      ),
+  );
+
+  server.registerTool(
+    "manage_schedule",
+    {
+      title: "View, schedule, change, or cancel shifts",
+      description:
+        "Lists scheduled shifts with how each went (on time, late, not clocked in, no-show), or, for admins ('org:admin'), schedules a shift for any member (action: 'create' with member, date, start_time, end_time, optional note), moves a shift or changes its note (action: 'update' with shift_id), or cancels a shift (action: 'cancel' with shift_id, or member and date). Shifts can't be scheduled on a member's approved time off, and the member is notified of changes when schedule notices are on. Members can list only their own shifts. Only change or cancel a shift when the user explicitly asks.",
+      inputSchema: portable(manageScheduleInputSchema),
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+    },
+    (args, ctx) =>
+      run(server, ctx.http?.authInfo, (caller) =>
+        manageScheduleTool(caller, args),
+      ),
+  );
+
+  server.registerTool(
+    "manage_time_off",
+    {
+      title: "Request, approve, deny, or cancel time off",
+      description:
+        "Lists vacation and sick time off, files a request (action: 'request'), approves or denies a pending request (actions 'approve'/'deny', admin-only), or cancels one (action: 'cancel': members withdraw their own pending requests; admins can also revoke approved time off). Admins ('org:admin') can file time off for any member by passing member, and it is approved right away unless approve: false. Approved time off shows in hours views and reports.",
+      inputSchema: portable(manageTimeOffInputSchema),
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    },
+    (args, ctx) =>
+      run(server, ctx.http?.authInfo, (caller) =>
+        manageTimeOffTool(caller, args),
+      ),
+  );
+
+  server.registerTool(
+    "manage_overtime_settings",
+    {
+      title: "View or update overtime rules",
+      description:
+        "Views or updates the organization's overtime thresholds: hours per day (daily_threshold_hours) and/or per week (weekly_threshold_hours) after which time counts as overtime in timecards, exports and reports. Pass null to turn a threshold off; omitted fields keep their values. Anyone can view; updating is admin-only ('org:admin').",
+      inputSchema: portable(manageOvertimeSettingsInputSchema),
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    (args, ctx) =>
+      run(server, ctx.http?.authInfo, (caller) =>
+        manageOvertimeSettingsTool(caller, args),
+      ),
+  );
+
+  server.registerTool(
+    "manage_alert_settings",
+    {
+      title: "View or update shift alert rules",
+      description:
+        "Views or updates the organization's alert rules: forgot-to-clock-out reminders, automatic clock-out, still-on-break reminders, whether admins are copied, and schedule notices to members. Only the fields passed change. Anyone can view; updating is admin-only ('org:admin').",
+      inputSchema: portable(manageAlertSettingsInputSchema),
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    (args, ctx) =>
+      run(server, ctx.http?.authInfo, (caller) =>
+        manageAlertSettingsTool(caller, args),
+      ),
+  );
+
+  server.registerTool(
+    "manage_location_settings",
+    {
+      title: "View or update location capture, geofencing and work sites",
+      description:
+        "Views the organization's location capture mode ('off', 'optional', 'required'), geofence restriction and work sites, or, for admins ('org:admin') on a plan with Geofencing, changes them (action: 'update' with capture_mode / restrict_clock_in) and adds, edits or deletes work sites (actions 'add_site', 'update_site', 'delete_site'; a site can be given by address or latitude/longitude, with radius_meters).",
+      inputSchema: portable(manageLocationSettingsInputSchema),
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+    },
+    (args, ctx) =>
+      run(server, ctx.http?.authInfo, (caller) =>
+        manageLocationSettingsTool(caller, args),
       ),
   );
 }

@@ -100,6 +100,12 @@ vi.mock("@/mcp/db", () => ({
     mockInvalidateTimeEntryCache(...args),
 }));
 
+// The admin tools (schedule, time off, ...) read the app's database
+// directly; they are covered in admin-tools.test.ts.
+vi.mock("@/lib/db", () => ({}));
+vi.mock("@/lib/alerts-db", () => ({}));
+vi.mock("@/lib/schedule-notify", () => ({}));
+
 vi.mock("@/lib/utils-clerk", () => ({
   isOverMemberShipLimit: vi.fn(async () => false),
 }));
@@ -180,9 +186,14 @@ describe("Clock Out MCP server", () => {
       "list_members",
       "list_organizations",
       "list_time_entries",
+      "manage_alert_settings",
       "manage_break_settings",
       "manage_breaks",
+      "manage_location_settings",
+      "manage_overtime_settings",
       "manage_reporting_settings",
+      "manage_schedule",
+      "manage_time_off",
       "run_hours_report",
       "toggle_break",
       "update_time_entry",
@@ -1068,7 +1079,35 @@ describe("manage_break_settings", () => {
       dock_lunch: false,
       lunch_duration_minutes: 30,
       lunch_min_shift_hours: 5,
+      max_meal_break_minutes: null,
+      max_unpaid_rest_break_minutes: null,
+      max_paid_break_minutes: null,
     });
+  });
+
+  it("lets admins set or clear one break limit and keeps the others", async () => {
+    mockDbGetBreakSettings.mockResolvedValue({
+      org_id: "org_1",
+      dock_lunch: true,
+      lunch_duration_minutes: 30,
+      lunch_min_shift_hours: 5,
+      max_meal_break_minutes: 30,
+      max_unpaid_rest_break_minutes: "15",
+      max_paid_break_minutes: null,
+    } as never);
+    const res = await manageBreakSettingsTool(caller, {
+      action: "update",
+      max_paid_break_minutes: 10,
+      max_meal_break_minutes: null,
+    });
+    expect(res.data.status).toBe("updated");
+    expect(mockDbUpdateBreakSettings).toHaveBeenCalledWith(
+      "org_1",
+      true,
+      30,
+      5,
+      { unpaid_meal: null, unpaid_rest: 15, paid_rest: 10 },
+    );
   });
 
   it("does not require the paid reporting feature", async () => {

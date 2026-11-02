@@ -2,7 +2,17 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/mcp/db", () => ({}));
 vi.mock("@/lib/reports", () => ({}));
+vi.mock("@/lib/db", () => ({}));
+vi.mock("@/lib/alerts-db", () => ({}));
+vi.mock("@/lib/schedule-notify", () => ({}));
 
+import {
+  manageAlertSettingsInputSchema,
+  manageLocationSettingsInputSchema,
+  manageOvertimeSettingsInputSchema,
+  manageScheduleInputSchema,
+  manageTimeOffInputSchema,
+} from "@/mcp/admin-tools";
 import { portable, toPortableJsonSchema } from "@/mcp/portable-schema";
 import {
   addTimeEntryInputSchema,
@@ -72,6 +82,11 @@ describe("portable JSON schema", () => {
     delete_time_entry: deleteTimeEntryInputSchema,
     manage_reporting_settings: manageReportingSettingsInputSchema,
     manage_break_settings: manageBreakSettingsInputSchema,
+    manage_schedule: manageScheduleInputSchema,
+    manage_time_off: manageTimeOffInputSchema,
+    manage_overtime_settings: manageOvertimeSettingsInputSchema,
+    manage_alert_settings: manageAlertSettingsInputSchema,
+    manage_location_settings: manageLocationSettingsInputSchema,
   };
 
   for (const [name, schema] of Object.entries(schemas)) {
