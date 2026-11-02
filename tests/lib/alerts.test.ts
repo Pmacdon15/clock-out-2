@@ -110,7 +110,7 @@ describe("validateAlertSettings", () => {
       "Auto clock-out hours must be between",
     ],
     [{ auto_clock_out_hours: Number.NaN }, "Auto clock-out hours"],
-    [{ break_reminder_minutes: 4 }, "Break reminder minutes"],
+    [{ break_reminder_minutes: 0 }, "Break reminder minutes"],
     [{ break_reminder_minutes: 481 }, "Break reminder minutes"],
     [{ break_reminder_minutes: 30.5 }, "Break reminder minutes"],
     [
