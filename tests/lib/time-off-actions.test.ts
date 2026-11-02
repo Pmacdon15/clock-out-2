@@ -44,6 +44,26 @@ describe("time off actions", () => {
     expect(mocks.updateTag).toHaveBeenCalledWith("time-off-org_1");
   });
 
+  it("passes an admin's member and approval through", async () => {
+    mocks.createTimeOffRequestDal.mockResolvedValue(ok(request));
+    await createTimeOffRequestAction(
+      "sick",
+      "2026-03-02",
+      "2026-03-02",
+      8,
+      null,
+      { memberId: "user_1", approve: true },
+    );
+    expect(mocks.createTimeOffRequestDal).toHaveBeenCalledWith(
+      "sick",
+      "2026-03-02",
+      "2026-03-02",
+      8,
+      null,
+      { memberId: "user_1", approve: true },
+    );
+  });
+
   it("reviews a request", async () => {
     mocks.reviewTimeOffRequestDal.mockResolvedValue(ok(request));
     await expect(reviewTimeOffRequestAction(3, "approved")).resolves.toEqual({

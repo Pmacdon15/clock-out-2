@@ -55,7 +55,7 @@ export function formatShiftRange(
   return `${from} – ${to}${known ? "" : ` ${tz}`}`;
 }
 
-export type ScheduleChange = "added" | "removed";
+export type ScheduleChange = "added" | "changed" | "removed";
 
 export function describeShiftChange(
   change: ScheduleChange,
@@ -67,6 +67,14 @@ export function describeShiftChange(
   const day = formatInTimeZone(start, zone.tz, "EEE, MMM d");
   const range = formatShiftRange(start, end, zone);
   const note = shift.note ? ` Note: ${shift.note}` : "";
+  if (change === "changed") {
+    return {
+      title: `Shift changed: ${day}`,
+      body: `Your shift is now ${range}.${note}`,
+      url: SCHEDULE_URL,
+      tag: `shift-changed:${shift.id}`,
+    };
+  }
   return change === "added"
     ? {
         title: `New shift: ${day}`,
@@ -83,7 +91,7 @@ export function describeShiftChange(
 }
 
 /**
- * Tells a member that an admin added or removed one of their upcoming
+ * Tells a member that an admin added, changed or removed one of their upcoming
  * shifts. Runs after the admin's request has been answered (`after()`), so
  * it never slows the schedule down and never throws.
  *

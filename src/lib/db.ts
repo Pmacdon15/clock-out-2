@@ -945,6 +945,33 @@ export async function dbCreateScheduledShift(
   return created as unknown as ScheduledShift;
 }
 
+export async function dbGetScheduledShiftById(id: number, orgId: string) {
+  await ensureScheduledShiftsTable();
+  const [row] = await sql`
+		SELECT * FROM scheduled_shifts WHERE id = ${id} AND org_id = ${orgId}
+	`;
+  return row as unknown as ScheduledShift | undefined;
+}
+
+/** Moves a shift to new times and/or changes its note. */
+export async function dbUpdateScheduledShift(
+  id: number,
+  orgId: string,
+  shiftStart: Date,
+  shiftEnd: Date,
+  note: string | null,
+) {
+  await ensureScheduledShiftsTable();
+  const [updated] = await sql`
+		UPDATE scheduled_shifts
+		SET shift_start = ${shiftStart}, shift_end = ${shiftEnd},
+			note = ${note}, updated_at = NOW()
+		WHERE id = ${id} AND org_id = ${orgId}
+		RETURNING *
+	`;
+  return updated as unknown as ScheduledShift | undefined;
+}
+
 export async function dbDeleteScheduledShift(id: number, orgId: string) {
   await ensureScheduledShiftsTable();
   const [deleted] = await sql`
@@ -1055,7 +1082,8 @@ export async function dbGetApprovedTimeOffForPeriod(
 /**
  * Files a pending request, unless it overlaps one of the member's pending or
  * approved requests (returns undefined then). The advisory lock stops two
- * overlapping requests sent together from both getting in.
+ * overlapping requests sent together from both getting in. With
+ * `approvedBy` (an admin's user id) it is filed already approved.
  */
 export async function dbCreateTimeOffRequest(
   orgId: string,
@@ -1065,15 +1093,18 @@ export async function dbCreateTimeOffRequest(
   endDate: string,
   hoursPerDay: number,
   note: string | null,
+  approvedBy: string | null = null,
 ) {
   await ensureTimeOffTable();
   const [, inserted] = await sql.transaction([
     sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${userId}:${orgId}:time-off`}::text, 0))`,
     sql`
 		INSERT INTO time_off_requests
-			(org_id, user_id, request_type, start_date, end_date, hours_per_day, note)
+			(org_id, user_id, request_type, start_date, end_date, hours_per_day, note,
+			status, reviewed_by, reviewed_at)
 		SELECT ${orgId}, ${userId}, ${type}, ${startDate}::DATE, ${endDate}::DATE,
-			${hoursPerDay}, ${note}
+			${hoursPerDay}, ${note}, ${approvedBy ? "approved" : "pending"},
+			${approvedBy}, ${approvedBy ? new Date() : null}
 		WHERE NOT EXISTS (
 			SELECT 1 FROM time_off_requests
 			WHERE user_id = ${userId} AND org_id = ${orgId}

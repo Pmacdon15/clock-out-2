@@ -123,6 +123,15 @@ describe("describeShiftChange", () => {
     });
   });
 
+  it("announces a changed shift with its new times", () => {
+    expect(describeShiftChange("changed", s, REGINA)).toEqual({
+      title: "Shift changed: Mon, Nov 2",
+      body: "Your shift is now Mon, Nov 2, 9:00 AM – 5:00 PM. Note: Front desk",
+      url: "/?defaultTab=schedule",
+      tag: "shift-changed:7",
+    });
+  });
+
   it("announces a removed shift", () => {
     expect(
       describeShiftChange("removed", { ...s, note: null }, REGINA),

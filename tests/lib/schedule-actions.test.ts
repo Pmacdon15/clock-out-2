@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   updateTag: vi.fn(),
   createScheduledShiftDal: vi.fn(),
   deleteScheduledShiftDal: vi.fn(),
+  updateScheduledShiftDal: vi.fn(),
   after: vi.fn((fn: () => unknown) => fn()),
   notifyScheduleChange: vi.fn(),
 }));
@@ -21,11 +22,13 @@ vi.mock("@/lib/reports", () => ({}));
 vi.mock("@/lib/dal", () => ({
   createScheduledShiftDal: mocks.createScheduledShiftDal,
   deleteScheduledShiftDal: mocks.deleteScheduledShiftDal,
+  updateScheduledShiftDal: mocks.updateScheduledShiftDal,
 }));
 
 import {
   createScheduledShiftAction,
   deleteScheduledShiftAction,
+  updateScheduledShiftAction,
 } from "@/lib/actions";
 
 const shift = { id: 1, org_id: "org_1", user_id: "user_1" };
@@ -90,5 +93,43 @@ describe("deleteScheduledShiftAction", () => {
       success: false,
       error: "nope",
     });
+  });
+});
+
+describe("updateScheduledShiftAction", () => {
+  it("parses the times, revalidates and tells the member", async () => {
+    mocks.updateScheduledShiftDal.mockResolvedValue(ok(shift));
+    await expect(
+      updateScheduledShiftAction(
+        1,
+        "2026-01-06T09:00:00.000Z",
+        "2026-01-06T17:00:00.000Z",
+        "Desk",
+        "UTC",
+        { start: "2026-01-06", end: "2026-01-06" },
+      ),
+    ).resolves.toEqual({ success: true, data: shift });
+    expect(mocks.updateScheduledShiftDal).toHaveBeenCalledWith(
+      1,
+      new Date("2026-01-06T09:00:00.000Z"),
+      new Date("2026-01-06T17:00:00.000Z"),
+      "Desk",
+      { start: "2026-01-06", end: "2026-01-06" },
+    );
+    expect(mocks.updateTag).toHaveBeenCalledWith("scheduled-shifts-org_1");
+    expect(mocks.notifyScheduleChange).toHaveBeenCalledWith(
+      "changed",
+      shift,
+      "UTC",
+    );
+  });
+
+  it("returns the error", async () => {
+    mocks.updateScheduledShiftDal.mockResolvedValue(err({ reason: "nope" }));
+    await expect(updateScheduledShiftAction(1, "a", "b")).resolves.toEqual({
+      success: false,
+      error: "nope",
+    });
+    expect(mocks.notifyScheduleChange).not.toHaveBeenCalled();
   });
 });
