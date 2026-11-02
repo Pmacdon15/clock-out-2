@@ -128,6 +128,15 @@ describe("Tabs", () => {
     expect(screen.getByText("Panel A")).toBeInTheDocument();
   });
 
+  it("keeps a long tab row inside narrow screens by scrolling it", () => {
+    render(<TabsExample defaultValue="a" />);
+    const list = screen.getByRole("button", { name: "A" }).parentElement;
+    // Without these the row widens the whole page on phones.
+    expect(list).toHaveClass("max-w-full", "overflow-x-auto", "justify-start");
+    expect(list).not.toHaveClass("justify-center");
+    expect(screen.getByRole("button", { name: "A" })).toHaveClass("shrink-0");
+  });
+
   it("shows nothing when no tab is selected", () => {
     render(<TabsExample />);
     expect(screen.queryByText(/Panel/)).not.toBeInTheDocument();
