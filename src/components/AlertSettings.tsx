@@ -8,6 +8,7 @@ import {
   TimerOff,
   Users,
 } from "lucide-react";
+import Link from "next/link";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { updateAlertSettingsAction } from "@/lib/alert-actions";
@@ -21,6 +22,11 @@ import { Button, Card } from "./ui";
 
 interface AlertSettingsProps {
   initialData: AlertSettingsData | null;
+  /**
+   * False when the org's plan does not include the `notifications` feature:
+   * automatic clock-out still works, but no reminders are sent.
+   */
+  hasNotifications?: boolean;
 }
 
 const inputClass =
@@ -75,7 +81,10 @@ function Rule({
  * "still on break" reminders. Long-running shifts otherwise inflate totals
  * silently, so every rule here acts on its own, from the server.
  */
-export default function AlertSettings({ initialData }: AlertSettingsProps) {
+export default function AlertSettings({
+  initialData,
+  hasNotifications = false,
+}: AlertSettingsProps) {
   const [saved, setSaved] = useState<AlertSettingsInput>(() =>
     normalizeAlertSettings(initialData),
   );
@@ -113,6 +122,21 @@ export default function AlertSettings({ initialData }: AlertSettingsProps) {
           email, push or both under Notifications.
         </p>
       </div>
+
+      {!hasNotifications && (
+        <div
+          className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border-2 border-amber-300 bg-amber-50 p-4 text-amber-900 text-sm dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+          data-testid="notifications-upgrade"
+        >
+          <p>
+            Reminders and schedule notices are only sent on paid plans.
+            Automatic clock-out still works on every plan.
+          </p>
+          <Link href="/plans">
+            <Button variant="outline">View Plans</Button>
+          </Link>
+        </div>
+      )}
 
       <div className="space-y-4">
         <Rule

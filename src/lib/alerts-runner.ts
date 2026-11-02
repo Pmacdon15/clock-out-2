@@ -16,6 +16,7 @@ import {
   dbGetOpenShifts,
   type OpenShiftBreak,
 } from "./alerts-db";
+import { createFeatureCheck, NOTIFICATIONS_FEATURE } from "./billing";
 import { getBreakLimits } from "./break-utils";
 import { fetchAllPages } from "./clerk-pagination";
 import { dbGetBreakSettings } from "./db";
@@ -107,10 +108,15 @@ export function buildDeliveries(
   return deliveries;
 }
 
-/** Runs one org's rules: close what ran too long, then send what's due. */
+/**
+ * Runs one org's rules: close what ran too long, then send what's due.
+ * With `notify` false (no paid `notifications` feature) shifts are still
+ * closed, but no alert is sent.
+ */
 export async function processOrgAlerts(
   row: AlertSettingsData,
   now: Date,
+  notify = true,
 ): Promise<OrgAlertResult> {
   const orgId = row.org_id;
   const settings = normalizeAlertSettings(row);
@@ -131,7 +137,7 @@ export async function processOrgAlerts(
     shifts,
     breaks,
     now,
-  });
+  }).filter((alert) => notify || alert.kind === "auto_clock_out");
   const result = {
     orgId,
     status: "ok" as const,
@@ -155,6 +161,7 @@ export async function processOrgAlerts(
       revalidateTag(`org-time-entries-${orgId}`, { expire: 0 });
     }
 
+    if (!notify) continue;
     if (!(await dbClaimAlert(alert.key, orgId))) continue;
 
     const counts = await deliver(
@@ -170,16 +177,22 @@ export async function processOrgAlerts(
 
 /**
  * One pass of the shift-alert cron over every org with a rule switched on.
- * A failure in one org is logged and reported, and never stops the others.
+ * Orgs without the paid `notifications` feature still get auto clock-outs,
+ * but nobody is emailed or pushed. A failure in one org is logged and
+ * reported, and never stops the others.
  */
 export async function runShiftAlerts(
   now: Date = new Date(),
+  hasNotifications: (orgId: string) => Promise<boolean> = createFeatureCheck(
+    NOTIFICATIONS_FEATURE,
+  ),
 ): Promise<OrgAlertResult[]> {
   const rows = await dbGetActiveAlertSettings();
   const results: OrgAlertResult[] = [];
   for (const row of rows) {
     try {
-      results.push(await processOrgAlerts(row, now));
+      const notify = await hasNotifications(row.org_id);
+      results.push(await processOrgAlerts(row, now, notify));
     } catch (error) {
       console.error(`[Alerts] Failed for org ${row.org_id}:`, error);
       results.push({ orgId: row.org_id, status: "error" });

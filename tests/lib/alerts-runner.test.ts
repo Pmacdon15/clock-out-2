@@ -237,6 +237,27 @@ describe("processOrgAlerts", () => {
     expect(mocks.deliver).toHaveBeenCalledTimes(2);
   });
 
+  it("still closes long shifts but sends nothing without the notifications feature", async () => {
+    mocks.dbGetBreakSettings.mockResolvedValue(undefined);
+    mocks.dbGetOpenShiftBreaks.mockResolvedValue([]);
+    mocks.dbGetOpenShifts.mockResolvedValue([
+      { id: 1, user_id: "u1", org_id: "org_1", clock_in: ago(17 * HOUR) },
+      { id: 3, user_id: "u1", org_id: "org_1", clock_in: ago(11 * HOUR) },
+    ]);
+    mocks.dbAutoClockOut.mockResolvedValue({ id: 1, user_id: "u1" });
+    await expect(processOrgAlerts(settings, now, false)).resolves.toEqual({
+      orgId: "org_1",
+      status: "ok",
+      alerts: 0,
+      autoClockOuts: 1,
+      emails: 0,
+      pushes: 0,
+    });
+    expect(mocks.dbAutoClockOut).toHaveBeenCalledTimes(1);
+    expect(mocks.dbClaimAlert).not.toHaveBeenCalled();
+    expect(mocks.deliver).not.toHaveBeenCalled();
+  });
+
   it("skips break lookups when break reminders are off and survives missing break settings", async () => {
     mocks.dbGetBreakSettings.mockRejectedValue(new Error("db"));
     mocks.dbGetOpenShifts.mockResolvedValue([
@@ -260,7 +281,9 @@ describe("runShiftAlerts", () => {
     mocks.dbGetOpenShifts
       .mockResolvedValueOnce([])
       .mockRejectedValueOnce(new Error("boom"));
-    const results = await runShiftAlerts(now);
+    const hasNotifications = vi.fn(async () => true);
+    const results = await runShiftAlerts(now, hasNotifications);
+    expect(hasNotifications).toHaveBeenCalledWith("org_1");
     expect(results).toEqual([
       expect.objectContaining({ orgId: "org_1", status: "ok" }),
       { orgId: "org_2", status: "error" },

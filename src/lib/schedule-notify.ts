@@ -12,6 +12,11 @@ import {
   dbGetScheduledShiftsBetween,
 } from "./alerts-db";
 import { loadOrgMembers, type OrgMember } from "./alerts-runner";
+import {
+  createFeatureCheck,
+  NOTIFICATIONS_FEATURE,
+  orgHasFeature,
+} from "./billing";
 import { deliver } from "./notify";
 import type { ScheduledShift } from "./types";
 
@@ -101,7 +106,8 @@ export function describeShiftChange(
  * it never slows the schedule down and never throws.
  *
  * Skipped for shifts that already ended (tidying up history), for an admin
- * scheduling themselves, and for orgs that switched schedule notices off.
+ * scheduling themselves, for orgs that switched schedule notices off, and
+ * for orgs without the paid `notifications` feature.
  */
 export async function notifyScheduleChange(
   change: ScheduleChange,
@@ -119,6 +125,9 @@ export async function notifyScheduleChange(
       loadOrgMembers(shift.org_id),
     ]);
     if (!normalizeAlertSettings(settingsRows[0]).schedule_notifications) {
+      return false;
+    }
+    if (!(await orgHasFeature(shift.org_id, NOTIFICATIONS_FEATURE))) {
       return false;
     }
     const member = members.find((m) => m.userId === shift.user_id);
@@ -248,6 +257,9 @@ export type DigestRunResult = {
  */
 export async function runWeeklyScheduleDigests(
   now: Date = new Date(),
+  hasNotifications: (orgId: string) => Promise<boolean> = createFeatureCheck(
+    NOTIFICATIONS_FEATURE,
+  ),
 ): Promise<DigestRunResult> {
   const result: DigestRunResult = { digests: 0, emails: 0, pushes: 0 };
   // Far enough ahead to cover next Sunday in any zone.
@@ -274,6 +286,7 @@ export async function runWeeklyScheduleDigests(
       continue;
     }
     try {
+      if (!(await hasNotifications(orgId))) continue;
       const members: OrgMember[] = await loadOrgMembers(orgId);
       for (const digest of due.filter((d) => d.orgId === orgId)) {
         const member = members.find((m) => m.userId === digest.userId);
@@ -360,6 +373,9 @@ export type ReminderRunResult = {
  */
 export async function runUpcomingShiftReminders(
   now: Date = new Date(),
+  hasNotifications: (orgId: string) => Promise<boolean> = createFeatureCheck(
+    NOTIFICATIONS_FEATURE,
+  ),
 ): Promise<ReminderRunResult> {
   const result: ReminderRunResult = { reminders: 0, emails: 0, pushes: 0 };
   const shifts = await dbGetScheduledShiftsBetween(
@@ -385,6 +401,7 @@ export async function runUpcomingShiftReminders(
       continue;
     }
     try {
+      if (!(await hasNotifications(orgId))) continue;
       const [members, open] = await Promise.all([
         loadOrgMembers(orgId),
         dbGetOpenShifts(orgId),

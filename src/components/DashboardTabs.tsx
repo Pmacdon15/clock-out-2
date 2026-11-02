@@ -43,6 +43,7 @@ export default function DashboardTabs({
   isAdminPromise,
   hasReportingPromise,
   hasGeofencingPromise,
+  hasNotificationsPromise,
   userIdPromise,
   orgIdPromise,
 }: DashboardTabsProps) {
@@ -50,6 +51,9 @@ export default function DashboardTabs({
   const hasReporting = use(hasReportingPromise);
   const hasGeofencing = hasGeofencingPromise
     ? use(hasGeofencingPromise)
+    : false;
+  const hasNotifications = hasNotificationsPromise
+    ? use(hasNotificationsPromise)
     : false;
   const isAdmin = use(isAdminPromise);
   const result = use(entriesPromise);
@@ -154,6 +158,7 @@ export default function DashboardTabs({
         <TabsContent className="mt-0" value="notifications">
           <Suspense fallback={<SettingsFallback />}>
             <NotificationSettings
+              hasNotifications={hasNotifications}
               isAdmin={isAdmin}
               settingsPromise={notificationSettingsPromise}
             />
@@ -190,6 +195,7 @@ export default function DashboardTabs({
               alertSettingsPromise={alertSettingsPromise}
               breakSettingsPromise={breakSettingsPromise}
               hasGeofencing={hasGeofencing}
+              hasNotifications={hasNotifications}
               hasReporting={hasReporting}
               locationSettingsPromise={locationSettingsPromise}
               membersPromise={membersPromise}

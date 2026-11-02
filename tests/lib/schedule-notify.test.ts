@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   dbGetOpenShifts: vi.fn(),
   loadOrgMembers: vi.fn(),
   deliver: vi.fn(),
+  orgHasFeature: vi.fn(),
 }));
 
 vi.mock("@/lib/alerts-db", () => ({
@@ -22,6 +23,12 @@ vi.mock("@/lib/alerts-runner", () => ({
   loadOrgMembers: mocks.loadOrgMembers,
 }));
 vi.mock("@/lib/notify", () => ({ deliver: mocks.deliver }));
+vi.mock("@/lib/billing", () => ({
+  NOTIFICATIONS_FEATURE: "notifications",
+  orgHasFeature: mocks.orgHasFeature,
+  createFeatureCheck: () => (orgId: string) =>
+    mocks.orgHasFeature(orgId, "notifications"),
+}));
 
 import {
   DIGEST_HOUR,
@@ -78,6 +85,7 @@ beforeEach(() => {
   mocks.loadOrgMembers.mockResolvedValue([member]);
   mocks.dbGetOpenShifts.mockResolvedValue([]);
   mocks.dbClaimAlert.mockResolvedValue(true);
+  mocks.orgHasFeature.mockResolvedValue(true);
   mocks.deliver.mockResolvedValue({ email: 1, push: 1 });
 });
 
@@ -202,6 +210,15 @@ describe("notifyScheduleChange", () => {
     await expect(
       notifyScheduleChange("added", upcoming, null, now),
     ).resolves.toBe(false);
+    expect(mocks.deliver).not.toHaveBeenCalled();
+  });
+
+  it("sends nothing for an org without the notifications feature", async () => {
+    mocks.orgHasFeature.mockResolvedValue(false);
+    await expect(
+      notifyScheduleChange("added", upcoming, null, now),
+    ).resolves.toBe(false);
+    expect(mocks.orgHasFeature).toHaveBeenCalledWith("org_1", "notifications");
     expect(mocks.deliver).not.toHaveBeenCalled();
   });
 
