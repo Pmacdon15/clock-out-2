@@ -75,7 +75,7 @@ const TOPICS: Toggle[] = [
     key: "schedule_alerts",
     label: "My schedule",
     description:
-      "Your schedule for the coming week (Sunday evening), and shifts added or removed.",
+      "Your schedule for the coming week (Sunday evening), a reminder an hour before each shift, and shifts added or removed.",
   },
   {
     key: "admin_alerts",
