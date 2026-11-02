@@ -190,4 +190,42 @@ describe("TimesheetExport", () => {
       { employee: "Me", ...period },
     );
   });
+
+  it("adds estimated gross pay for members with a rate", () => {
+    render(
+      <TimesheetExport
+        employeeName="Me"
+        entries={[makeEntry({ user_id: "me" })]}
+        payRates={
+          new Map([["me", { hourlyRate: 20, overtimeMultiplier: 1.5 }]])
+        }
+        {...period}
+      />,
+    );
+    expect(screen.getByTestId("export-gross-pay")).toHaveTextContent(
+      "est. $160.00 gross",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "CSV" }));
+    expect(exportTimesheet).toHaveBeenLastCalledWith(
+      "csv",
+      [
+        expect.objectContaining({
+          pay: expect.objectContaining({ grossPay: 160 }),
+        }),
+      ],
+      { employee: "Me", ...period },
+    );
+  });
+
+  it("shows no pay when the member has no rate", () => {
+    render(
+      <TimesheetExport
+        employeeName="Me"
+        entries={[makeEntry({ user_id: "me" })]}
+        payRates={new Map()}
+        {...period}
+      />,
+    );
+    expect(screen.queryByTestId("export-gross-pay")).not.toBeInTheDocument();
+  });
 });

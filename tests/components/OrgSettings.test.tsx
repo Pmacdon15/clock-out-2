@@ -38,6 +38,24 @@ const captured = vi.hoisted(() => ({
   locationProps: [] as CapturedLocationProps[],
   alertProps: [] as { initialData: unknown }[],
   overtimeProps: [] as CapturedOvertimeProps[],
+  payRateProps: [] as {
+    members: { id: string; name: string }[];
+    initialRates: unknown[];
+  }[],
+}));
+
+vi.mock("@/components/PayRateSettings", () => ({
+  default: (props: {
+    members: { id: string; name: string }[];
+    initialRates: unknown[];
+  }) => {
+    captured.payRateProps.push(props);
+    return (
+      <div data-testid="pay-rates">
+        {props.members.length}|{props.initialRates.length}
+      </div>
+    );
+  },
 }));
 
 vi.mock("@/components/AlertSettings", () => ({
@@ -176,6 +194,39 @@ describe("OrgSettings", () => {
       />,
     );
     expect(screen.getByTestId("alerts")).toHaveTextContent("null");
+  });
+
+  it("gives the pay rate card the members and their rates", () => {
+    const members = [{ id: "user_1", name: "Ada" }];
+    const rates = [
+      {
+        org_id: "org_1",
+        user_id: "user_1",
+        hourly_rate: 20,
+        overtime_multiplier: 1.5,
+      },
+    ];
+    const { unmount } = render(
+      <OrgSettings
+        hasReporting={false}
+        membersPromise={resolved(members)}
+        orgSettingsPromise={resolved({ ok: true, value: null })}
+        payRates={rates}
+      />,
+    );
+    expect(captured.payRateProps.at(-1)).toEqual({
+      members,
+      initialRates: rates,
+    });
+    unmount();
+
+    render(
+      <OrgSettings
+        hasReporting={false}
+        orgSettingsPromise={resolved({ ok: true, value: null })}
+      />,
+    );
+    expect(screen.getByTestId("pay-rates")).toHaveTextContent("0|0");
   });
 
   it("leaves the shift alert rules out without a promise", () => {

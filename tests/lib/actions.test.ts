@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   updateBreakSettingsDal: vi.fn(),
   updateLocationSettingsDal: vi.fn(),
   updateOvertimeSettingsDal: vi.fn(),
+  updateMemberPayRateDal: vi.fn(),
   updateReportingSettingsDal: vi.fn(),
   createSiteDal: vi.fn(),
   updateSiteDal: vi.fn(),
@@ -44,6 +45,7 @@ vi.mock("@/lib/dal", () => ({
   updateBreakSettingsDal: mocks.updateBreakSettingsDal,
   updateLocationSettingsDal: mocks.updateLocationSettingsDal,
   updateOvertimeSettingsDal: mocks.updateOvertimeSettingsDal,
+  updateMemberPayRateDal: mocks.updateMemberPayRateDal,
   updateReportingSettingsDal: mocks.updateReportingSettingsDal,
   createSiteDal: mocks.createSiteDal,
   updateSiteDal: mocks.updateSiteDal,
@@ -68,6 +70,7 @@ import {
   updateBreakAction,
   updateBreakSettingAction,
   updateLocationSettingsAction,
+  updateMemberPayRateAction,
   updateOrgSettingAction,
   updateOvertimeSettingsAction,
   updateSiteAction,
@@ -655,6 +658,34 @@ describe("updateOvertimeSettingsAction", () => {
       success: false,
       error: "nope",
     });
+    expect(mocks.updateTag).not.toHaveBeenCalled();
+  });
+});
+
+describe("updateMemberPayRateAction", () => {
+  it("saves the rate and revalidates the org's pay rates", async () => {
+    mocks.updateMemberPayRateDal.mockResolvedValue(
+      ok({ org_id: "org_1", user_id: "user_2", cleared: false }),
+    );
+    await expect(updateMemberPayRateAction("user_2", 20, 1.5)).resolves.toEqual(
+      {
+        success: true,
+        data: { org_id: "org_1", user_id: "user_2", cleared: false },
+      },
+    );
+    expect(mocks.updateMemberPayRateDal).toHaveBeenCalledWith(
+      "user_2",
+      20,
+      1.5,
+    );
+    expect(mocks.updateTag).toHaveBeenCalledWith("pay-rates-org_1");
+  });
+
+  it("returns the failure reason", async () => {
+    mocks.updateMemberPayRateDal.mockResolvedValue(failure);
+    await expect(
+      updateMemberPayRateAction("user_2", null, 1.5),
+    ).resolves.toEqual({ success: false, error: "nope" });
     expect(mocks.updateTag).not.toHaveBeenCalled();
   });
 });

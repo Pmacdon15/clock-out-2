@@ -935,6 +935,57 @@ describe("overtime settings", () => {
   });
 });
 
+describe("pay rates", () => {
+  beforeEach(() => {
+    db.resetPayRatesTableCheck();
+  });
+
+  it("ensurePayRatesTable creates member_pay_rates once", async () => {
+    sql.mockResolvedValue([]);
+    await Promise.all([db.ensurePayRatesTable(), db.ensurePayRatesTable()]);
+    await db.ensurePayRatesTable();
+    expect(sql).toHaveBeenCalledTimes(1);
+    expect(textOf(0)).toContain("CREATE TABLE IF NOT EXISTS member_pay_rates");
+    expect(textOf(0)).toContain("hourly_rate DOUBLE PRECISION NOT NULL");
+    expect(textOf(0)).toContain("PRIMARY KEY (org_id, user_id)");
+  });
+
+  it("ensurePayRatesTable retries after a failure", async () => {
+    sql.mockRejectedValueOnce(new Error("db down"));
+    await expect(db.ensurePayRatesTable()).rejects.toThrow("db down");
+    sql.mockReset();
+    sql.mockResolvedValue([]);
+    await db.ensurePayRatesTable();
+    expect(sql).toHaveBeenCalledTimes(1);
+  });
+
+  it("dbGetPayRates reads the org's rates and tags the cache", async () => {
+    const rows = [{ org_id: "o1", user_id: "u1", hourly_rate: 20 }];
+    sql.mockResolvedValueOnce([]).mockResolvedValueOnce(rows);
+    await expect(db.dbGetPayRates("o1")).resolves.toEqual(rows);
+    expect(textOf(1)).toContain("SELECT * FROM member_pay_rates");
+    expect(valuesOf(1)).toEqual(["o1"]);
+    expect(cacheTag).toHaveBeenCalledWith("pay-rates-o1");
+    expect(cacheLife).toHaveBeenCalledWith("hours");
+  });
+
+  it("dbUpsertPayRate inserts or updates one member's rate", async () => {
+    const row = { org_id: "o1", user_id: "u1", hourly_rate: 20 };
+    sql.mockResolvedValueOnce([]).mockResolvedValueOnce([row]);
+    await expect(db.dbUpsertPayRate("o1", "u1", 20, 1.5)).resolves.toEqual(row);
+    expect(textOf(1)).toContain("INSERT INTO member_pay_rates");
+    expect(textOf(1)).toContain("ON CONFLICT (org_id, user_id)");
+    expect(valuesOf(1)).toEqual(["o1", "u1", 20, 1.5, 20, 1.5]);
+  });
+
+  it("dbDeletePayRate removes one member's rate", async () => {
+    sql.mockResolvedValue([]);
+    await db.dbDeletePayRate("o1", "u1");
+    expect(textOf(1)).toContain("DELETE FROM member_pay_rates");
+    expect(valuesOf(1)).toEqual(["o1", "u1"]);
+  });
+});
+
 describe("scheduled shifts", () => {
   beforeEach(() => {
     db.resetScheduledShiftsTableCheck();

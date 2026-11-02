@@ -7,6 +7,7 @@ import type {
   BreakType,
   LocationSettingsData,
   OvertimeSettingsData,
+  PayRateData,
   ReportingSettingsData,
   ScheduledShift,
   SiteData,
@@ -443,6 +444,80 @@ export async function dbUpdateOvertimeSettings(
 		RETURNING *
 	`;
   return updated as OvertimeSettingsData;
+}
+
+/* -------------------------------------------------------- pay rates -- */
+
+let payRatesTableReady: Promise<void> | null = null;
+
+/**
+ * Production databases that predate `member_pay_rates` in schema.sql don't
+ * have the table, so create it on first use, like the overtime table. Runs
+ * once per server instance; a failure is not cached, so the next call retries.
+ */
+export function ensurePayRatesTable(): Promise<void> {
+  payRatesTableReady ??= (async () => {
+    await sql`
+		CREATE TABLE IF NOT EXISTS member_pay_rates (
+			org_id TEXT NOT NULL,
+			user_id TEXT NOT NULL,
+			hourly_rate DOUBLE PRECISION NOT NULL,
+			overtime_multiplier DOUBLE PRECISION NOT NULL DEFAULT 1.5,
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+			PRIMARY KEY (org_id, user_id)
+		)
+	`;
+  })().catch((error) => {
+    payRatesTableReady = null;
+    throw error;
+  });
+  return payRatesTableReady;
+}
+
+/** Test-only: forget that the table check ran. */
+export function resetPayRatesTableCheck() {
+  payRatesTableReady = null;
+}
+
+export async function dbGetPayRates(orgId: string) {
+  "use cache";
+  cacheTag(`pay-rates-${orgId}`);
+  cacheLife("hours");
+  await ensurePayRatesTable();
+  const rows = await sql`
+		SELECT * FROM member_pay_rates WHERE org_id = ${orgId}
+	`;
+  return rows as PayRateData[];
+}
+
+export async function dbUpsertPayRate(
+  orgId: string,
+  userId: string,
+  hourlyRate: number,
+  overtimeMultiplier: number,
+) {
+  await ensurePayRatesTable();
+  const [updated] = await sql`
+		INSERT INTO member_pay_rates (
+			org_id, user_id, hourly_rate, overtime_multiplier, updated_at
+		)
+		VALUES (${orgId}, ${userId}, ${hourlyRate}, ${overtimeMultiplier}, NOW())
+		ON CONFLICT (org_id, user_id)
+		DO UPDATE SET
+            hourly_rate = ${hourlyRate},
+            overtime_multiplier = ${overtimeMultiplier},
+            updated_at = NOW()
+		RETURNING *
+	`;
+  return updated as PayRateData;
+}
+
+export async function dbDeletePayRate(orgId: string, userId: string) {
+  await ensurePayRatesTable();
+  await sql`
+		DELETE FROM member_pay_rates
+		WHERE org_id = ${orgId} AND user_id = ${userId}
+	`;
 }
 
 /* ----------------------------------------------------------- breaks -- */

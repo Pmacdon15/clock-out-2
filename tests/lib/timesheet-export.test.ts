@@ -350,7 +350,7 @@ describe("XLSX output", () => {
       "xl/worksheets/sheet1.xml",
     ]);
     expect(files["xl/workbook.xml"]).toContain('<sheet name="Timesheet"');
-    expect(files["xl/styles.xml"]).toContain('<cellXfs count="6">');
+    expect(files["xl/styles.xml"]).toContain('<cellXfs count="8">');
     expect(files["xl/worksheets/sheet1.xml"]).toBe(
       buildSheetXml([row()], meta),
     );

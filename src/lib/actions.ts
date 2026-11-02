@@ -26,6 +26,7 @@ import {
   updateTimeEntry as dalUpdateTimeEntry,
   updateBreakSettingsDal,
   updateLocationSettingsDal,
+  updateMemberPayRateDal,
   updateOvertimeSettingsDal,
   updateReportingSettingsDal,
 } from "./dal";
@@ -524,4 +525,26 @@ export async function setTimeOffAllowanceAction(
   ptoDays: number | null,
 ) {
   return timeOffResult(await dalSetTimeOffAllowance(memberId, ptoDays));
+}
+
+export async function updateMemberPayRateAction(
+  memberId: string,
+  hourlyRate: number | null,
+  overtimeMultiplier: number,
+) {
+  const result = await updateMemberPayRateDal(
+    memberId,
+    hourlyRate,
+    overtimeMultiplier,
+  );
+
+  return result.match(
+    (rate) => {
+      updateTag(`pay-rates-${rate.org_id}`);
+      return { success: true, data: rate };
+    },
+    (err) => {
+      return { success: false, error: err.reason };
+    },
+  );
 }

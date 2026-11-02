@@ -212,7 +212,9 @@ describe("DashboardTabs", () => {
       hasGeofencing: false,
       hasReporting: true,
       locationSettingsPromise: undefined,
+      membersPromise: p.membersPromise,
       orgSettingsPromise: p.orgSettingsPromise,
+      payRates: [],
       sitesPromise: undefined,
     });
   });
@@ -349,6 +351,47 @@ describe("DashboardTabs", () => {
       />,
     );
     expect(latest(captured.viewHours).overtimeSettings).toBeNull();
+  });
+
+  it("passes pay rates to the hours view and the settings tab", () => {
+    const rates = [
+      {
+        org_id: "org_1",
+        user_id: "user_1",
+        hourly_rate: 20,
+        overtime_multiplier: 1.5,
+      },
+    ];
+    render(
+      <DashboardTabs
+        {...props({
+          defaultTabPromise: resolved("view"),
+          payRatesPromise: ok(rates),
+        })}
+      />,
+    );
+    expect(latest(captured.viewHours).payRates).toEqual(rates);
+
+    render(
+      <DashboardTabs
+        {...props({
+          defaultTabPromise: resolved("settings"),
+          isAdminPromise: resolved(true),
+          payRatesPromise: ok(rates),
+        })}
+      />,
+    );
+    expect(latest(captured.orgSettings).payRates).toEqual(rates);
+
+    render(
+      <DashboardTabs
+        {...props({
+          defaultTabPromise: resolved("view"),
+          payRatesPromise: resolved({ ok: false, error: { reason: "err" } }),
+        })}
+      />,
+    );
+    expect(latest(captured.viewHours).payRates).toEqual([]);
   });
 
   it("gives the hours view no overtime settings without the promise", () => {

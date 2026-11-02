@@ -3,6 +3,7 @@
 import { useOrganization } from "@clerk/nextjs";
 import { Download } from "lucide-react";
 import { useMemo, useState } from "react";
+import { formatMoney, type PayRate } from "@/lib/pay";
 import { loadPdfImage } from "@/lib/pdf-image";
 import {
   buildExportRows,
@@ -12,8 +13,10 @@ import {
   formatHours,
   formatPeriod,
   hasOvertime,
+  hasPay,
   totalHours,
   totalOvertime,
+  totalPay,
 } from "@/lib/timesheet-export";
 import type {
   BreakSettingsData,
@@ -31,6 +34,8 @@ interface TimesheetExportProps {
   members?: { id: string; name: string }[];
   breakSettings?: BreakSettingsData | null;
   overtimeSettings?: OvertimeSettingsData | null;
+  /** Rates by user id; rows for these members carry estimated pay. */
+  payRates?: Map<string, PayRate>;
 }
 
 export function TimesheetExport({
@@ -42,6 +47,7 @@ export function TimesheetExport({
   members = [],
   breakSettings,
   overtimeSettings,
+  payRates,
 }: TimesheetExportProps) {
   const { organization } = useOrganization();
   const [isExporting, setIsExporting] = useState(false);
@@ -57,6 +63,7 @@ export function TimesheetExport({
         undefined,
         breakSettings,
         overtimeSettings,
+        (userId) => payRates?.get(userId),
       ),
     [
       entries,
@@ -65,6 +72,7 @@ export function TimesheetExport({
       employeeName,
       breakSettings,
       overtimeSettings,
+      payRates,
     ],
   );
 
@@ -106,6 +114,15 @@ export function TimesheetExport({
               ·{" "}
               <span className="font-bold text-orange-600 dark:text-orange-400">
                 {formatHours(totalOvertime(rows))} hrs overtime
+              </span>
+            </>
+          )}
+          {hasPay(rows) && (
+            <>
+              {" "}
+              ·{" "}
+              <span className="font-bold" data-testid="export-gross-pay">
+                est. {formatMoney(totalPay(rows).grossPay)} gross
               </span>
             </>
           )}

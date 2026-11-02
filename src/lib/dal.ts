@@ -20,6 +20,7 @@ import {
   dbCreateSite,
   dbCreateTimeOffRequest,
   dbDeleteBreak,
+  dbDeletePayRate,
   dbDeleteScheduledShift,
   dbDeleteSite,
   dbDeleteTimeEntry,
@@ -33,6 +34,7 @@ import {
   dbGetLocationSettings,
   dbGetOrgTimeEntries,
   dbGetOvertimeSettings,
+  dbGetPayRates,
   dbGetPtoRequestsForPeriod,
   dbGetReportingSettings,
   dbGetScheduledShiftById,
@@ -55,6 +57,7 @@ import {
   dbUpdateScheduledShift,
   dbUpdateSite,
   dbUpdateTimeEntry,
+  dbUpsertPayRate,
 } from "./db";
 import {
   type Coordinates,
@@ -68,6 +71,7 @@ import {
   MAX_DAILY_OVERTIME_HOURS,
   MAX_WEEKLY_OVERTIME_HOURS,
 } from "./overtime";
+import { isValidHourlyRate, isValidOvertimeMultiplier } from "./pay";
 import {
   evaluateShifts,
   invalidShiftReason,
@@ -88,6 +92,7 @@ import type {
   BreakType,
   LocationSettingsData,
   OvertimeSettingsData,
+  PayRateData,
   ReportingSettingsData,
   ScheduledShift,
   ScheduledShiftWithStatus,
@@ -688,6 +693,80 @@ export async function getOrgOvertimeSettings(): Promise<
         ok: false,
       };
     });
+}
+
+/* ----------------------------------------------------------- pay rates -- */
+
+/**
+ * Pay rates the caller may see: every member's for admins, only their own
+ * for everyone else.
+ */
+export async function getOrgPayRates(): Promise<
+  SerializableResult<PayRateData[], { reason: string }>
+> {
+  const { userId, orgId, orgRole } = await auth.protect();
+  if (!userId || !orgId) {
+    return {
+      error: { reason: "Unauthorized or no organization selected" },
+      ok: false,
+    };
+  }
+
+  return await dbGetPayRates(orgId)
+    .then((rates) => ({
+      value:
+        orgRole === "org:admin"
+          ? rates
+          : rates.filter((rate) => rate.user_id === userId),
+      ok: true as const,
+    }))
+    .catch((e) => {
+      console.error("Error fetching pay rates: ", e);
+      return { error: { reason: "Error fetching pay rates." }, ok: false };
+    });
+}
+
+/**
+ * Sets (or, with a null rate, clears) one member's pay rate. Admins only, and
+ * only for members of the admin's active organization.
+ */
+export async function updateMemberPayRateDal(
+  memberId: string,
+  hourlyRate: number | null,
+  overtimeMultiplier: number,
+) {
+  const { userId, orgId, orgRole } = await auth.protect();
+  if (!userId || !orgId || orgRole !== "org:admin") {
+    return errAsync({ reason: "Unauthorized" } as const);
+  }
+  if (
+    (hourlyRate !== null && !isValidHourlyRate(hourlyRate)) ||
+    !isValidOvertimeMultiplier(overtimeMultiplier)
+  ) {
+    return errAsync({ reason: "Invalid pay rate" } as const);
+  }
+
+  const members = await getOrgMembers();
+  if (!members.some((member) => member.id === memberId)) {
+    return errAsync({ reason: "Member not found" } as const);
+  }
+
+  try {
+    if (hourlyRate === null) {
+      await dbDeletePayRate(orgId, memberId);
+      return okAsync({ org_id: orgId, user_id: memberId, cleared: true });
+    }
+    const updated = await dbUpsertPayRate(
+      orgId,
+      memberId,
+      hourlyRate,
+      overtimeMultiplier,
+    );
+    return okAsync({ ...updated, cleared: false });
+  } catch (e) {
+    console.error("Update pay rate error: ", e);
+    return errAsync({ reason: "Failed to update pay rate" } as const);
+  }
 }
 
 /* -------------------------------------------------------------- breaks -- */

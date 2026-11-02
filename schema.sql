@@ -47,6 +47,18 @@ CREATE TABLE IF NOT EXISTS overtime_settings (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Each member's hourly rate and overtime multiplier, for estimated gross
+-- pay: regular hours x rate + overtime hours x rate x multiplier. No row
+-- means no rate (pay isn't estimated for that member).
+CREATE TABLE IF NOT EXISTS member_pay_rates (
+    org_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    hourly_rate DOUBLE PRECISION NOT NULL,
+    overtime_multiplier DOUBLE PRECISION NOT NULL DEFAULT 1.5,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    PRIMARY KEY (org_id, user_id)
+);
+
 CREATE TABLE IF NOT EXISTS location_settings (
     org_id TEXT PRIMARY KEY REFERENCES settings(org_id) ON DELETE CASCADE,
     -- 'off' | 'optional' | 'required'
