@@ -14,7 +14,7 @@ import type {
 export const ALERT_BOUNDS = {
   minHours: 1,
   maxHours: 48,
-  minBreakMinutes: 5,
+  minBreakMinutes: 1,
   maxBreakMinutes: 480,
 } as const;
 
