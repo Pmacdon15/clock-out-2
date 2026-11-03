@@ -13,6 +13,7 @@ Live app: https://clockout.patmac.ca
 - **Weekly timecards** — per-member totals, days worked, and day-by-day breakdowns, with charts.
 - **Timesheet export** — server-generated PDF and Excel (.xlsx) timesheets for any period, grouped by week or month.
 - **Shift alerts & auto clock-out** — "forgot to clock out" reminders after N hours, an optional automatic clock-out at an org-set limit (the shift is closed at exactly clock-in + limit), and "forgot to end break" reminders. Each member picks email, push or both (and which alerts) under **Notifications**; admins can get a copy of every alert. Push works on Android, desktop, and iPhone/iPad once the app is added to the Home Screen. See [Shift alerts & notifications](#shift-alerts--notifications).
+- **Canadian payroll deductions (optional)** — admins can turn on estimated CPP/QPP, CPP2/QPP2 and EI deductions and net pay beside gross pay, for their province or territory (Quebec uses QPP and Quebec EI rates). Rates are stored as data and kept current from the CRA automatically. See [Payroll deductions](#payroll-deductions-canada).
 - **Emailed hours reports** — organizations on a plan with the Reporting feature can schedule automatic report emails (weekly, bi-weekly, twice-monthly/pay-period, or a custom weekday every 1–2 weeks) and run ad-hoc reports for any date range.
 - **MCP server** — 18 tools over Streamable HTTP with Clerk OAuth sign-in (see below).
 
@@ -49,18 +50,18 @@ bun run format           # biome format --write
 
 ### Environment variables
 
-| Variable                                                   | Purpose                                                                                                                    |
-| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`                        | Clerk publishable key. The MCP OAuth issuer is derived from it, so it also decides which Clerk instance issues MCP tokens. |
-| `CLERK_SECRET_KEY`                                         | Clerk secret key (used by `@clerk/nextjs`).                                                                                |
-| `CLERK_WEBHOOK_SIGNING_SECRET`                             | Verifies Clerk webhooks at `/api/webhooks/clerk`.                                                                          |
-| `DATABASE_URL`                                             | Neon Postgres connection string.                                                                                           |
-| `NEXT_PUBLIC_APP_URL`                                      | Public origin of the deployment (e.g. `https://clockout.patmac.ca`); used as the MCP server's website/icon origin.         |
-| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` | Amazon SES credentials for report email.                                                                                   |
-| `SES_FROM_EMAIL`                                           | From address for report email.                                                                                             |
-| `CRON_SECRET`                                              | Bearer secret guarding `/api/cron/weekly-report` (called daily by Vercel Cron) and `/api/cron/shift-alerts`.               |
-| `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`        | Web Push (VAPID) key pair for push notifications. Push is off until both are set.                                          |
-| `VAPID_SUBJECT`                                            | Optional contact for push services, e.g. `mailto:you@example.com`. Defaults to `NEXT_PUBLIC_APP_URL`.                      |
+| Variable                                                   | Purpose                                                                                                                                    |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`                        | Clerk publishable key. The MCP OAuth issuer is derived from it, so it also decides which Clerk instance issues MCP tokens.                 |
+| `CLERK_SECRET_KEY`                                         | Clerk secret key (used by `@clerk/nextjs`).                                                                                                |
+| `CLERK_WEBHOOK_SIGNING_SECRET`                             | Verifies Clerk webhooks at `/api/webhooks/clerk`.                                                                                          |
+| `DATABASE_URL`                                             | Neon Postgres connection string.                                                                                                           |
+| `NEXT_PUBLIC_APP_URL`                                      | Public origin of the deployment (e.g. `https://clockout.patmac.ca`); used as the MCP server's website/icon origin.                         |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` | Amazon SES credentials for report email.                                                                                                   |
+| `SES_FROM_EMAIL`                                           | From address for report email.                                                                                                             |
+| `CRON_SECRET`                                              | Bearer secret guarding `/api/cron/weekly-report` and `/api/cron/payroll-rates` (called daily by Vercel Cron) and `/api/cron/shift-alerts`. |
+| `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`        | Web Push (VAPID) key pair for push notifications. Push is off until both are set.                                                          |
+| `VAPID_SUBJECT`                                            | Optional contact for push services, e.g. `mailto:you@example.com`. Defaults to `NEXT_PUBLIC_APP_URL`.                                      |
 
 ### Database
 
@@ -157,7 +158,14 @@ App-side, Clerk is wired in through `src/proxy.ts` (`clerkMiddleware`, protectin
 
 ## Deployment
 
-Deployed on Vercel. `vercel.json` registers a daily cron (`0 6 * * *`) hitting `/api/cron/weekly-report`, which sends any scheduled report emails that are due; the route requires the `CRON_SECRET` bearer token. Email goes out through Amazon SES using React Email templates.
+Deployed on Vercel. `vercel.json` registers a daily cron (`0 6 * * *`) hitting `/api/cron/weekly-report`, which sends any scheduled report emails that are due; the route requires the `CRON_SECRET` bearer token. A second daily cron (`0 19 * * *`, 12:00 p.m. MST) hits `/api/cron/payroll-rates` to pick up new CRA payroll rates. Email goes out through Amazon SES using React Email templates.
+
+## Payroll deductions (Canada)
+
+Admins turn this on under **Settings → Payroll Deductions** and pick the province or territory of employment. The Hours view then shows estimated CPP (QPP in Quebec), CPP2/QPP2 and EI, and net pay before income tax, worked out per member per Monday–Sunday week with the CRA's T4127 formulas (basic exemption prorated over 52 periods; contributions stop at the annual maximums). Income tax and QPIP aren't calculated, and the year-to-date maximums only count the hours on screen.
+
+- **Rates are data.** Each row in `payroll_rates` is one jurisdiction (`CA` = Canada except Quebec, `QC`) from one T4127 edition, keyed by the date it takes effect. A pay week uses the latest row on or before its date, so past years keep their own rates. The 2026 figures ship as seed rows in `src/lib/payroll.ts`.
+- **Updates are automatic.** `GET /api/cron/payroll-rates` (bearer `CRON_SECRET`) reads the [T4127 index](https://www.canada.ca/en/revenue-agency/services/forms-publications/payroll/t4127-payroll-deductions-formulas.html), follows the newest edition, downloads its CSV tables 8.3 (CPP/QPP), 8.6 (CPP2/QPP2) and 8.7 (EI), and stores a jurisdiction only when its figures changed. Every row is checked first (each published maximum has to match its rate and ceiling); a row that fails, or a page or file whose layout changed, is logged and skipped and the current rates stay in use. No new env vars are needed.
 
 ## Shift alerts & notifications
 

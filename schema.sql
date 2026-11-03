@@ -36,6 +36,13 @@ CREATE TABLE IF NOT EXISTS break_settings (
 ALTER TABLE break_settings ADD COLUMN IF NOT EXISTS max_meal_break_minutes INTEGER;
 ALTER TABLE break_settings ADD COLUMN IF NOT EXISTS max_unpaid_rest_break_minutes INTEGER;
 ALTER TABLE break_settings ADD COLUMN IF NOT EXISTS max_paid_break_minutes INTEGER;
+-- Whether lunch (the meal period) is paid. When TRUE the clock offers a paid
+-- meal period ('paid_meal') instead of an unpaid one and lunch is never docked.
+ALTER TABLE break_settings ADD COLUMN IF NOT EXISTS paid_lunch BOOLEAN NOT NULL DEFAULT FALSE;
+-- How many paid / unpaid breaks a member may start in one shift. NULL = no
+-- limit. A meal period counts toward whichever kind lunch is (paid_lunch).
+ALTER TABLE break_settings ADD COLUMN IF NOT EXISTS max_paid_breaks_per_shift INTEGER;
+ALTER TABLE break_settings ADD COLUMN IF NOT EXISTS max_unpaid_breaks_per_shift INTEGER;
 
 -- Overtime thresholds in hours. NULL turns that threshold off. Daily
 -- overtime is hours past the daily threshold on one day; weekly overtime is
@@ -104,7 +111,7 @@ CREATE TABLE IF NOT EXISTS time_entry_breaks (
     id SERIAL PRIMARY KEY,
     time_entry_id INTEGER NOT NULL REFERENCES time_entries(id) ON DELETE CASCADE,
     break_type TEXT NOT NULL DEFAULT 'unpaid_meal'
-        CHECK (break_type IN ('unpaid_meal', 'unpaid_rest', 'paid_rest')),
+        CHECK (break_type IN ('unpaid_meal', 'paid_meal', 'unpaid_rest', 'paid_rest')),
     break_start TIMESTAMP WITH TIME ZONE NOT NULL,
     -- NULL while the break is still running.
     break_end TIMESTAMP WITH TIME ZONE,
@@ -214,4 +221,24 @@ CREATE TABLE IF NOT EXISTS time_off_allowances (
     pto_days DOUBLE PRECISION NOT NULL CHECK (pto_days >= 0),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     PRIMARY KEY (org_id, user_id)
+);
+
+-- Optional CPP/QPP and EI deduction estimates, per org. Province decides the
+-- rates: QC uses QPP and Quebec EI, everything else federal CPP and EI.
+CREATE TABLE IF NOT EXISTS payroll_settings (
+    org_id TEXT PRIMARY KEY REFERENCES settings(org_id) ON DELETE CASCADE,
+    deductions_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    province TEXT NOT NULL DEFAULT 'SK',
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- CRA T4127 figures for one jurisdiction ('CA' or 'QC'), effective from a
+-- yyyy-MM-dd date. Filled by /api/cron/payroll-rates; 2026 is seeded in code.
+CREATE TABLE IF NOT EXISTS payroll_rates (
+    jurisdiction TEXT NOT NULL,
+    effective_from TEXT NOT NULL,
+    rates JSONB NOT NULL,
+    source TEXT,
+    fetched_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    PRIMARY KEY (jurisdiction, effective_from)
 );

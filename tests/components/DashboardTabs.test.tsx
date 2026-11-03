@@ -108,6 +108,7 @@ describe("DashboardTabs", () => {
         {...props({
           alertSettingsPromise,
           defaultTabPromise: resolved("notifications"),
+          hasNotificationsPromise: resolved(true),
           isAdminPromise: resolved(true),
           notificationSettingsPromise,
         })}
@@ -116,6 +117,7 @@ describe("DashboardTabs", () => {
     expect(screen.getByTestId("notification-settings")).toBeInTheDocument();
     expect(screen.getByTestId("timezone-sync")).toBeInTheDocument();
     expect(latest(captured.notifications)).toEqual({
+      hasNotifications: true,
       isAdmin: true,
       settingsPromise: notificationSettingsPromise,
     });
@@ -123,6 +125,31 @@ describe("DashboardTabs", () => {
     expect(latest(captured.orgSettings).alertSettingsPromise).toBe(
       alertSettingsPromise,
     );
+  });
+
+  it("tells components when the org lacks the notifications feature", () => {
+    render(
+      <DashboardTabs
+        {...props({
+          defaultTabPromise: resolved("notifications"),
+          notificationSettingsPromise: ok({
+            preferences: {
+              email_enabled: true,
+              push_enabled: true,
+              shift_alerts: true,
+              break_alerts: true,
+              admin_alerts: true,
+            },
+            emailAvailable: true,
+            pushAvailable: false,
+            vapidPublicKey: null,
+          }),
+        })}
+      />,
+    );
+    expect(latest(captured.notifications)).toMatchObject({
+      hasNotifications: false,
+    });
   });
 
   it("hides the notifications tab without preferences", () => {
@@ -229,13 +256,42 @@ describe("DashboardTabs", () => {
     expect(latest(captured.orgSettings)).toEqual({
       breakSettingsPromise: undefined,
       hasGeofencing: false,
+      hasNotifications: false,
       hasReporting: true,
       locationSettingsPromise: undefined,
       membersPromise: p.membersPromise,
       orgSettingsPromise: p.orgSettingsPromise,
       payRates: [],
+      payroll: null,
       sitesPromise: undefined,
     });
+  });
+
+  it("passes the payroll deduction settings to the hours view and settings", () => {
+    const payroll = { enabled: true, province: "QC", rates: [] };
+    render(
+      <DashboardTabs
+        {...props({
+          defaultTabPromise: resolved("view"),
+          payrollPromise: resolved({ ok: true as const, value: payroll }),
+        })}
+      />,
+    );
+    expect(latest(captured.viewHours).payroll).toEqual(payroll);
+
+    render(
+      <DashboardTabs
+        {...props({
+          defaultTabPromise: resolved("settings"),
+          isAdminPromise: resolved(true),
+          payrollPromise: resolved({
+            ok: false as const,
+            error: { reason: "err" },
+          }),
+        })}
+      />,
+    );
+    expect(latest(captured.orgSettings).payroll).toBeNull();
   });
 
   it("passes the geofencing entitlement and its settings to the panels", () => {

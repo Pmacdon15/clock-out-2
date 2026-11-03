@@ -51,8 +51,9 @@ import {
 } from "@/lib/alerts-dal";
 import type { AlertSettingsInput } from "@/lib/types";
 
-const admin = { userId: "u1", orgId: "org_1", orgRole: "org:admin" };
-const member = { userId: "u1", orgId: "org_1", orgRole: "org:member" };
+const has = vi.fn(() => true);
+const admin = { userId: "u1", orgId: "org_1", orgRole: "org:admin", has };
+const member = { userId: "u1", orgId: "org_1", orgRole: "org:member", has };
 const sub = {
   endpoint: "https://push.example/1",
   keys: { p256dh: "p", auth: "a" },
@@ -165,6 +166,37 @@ describe("getMyNotificationSettings", () => {
       ok: false,
       error: { reason: "Error fetching notification preferences" },
     });
+  });
+});
+
+describe("notifications paywall", () => {
+  const reason =
+    "Notifications are a paid feature. Upgrade your organization's plan to turn them on.";
+
+  it("refuses preference changes, new devices and tests without the feature", async () => {
+    const unpaid = { ...member, has: vi.fn(() => false) };
+    mocks.protect.mockResolvedValue(unpaid);
+    expect(
+      (
+        await updateNotificationPreferencesDal(DEFAULT_NOTIFICATION_PREFERENCES)
+      )._unsafeUnwrapErr(),
+    ).toEqual({ reason });
+    expect((await savePushSubscriptionDal(sub))._unsafeUnwrapErr()).toEqual({
+      reason,
+    });
+    expect((await sendTestNotificationDal())._unsafeUnwrapErr()).toEqual({
+      reason,
+    });
+    expect(unpaid.has).toHaveBeenCalledWith({ feature: "notifications" });
+    expect(mocks.dbUpdateNotificationPreferences).not.toHaveBeenCalled();
+    expect(mocks.dbSavePushSubscription).not.toHaveBeenCalled();
+    expect(mocks.deliver).not.toHaveBeenCalled();
+  });
+
+  it("still lets anyone remove a device", async () => {
+    mocks.protect.mockResolvedValue({ ...member, has: () => false });
+    mocks.dbDeletePushSubscription.mockResolvedValue(undefined);
+    expect((await deletePushSubscriptionDal(sub.endpoint)).isOk()).toBe(true);
   });
 });
 

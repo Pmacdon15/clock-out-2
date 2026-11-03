@@ -369,6 +369,7 @@ export async function dbAutoClockOut(
 ) {
   await ensureTimeEntryBreaksTable();
   const meal = limits?.unpaid_meal ?? null;
+  const paidMeal = limits?.paid_meal ?? null;
   const unpaidRest = limits?.unpaid_rest ?? null;
   const paidRest = limits?.paid_rest ?? null;
   const [closed] = await sql`
@@ -395,6 +396,7 @@ export async function dbAutoClockOut(
 					CASE WHEN b.break_end IS NULL THEN
 						b.break_start + make_interval(mins => (CASE b.break_type
 							WHEN 'unpaid_meal' THEN ${meal}::INTEGER
+							WHEN 'paid_meal' THEN ${paidMeal}::INTEGER
 							WHEN 'unpaid_rest' THEN ${unpaidRest}::INTEGER
 							WHEN 'paid_rest' THEN ${paidRest}::INTEGER
 						END))

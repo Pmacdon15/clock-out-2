@@ -34,7 +34,12 @@ import type { Coordinates } from "./geo";
 import { reverseGeocode, searchAddress } from "./geoapify";
 import { sendWeeklyReports } from "./reports";
 import { notifyScheduleChange } from "./schedule-notify";
-import type { BreakLimits, BreakType, TimeOffType } from "./types";
+import type {
+  BreakCountLimits,
+  BreakLimits,
+  BreakType,
+  TimeOffType,
+} from "./types";
 
 /**
  * `coordinates` is whatever the browser's Geolocation API gave the client, or
@@ -162,12 +167,16 @@ export async function updateBreakSettingAction(
   durationMinutes: number = 30,
   minShiftHours: number = 5,
   limits?: BreakLimits,
+  paidLunch?: boolean,
+  countLimits?: BreakCountLimits,
 ) {
   const result = await updateBreakSettingsDal(
     dockLunch,
     durationMinutes,
     minShiftHours,
     limits,
+    paidLunch,
+    countLimits,
   );
 
   return result.match(
@@ -213,7 +222,7 @@ function updateBreakTags(entry: { user_id: string; org_id: string }) {
   updateTag(`org-time-entries-${entry.org_id}`);
 }
 
-export async function startBreakAction(breakType: BreakType = "unpaid_meal") {
+export async function startBreakAction(breakType?: BreakType) {
   const result = await dalStartBreak(breakType);
 
   return result.match(

@@ -21,6 +21,16 @@ const setNumber = (label: RegExp, value: string) =>
   fireEvent.change(screen.getByLabelText(label), { target: { value } });
 
 describe("AlertSettings", () => {
+  it("points orgs without the notifications feature to the plans page", () => {
+    const { rerender } = render(<AlertSettings initialData={null} />);
+    expect(screen.getByTestId("notifications-upgrade")).toBeInTheDocument();
+    expect(screen.getByRole("link")).toHaveAttribute("href", "/plans");
+    rerender(<AlertSettings hasNotifications initialData={null} />);
+    expect(
+      screen.queryByTestId("notifications-upgrade"),
+    ).not.toBeInTheDocument();
+  });
+
   it("starts with every rule off and nothing to save", () => {
     render(<AlertSettings initialData={null} />);
     expect(screen.getByText("Shift Alerts")).toBeInTheDocument();

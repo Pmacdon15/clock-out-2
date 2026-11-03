@@ -20,16 +20,18 @@ import {
   startBreakAction,
 } from "@/lib/actions";
 import {
-  BREAK_TYPE_VALUES,
   BREAK_TYPES,
+  breakCountLimitMessage,
   breakTypeLabel,
-  DEFAULT_BREAK_TYPE,
   getBreakDeadlineMs,
   getBreakDurationMs,
   getDockedMinutes,
   getEffectiveDurationMs,
+  getOfferedBreakTypes,
   getOpenBreak,
+  getRemainingBreakCount,
   getUnpaidBreakMs,
+  isBreakCountReached,
   isPaidBreakType,
 } from "@/lib/break-utils";
 import {
@@ -109,7 +111,14 @@ export default function TimeClock({
   const [expiredBreak, setExpiredBreak] = useState<ExpiredBreak | null>(null);
   // The break already being auto-ended, so the ticker fires it only once.
   const autoEndedBreakId = useRef<number | null>(null);
-  const [breakType, setBreakType] = useState<BreakType>(DEFAULT_BREAK_TYPE);
+  // The kinds the org offers, lunch (paid or unpaid, per the org) first.
+  const offeredBreakTypes = getOfferedBreakTypes(breakSettings);
+  const [pickedBreakType, setBreakType] = useState<BreakType | null>(null);
+  // Defaults to lunch, and falls back to it if the org's lunch pay changes.
+  const breakType =
+    pickedBreakType && offeredBreakTypes.includes(pickedBreakType)
+      ? pickedBreakType
+      : offeredBreakTypes[0];
   const [isLocating, setIsLocating] = useState(false);
   const captureLocation = isCaptureEnabled(locationSettings);
   const locationRequired = isLocationRequired(locationSettings);
@@ -125,6 +134,18 @@ export default function TimeClock({
   const breakDeadlineMs = openBreak
     ? getBreakDeadlineMs(openBreak, breakSettings)
     : null;
+
+  // Per-shift break count limits, if the org set any.
+  const selectedBreakUsedUp = isBreakCountReached(
+    activeEntry,
+    breakType,
+    breakSettings,
+  );
+  const selectedBreaksLeft = getRemainingBreakCount(
+    activeEntry,
+    breakType,
+    breakSettings,
+  );
 
   useEffect(() => {
     if (!activeEntry) return;
@@ -455,36 +476,68 @@ export default function TimeClock({
                 </Button>
               </>
             ) : (
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <label className="sr-only" htmlFor="break-type">
-                  Break type
-                </label>
-                <select
-                  className="flex-1 rounded-xl border bg-white px-3 py-2 text-sm dark:bg-zinc-950"
-                  id="break-type"
-                  onChange={(e) => setBreakType(e.target.value as BreakType)}
-                  value={breakType}
-                >
-                  {BREAK_TYPE_VALUES.map((value) => (
-                    <option key={value} value={value}>
-                      {BREAK_TYPES[value].label} (
-                      {BREAK_TYPES[value].paid ? "paid" : "unpaid"})
-                    </option>
-                  ))}
-                </select>
-                <Button
-                  disabled={startBreakMutation.isPending}
-                  onClick={handleStartBreak}
-                  variant="outline"
-                >
-                  {startBreakMutation.isPending ? (
-                    <Loader2 className="animate-spin" />
-                  ) : (
-                    <Coffee className="h-4 w-4" />
-                  )}
-                  Start Break
-                </Button>
-              </div>
+              <>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <label className="sr-only" htmlFor="break-type">
+                    Break type
+                  </label>
+                  <select
+                    className="flex-1 rounded-xl border bg-white px-3 py-2 text-sm dark:bg-zinc-950"
+                    id="break-type"
+                    onChange={(e) => setBreakType(e.target.value as BreakType)}
+                    value={breakType}
+                  >
+                    {offeredBreakTypes.map((value) => (
+                      <option
+                        disabled={isBreakCountReached(
+                          activeEntry,
+                          value,
+                          breakSettings,
+                        )}
+                        key={value}
+                        value={value}
+                      >
+                        {BREAK_TYPES[value].label} (
+                        {BREAK_TYPES[value].paid ? "paid" : "unpaid"})
+                      </option>
+                    ))}
+                  </select>
+                  <Button
+                    disabled={
+                      startBreakMutation.isPending || selectedBreakUsedUp
+                    }
+                    onClick={handleStartBreak}
+                    variant="outline"
+                  >
+                    {startBreakMutation.isPending ? (
+                      <Loader2 className="animate-spin" />
+                    ) : (
+                      <Coffee className="h-4 w-4" />
+                    )}
+                    Start Break
+                  </Button>
+                </div>
+                {selectedBreakUsedUp ? (
+                  <p
+                    className="text-amber-700 text-xs dark:text-amber-400"
+                    data-testid="break-count-limit"
+                    role="status"
+                  >
+                    {breakCountLimitMessage(breakType, breakSettings)}
+                  </p>
+                ) : (
+                  selectedBreaksLeft !== null && (
+                    <p
+                      className="text-muted-foreground text-xs"
+                      data-testid="breaks-left"
+                    >
+                      {selectedBreaksLeft}{" "}
+                      {isPaidBreakType(breakType) ? "paid" : "unpaid"} break
+                      {selectedBreaksLeft === 1 ? "" : "s"} left this shift
+                    </p>
+                  )
+                )}
+              </>
             )}
             {getUnpaidBreakMs(activeEntry) > 0 && (
               <p className="text-muted-foreground text-xs">

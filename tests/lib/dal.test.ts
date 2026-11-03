@@ -429,6 +429,7 @@ describe("clockOut", () => {
     expect((await clockOut()).isOk()).toBe(true);
     expect(mocks.dbEndOpenBreak).toHaveBeenCalledWith("user_1", "org_1", {
       unpaid_meal: null,
+      paid_meal: null,
       unpaid_rest: 10,
       paid_rest: null,
     });
@@ -734,6 +735,8 @@ describe("updateBreakSettingsDal", () => {
       30,
       5,
       undefined,
+      undefined,
+      undefined,
     );
   });
 
@@ -747,6 +750,8 @@ describe("updateBreakSettingsDal", () => {
       true,
       30,
       5,
+      undefined,
+      undefined,
       undefined,
     );
     expect(has).not.toHaveBeenCalled();
@@ -762,13 +767,20 @@ describe("updateBreakSettingsDal", () => {
       45,
       6,
       undefined,
+      undefined,
+      undefined,
     );
   });
 
   it("saves per-break-type limits", async () => {
     mocks.protect.mockResolvedValue(admin);
     mocks.dbUpdateBreakSettings.mockResolvedValue({ org_id: "org_1" });
-    const limits = { unpaid_meal: 45, unpaid_rest: null, paid_rest: 15 };
+    const limits = {
+      unpaid_meal: 45,
+      paid_meal: 45,
+      unpaid_rest: null,
+      paid_rest: 15,
+    };
     expect((await updateBreakSettingsDal(false, 30, 5, limits)).isOk()).toBe(
       true,
     );
@@ -778,7 +790,41 @@ describe("updateBreakSettingsDal", () => {
       30,
       5,
       limits,
+      undefined,
+      undefined,
     );
+  });
+
+  it("saves whether lunch is paid", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbUpdateBreakSettings.mockResolvedValue({ org_id: "org_1" });
+    expect(
+      (await updateBreakSettingsDal(false, 30, 5, undefined, true)).isOk(),
+    ).toBe(true);
+    expect(mocks.dbUpdateBreakSettings).toHaveBeenCalledWith(
+      "org_1",
+      false,
+      30,
+      5,
+      undefined,
+      true,
+      undefined,
+    );
+  });
+
+  it("rejects a lunch pay choice that isn't a boolean", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    const result = await updateBreakSettingsDal(
+      false,
+      30,
+      5,
+      undefined,
+      "yes" as unknown as boolean,
+    );
+    expect(result._unsafeUnwrapErr()).toEqual({
+      reason: "Invalid break settings",
+    });
+    expect(mocks.dbUpdateBreakSettings).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -790,9 +836,54 @@ describe("updateBreakSettingsDal", () => {
     mocks.protect.mockResolvedValue(admin);
     const result = await updateBreakSettingsDal(true, 30, 5, {
       unpaid_meal: null,
+      paid_meal: null,
       unpaid_rest: null,
       paid_rest: value,
     });
+    expect(result._unsafeUnwrapErr()).toEqual({
+      reason: "Invalid break settings",
+    });
+    expect(mocks.dbUpdateBreakSettings).not.toHaveBeenCalled();
+  });
+
+  it("saves per-shift break count limits", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbUpdateBreakSettings.mockResolvedValue({ org_id: "org_1" });
+    const counts = { paid: 2, unpaid: null };
+    expect(
+      (
+        await updateBreakSettingsDal(false, 30, 5, undefined, undefined, counts)
+      ).isOk(),
+    ).toBe(true);
+    expect(mocks.dbUpdateBreakSettings).toHaveBeenCalledWith(
+      "org_1",
+      false,
+      30,
+      5,
+      undefined,
+      undefined,
+      counts,
+    );
+  });
+
+  it.each([
+    ["a zero count", 0],
+    ["a fractional count", 1.5],
+    ["an excessive count", 21],
+    ["a NaN count", Number.NaN],
+  ])("rejects %s", async (_label, value) => {
+    mocks.protect.mockResolvedValue(admin);
+    const result = await updateBreakSettingsDal(
+      true,
+      30,
+      5,
+      undefined,
+      undefined,
+      {
+        paid: null,
+        unpaid: value,
+      },
+    );
     expect(result._unsafeUnwrapErr()).toEqual({
       reason: "Invalid break settings",
     });
@@ -910,6 +1001,7 @@ describe("startBreak", () => {
     expect((await startBreak("unpaid_meal")).isOk()).toBe(true);
     expect(mocks.dbEndOpenBreak).toHaveBeenCalledWith("user_1", "org_1", {
       unpaid_meal: null,
+      paid_meal: null,
       unpaid_rest: null,
       paid_rest: 15,
     });
@@ -937,6 +1029,69 @@ describe("startBreak", () => {
     expect(mocks.dbStartBreak).not.toHaveBeenCalled();
   });
 
+  it("refuses a break once the shift has used up its paid breaks", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetActiveEntry.mockResolvedValue({
+      id: 1,
+      breaks: [
+        { id: 2, break_type: "paid_rest", break_end: new Date() },
+        { id: 3, break_type: "paid_rest", break_end: new Date() },
+      ],
+    });
+    mocks.dbGetBreakSettings.mockResolvedValue({
+      max_paid_breaks_per_shift: 2,
+    });
+    expect((await startBreak("paid_rest"))._unsafeUnwrapErr()).toEqual({
+      reason: "You've used all 2 paid breaks allowed this shift.",
+    });
+    expect(mocks.dbStartBreak).not.toHaveBeenCalled();
+  });
+
+  it("counts meal periods and unpaid rest breaks against the unpaid limit", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetActiveEntry.mockResolvedValue({
+      id: 1,
+      breaks: [{ id: 2, break_type: "unpaid_meal", break_end: new Date() }],
+    });
+    mocks.dbGetBreakSettings.mockResolvedValue({
+      max_unpaid_breaks_per_shift: 1,
+    });
+    expect((await startBreak("unpaid_rest"))._unsafeUnwrapErr()).toEqual({
+      reason: "You've used all 1 unpaid break allowed this shift.",
+    });
+    expect(mocks.dbStartBreak).not.toHaveBeenCalled();
+  });
+
+  it("still allows the other kind of break when one kind is used up", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetActiveEntry.mockResolvedValue({
+      id: 1,
+      breaks: [{ id: 2, break_type: "unpaid_meal", break_end: new Date() }],
+    });
+    mocks.dbGetBreakSettings.mockResolvedValue({
+      max_unpaid_breaks_per_shift: 1,
+      max_paid_breaks_per_shift: 2,
+    });
+    mocks.dbStartBreak.mockResolvedValue({ id: 9, time_entry_id: 1 });
+    expect((await startBreak("paid_rest")).isOk()).toBe(true);
+    expect(mocks.dbStartBreak).toHaveBeenCalledWith(
+      "user_1",
+      "org_1",
+      "paid_rest",
+    );
+  });
+
+  it("allows a break when the break settings lookup fails", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetActiveEntry.mockResolvedValue({
+      id: 1,
+      breaks: [{ id: 2, break_type: "paid_rest", break_end: new Date() }],
+    });
+    mocks.dbGetBreakSettings.mockRejectedValue(new Error("db"));
+    mocks.dbStartBreak.mockResolvedValue({ id: 9, time_entry_id: 1 });
+    expect((await startBreak("paid_rest")).isOk()).toBe(true);
+  });
+
   it("starts the break and returns it with its owner", async () => {
     mocks.protect.mockResolvedValue(member);
     mocks.dbGetActiveEntry.mockResolvedValue({ id: 1, breaks: [] });
@@ -952,6 +1107,65 @@ describe("startBreak", () => {
       "user_1",
       "org_1",
       "paid_rest",
+    );
+  });
+
+  it("starts the org's paid lunch when no type is given", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetBreakSettings.mockResolvedValue({ paid_lunch: true });
+    mocks.dbGetActiveEntry.mockResolvedValue({ id: 1, breaks: [] });
+    mocks.dbStartBreak.mockResolvedValue({ id: 9, time_entry_id: 1 });
+    expect((await startBreak()).isOk()).toBe(true);
+    expect(mocks.dbStartBreak).toHaveBeenCalledWith(
+      "user_1",
+      "org_1",
+      "paid_meal",
+    );
+  });
+
+  it("starts an unpaid lunch by default", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetBreakSettings.mockResolvedValue(undefined);
+    mocks.dbGetActiveEntry.mockResolvedValue({ id: 1, breaks: [] });
+    mocks.dbStartBreak.mockResolvedValue({ id: 9, time_entry_id: 1 });
+    expect((await startBreak()).isOk()).toBe(true);
+    expect(mocks.dbStartBreak).toHaveBeenCalledWith(
+      "user_1",
+      "org_1",
+      "unpaid_meal",
+    );
+  });
+
+  it("refuses an unpaid lunch while the org's lunch is paid", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetBreakSettings.mockResolvedValue({ paid_lunch: true });
+    const result = await startBreak("unpaid_meal");
+    expect(result._unsafeUnwrapErr()).toEqual({
+      reason: "Lunch is paid in this organization",
+    });
+    expect(mocks.dbStartBreak).not.toHaveBeenCalled();
+  });
+
+  it("refuses a paid lunch while the org's lunch is unpaid", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetBreakSettings.mockResolvedValue({ paid_lunch: false });
+    const result = await startBreak("paid_meal");
+    expect(result._unsafeUnwrapErr()).toEqual({
+      reason: "Lunch is unpaid in this organization",
+    });
+    expect(mocks.dbStartBreak).not.toHaveBeenCalled();
+  });
+
+  it("allows unpaid rest breaks alongside a paid lunch", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetBreakSettings.mockResolvedValue({ paid_lunch: true });
+    mocks.dbGetActiveEntry.mockResolvedValue({ id: 1, breaks: [] });
+    mocks.dbStartBreak.mockResolvedValue({ id: 9, time_entry_id: 1 });
+    expect((await startBreak("unpaid_rest")).isOk()).toBe(true);
+    expect(mocks.dbStartBreak).toHaveBeenCalledWith(
+      "user_1",
+      "org_1",
+      "unpaid_rest",
     );
   });
 
@@ -997,6 +1211,7 @@ describe("endBreak", () => {
     });
     expect(mocks.dbEndOpenBreak).toHaveBeenCalledWith("user_1", "org_1", {
       unpaid_meal: null,
+      paid_meal: null,
       unpaid_rest: null,
       paid_rest: null,
     });
@@ -1016,6 +1231,7 @@ describe("endBreak", () => {
     // Lunch is docked, so the meal limit is the 30-minute deduction.
     expect(mocks.dbEndOpenBreak).toHaveBeenCalledWith("user_1", "org_1", {
       unpaid_meal: 30,
+      paid_meal: 60,
       unpaid_rest: null,
       paid_rest: 15,
     });
@@ -1028,6 +1244,7 @@ describe("endBreak", () => {
     expect((await endBreak()).isOk()).toBe(true);
     expect(mocks.dbEndOpenBreak).toHaveBeenCalledWith("user_1", "org_1", {
       unpaid_meal: null,
+      paid_meal: null,
       unpaid_rest: null,
       paid_rest: null,
     });
