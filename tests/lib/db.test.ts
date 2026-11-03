@@ -1058,6 +1058,83 @@ describe("overtime settings", () => {
   });
 });
 
+describe("pay period settings", () => {
+  beforeEach(() => {
+    db.resetPayPeriodSettingsTableCheck();
+  });
+
+  it("ensurePayPeriodSettingsTable creates settings then pay_period_settings", async () => {
+    sql.mockResolvedValue([]);
+    await db.ensurePayPeriodSettingsTable();
+    expect(sql).toHaveBeenCalledTimes(2);
+    expect(textOf(0)).toContain("CREATE TABLE IF NOT EXISTS settings");
+    expect(textOf(1)).toContain(
+      "CREATE TABLE IF NOT EXISTS pay_period_settings",
+    );
+    expect(textOf(1)).toContain("REFERENCES settings(org_id)");
+    expect(textOf(1)).toContain("holdback_days INTEGER NOT NULL DEFAULT 0");
+  });
+
+  it("ensurePayPeriodSettingsTable only runs once per instance", async () => {
+    sql.mockResolvedValue([]);
+    await Promise.all([
+      db.ensurePayPeriodSettingsTable(),
+      db.ensurePayPeriodSettingsTable(),
+    ]);
+    await db.ensurePayPeriodSettingsTable();
+    expect(sql).toHaveBeenCalledTimes(2);
+  });
+
+  it("ensurePayPeriodSettingsTable retries after a failure", async () => {
+    sql.mockRejectedValueOnce(new Error("db down"));
+    await expect(db.ensurePayPeriodSettingsTable()).rejects.toThrow("db down");
+    sql.mockReset();
+    sql.mockResolvedValue([]);
+    await db.ensurePayPeriodSettingsTable();
+    expect(sql).toHaveBeenCalledTimes(2);
+  });
+
+  it("dbGetPayPeriodSettings creates the table, then reads and tags the cache", async () => {
+    sql
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ org_id: "o1", enabled: true }]);
+    await expect(db.dbGetPayPeriodSettings("o1")).resolves.toEqual({
+      org_id: "o1",
+      enabled: true,
+    });
+    expect(textOf(2)).toContain("SELECT * FROM pay_period_settings");
+    expect(valuesOf(2)).toEqual(["o1"]);
+    expect(cacheTag).toHaveBeenCalledWith("pay-period-settings-o1");
+    expect(cacheLife).toHaveBeenCalledWith("hours");
+  });
+
+  it("dbUpdatePayPeriodSettings upserts settings and the pay period", async () => {
+    sql
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ org_id: "o1", enabled: true }]);
+    await expect(
+      db.dbUpdatePayPeriodSettings("o1", true, "weekly", "2026-11-13", 7),
+    ).resolves.toEqual({ org_id: "o1", enabled: true });
+    expect(textOf(2)).toContain("INSERT INTO settings");
+    expect(textOf(3)).toContain("INSERT INTO pay_period_settings");
+    expect(textOf(3)).toContain("ON CONFLICT (org_id)");
+    expect(valuesOf(3)).toEqual([
+      "o1",
+      true,
+      "weekly",
+      "2026-11-13",
+      7,
+      true,
+      "weekly",
+      "2026-11-13",
+      7,
+    ]);
+  });
+});
+
 describe("pay rates", () => {
   beforeEach(() => {
     db.resetPayRatesTableCheck();

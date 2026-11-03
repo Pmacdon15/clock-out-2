@@ -88,6 +88,14 @@ describe("HoursLineChart summary", () => {
       { timeframe: "custom", startDate: "2026-03-01", endDate: undefined },
       "Mar 1, 2026 -",
     ],
+    [
+      {
+        timeframe: "pay-period",
+        startDate: "2026-10-31T00:00:00.000",
+        endDate: "2026-11-06T23:59:59.999",
+      },
+      "Oct 31, 2026 - Nov 6, 2026",
+    ],
     [{ timeframe: "all" }, "all"],
     [{ timeframe: undefined }, "custom"],
     [{ timeframe: "year", startDate: undefined }, "year"],

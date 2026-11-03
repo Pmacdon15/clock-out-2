@@ -197,3 +197,67 @@ describe("TimeframeSelector range pickers", () => {
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
   });
 });
+
+describe("TimeframeSelector pay periods", () => {
+  const payPeriodSettings = {
+    org_id: "org_1",
+    enabled: true,
+    frequency: "weekly" as const,
+    anchor_payday: "2026-11-13",
+    holdback_days: 7,
+  };
+
+  it("offers no pay period timeframe unless it is turned on", () => {
+    renderSelector();
+    expect(
+      screen.queryByRole("button", { name: "PAY PERIOD" }),
+    ).not.toBeInTheDocument();
+    renderSelector({
+      payPeriodSettings: { ...payPeriodSettings, enabled: false },
+    });
+    expect(
+      screen.queryByRole("button", { name: "PAY PERIOD" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("jumps to the pay period that includes today", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-03T12:00:00Z"));
+    renderSelector({ payPeriodSettings });
+    fireEvent.click(screen.getByRole("button", { name: "PAY PERIOD" }));
+    const params = pushed();
+    expect(params.get("timeframe")).toBe("pay-period");
+    expect(params.get("start")).toBe("2026-10-31T00:00:00.000");
+    expect(params.get("end")).toBe("2026-11-06T23:59:59.999");
+  });
+
+  it("lists pay periods with the selected one's payday", () => {
+    renderSelector({
+      payPeriodSettings,
+      timeframe: "pay-period",
+      startDate: "2026-10-31T00:00:00.000",
+      endDate: "2026-11-06T23:59:59.999",
+    });
+    const picker = screen.getByRole("combobox", { name: "Pay period" });
+    expect(picker).toHaveValue(
+      "2026-10-31T00:00:00.000|2026-11-06T23:59:59.999",
+    );
+    const options = screen.getAllByRole("option");
+    // One upcoming period, the current one, then 12 earlier ones.
+    expect(options).toHaveLength(14);
+    expect(options[0]).toHaveTextContent("Nov 7 – Nov 13");
+    expect(options[1]).toHaveTextContent("Oct 31 – Nov 6");
+    expect(screen.getByText("Paid Fri, Nov 13")).toBeInTheDocument();
+
+    fireEvent.change(picker, {
+      target: { value: "2026-11-07T00:00:00.000|2026-11-13T23:59:59.999" },
+    });
+    expect(pushed().get("start")).toBe("2026-11-07T00:00:00.000");
+    expect(pushed().get("end")).toBe("2026-11-13T23:59:59.999");
+  });
+
+  it("shows no pay period picker once pay periods are turned off", () => {
+    renderSelector({ timeframe: "pay-period" });
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+  });
+});

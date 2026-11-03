@@ -293,6 +293,24 @@ describe("ViewHours timesheet export", () => {
     });
   });
 
+  it("offers the export for a pay period and passes the pay period settings", () => {
+    const payPeriodSettings = {
+      org_id: "org_1",
+      enabled: true,
+      frequency: "weekly" as const,
+      anchor_payday: "2026-11-13",
+      holdback_days: 7,
+    };
+    renderView({ payPeriodSettings, timeframePromise: resolved("pay-period") });
+    expect(latest("TimesheetExport")).toMatchObject({
+      startDate: "2026-03-08",
+    });
+    expect(latest("TimeframeSelector")).toMatchObject({
+      payPeriodSettings,
+      timeframe: "pay-period",
+    });
+  });
+
   it("exports the whole org's entries when viewing all", () => {
     renderView({
       selectedUserIdPromise: resolved("all"),

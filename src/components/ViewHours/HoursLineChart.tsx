@@ -71,7 +71,7 @@ export function HoursLineChart(props: HoursLineChartProps) {
     if (timeframe === "year") {
       return format(start, "yyyy");
     }
-    if (timeframe === "custom") {
+    if (timeframe === "custom" || timeframe === "pay-period") {
       return `${format(start, "MMM d, yyyy")} - ${endDate ? format(new Date(endDate.includes("T") ? endDate : `${endDate}T00:00:00`), "MMM d, yyyy") : ""}`;
     }
     return timeframe || "custom";

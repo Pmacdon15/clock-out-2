@@ -112,6 +112,20 @@ export type OvertimeSettingsData = {
 };
 
 /**
+ * When paydays fall and which worked days each one pays for. A payday every
+ * week or two weeks from `anchor_payday` (YYYY-MM-DD) pays for the 7 or 14
+ * days ending `holdback_days` before it.
+ */
+export type PayPeriodSettingsData = {
+  org_id: string;
+  enabled: boolean;
+  frequency: "weekly" | "bi-weekly";
+  anchor_payday: string;
+  holdback_days: number;
+  updated_at?: Date;
+};
+
+/**
  * A member's pay rate. Gross pay is regular hours × `hourly_rate` plus
  * overtime hours × `hourly_rate` × `overtime_multiplier`.
  */
@@ -181,6 +195,9 @@ export interface DashboardTabsProps {
   overtimeSettingsPromise?: Promise<
     SerializableResult<OvertimeSettingsData | null, { reason: string }>
   >;
+  payPeriodSettingsPromise?: Promise<
+    SerializableResult<PayPeriodSettingsData | null, { reason: string }>
+  >;
   /** Admins get every member's rate; members get only their own. */
   payRatesPromise?: Promise<
     SerializableResult<PayRateData[], { reason: string }>
@@ -238,6 +255,8 @@ export interface ViewHoursProps {
   isAdmin?: boolean;
   breakSettings?: BreakSettingsData | null;
   overtimeSettings?: OvertimeSettingsData | null;
+  /** Adds a Pay Period timeframe to the Hours view when enabled. */
+  payPeriodSettings?: PayPeriodSettingsData | null;
   /** Rates the viewer may see; gross pay is estimated for these members. */
   payRates?: PayRateData[];
   /** Deductions are estimated beside gross pay when enabled. */

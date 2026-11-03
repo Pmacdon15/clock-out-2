@@ -25,6 +25,7 @@ export default function ViewHours({
   isAdmin = false,
   breakSettings,
   overtimeSettings,
+  payPeriodSettings,
   payRates,
   payroll,
   membersPromise,
@@ -152,12 +153,13 @@ export default function ViewHours({
           endDate={endDate}
           isAdmin={isAdmin}
           members={members}
+          payPeriodSettings={payPeriodSettings}
           selectedUserId={selectedUserId}
           startDate={startDate}
           timeframe={timeframe}
         />
 
-        {timeframe === "custom" && (
+        {(timeframe === "custom" || timeframe === "pay-period") && (
           <TimesheetExport
             breakSettings={breakSettings}
             employeeName={employeeName}

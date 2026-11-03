@@ -6,8 +6,26 @@ import type { Route } from "next";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTimeframeDefaults } from "@/hooks/useTimeframeDefaults";
 import { getMonthRange, getWeekRange, getYearRange } from "@/lib/date-utils";
+import {
+  formatPayday,
+  formatPayPeriodRange,
+  getPayPeriod,
+  isPayPeriodEnabled,
+  listPayPeriods,
+  payPeriodRangeValue,
+} from "@/lib/pay-period";
+import type { PayPeriodSettingsData } from "@/lib/types";
 
-export type TimeframeValue = "week" | "month" | "year" | "custom" | "all";
+export type TimeframeValue =
+  | "week"
+  | "pay-period"
+  | "month"
+  | "year"
+  | "custom"
+  | "all";
+
+/** Earlier pay periods listed in the picker, besides the current one. */
+const PAST_PAY_PERIODS = 12;
 
 interface TimeframeSelectorProps {
   timeframe: TimeframeValue;
@@ -18,6 +36,8 @@ interface TimeframeSelectorProps {
   members?: { id: string; name: string }[];
   selectedUserId?: string;
   currentUserId?: string | null | undefined;
+  /** Offers a Pay Period timeframe when enabled. */
+  payPeriodSettings?: PayPeriodSettingsData | null;
 }
 
 export function TimeframeSelector({
@@ -29,6 +49,7 @@ export function TimeframeSelector({
   members,
   selectedUserId,
   currentUserId,
+  payPeriodSettings,
 }: TimeframeSelectorProps) {
   useTimeframeDefaults();
   const router = useRouter();
@@ -59,6 +80,16 @@ export function TimeframeSelector({
   const currentDate = currentStart.getDate();
   const currentWeek = Math.min(4, Math.ceil(currentDate / 7));
 
+  const payPeriods = isPayPeriodEnabled(payPeriodSettings)
+    ? payPeriodSettings
+    : null;
+  const selectedPayPeriod = payPeriods
+    ? getPayPeriod(payPeriods, currentStart)
+    : null;
+  const timeframes: TimeframeValue[] = payPeriods
+    ? ["week", "pay-period", "month", "year", "custom", "all"]
+    : ["week", "month", "year", "custom", "all"];
+
   const handleDropdownChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const [start, end] = e.target.value.split("|");
     updateParams({ start, end });
@@ -75,6 +106,10 @@ export function TimeframeSelector({
       [start, end] = getMonthRange(currentYear, currentMonth).split("|");
     } else if (t === "year") {
       [start, end] = getYearRange(currentYear).split("|");
+    } else if (t === "pay-period" && payPeriods) {
+      [start, end] = payPeriodRangeValue(
+        getPayPeriod(payPeriods, new Date()),
+      ).split("|");
     }
     updateParams({ timeframe: t, ...(start && end ? { start, end } : {}) });
   };
@@ -125,7 +160,7 @@ export function TimeframeSelector({
 
       <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
         <div className="flex max-w-full overflow-x-auto rounded-lg bg-zinc-100 p-1 dark:bg-zinc-900">
-          {(["week", "month", "year", "custom", "all"] as const).map((t) => (
+          {timeframes.map((t) => (
             <button
               className={`whitespace-nowrap rounded-md px-4 py-1.5 font-semibold text-xs transition-all ${
                 timeframe === t
@@ -136,7 +171,7 @@ export function TimeframeSelector({
               onClick={() => handleTimeframeChange(t)}
               type="button"
             >
-              {t.toUpperCase()}
+              {t.replace("-", " ").toUpperCase()}
             </button>
           ))}
         </div>
@@ -212,6 +247,35 @@ export function TimeframeSelector({
                 </option>
               ))}
             </select>
+          </div>
+        )}
+
+        {timeframe === "pay-period" && payPeriods && selectedPayPeriod && (
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+            <Calendar className="h-4 w-4 text-zinc-400" />
+            <select
+              aria-label="Pay period"
+              className="rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-xs outline-none focus:ring-1 focus:ring-zinc-400 dark:border-zinc-800 dark:bg-zinc-950"
+              onChange={handleDropdownChange}
+              value={payPeriodRangeValue(selectedPayPeriod)}
+            >
+              {listPayPeriods(
+                payPeriods,
+                currentStart,
+                PAST_PAY_PERIODS,
+                1,
+              ).map((period) => (
+                <option
+                  key={period.payday.toISOString()}
+                  value={payPeriodRangeValue(period)}
+                >
+                  {formatPayPeriodRange(period)}
+                </option>
+              ))}
+            </select>
+            <span className="font-semibold text-xs text-zinc-500 dark:text-zinc-400">
+              Paid {formatPayday(selectedPayPeriod)}
+            </span>
           </div>
         )}
 

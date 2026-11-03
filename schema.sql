@@ -267,3 +267,16 @@ CREATE TABLE IF NOT EXISTS payroll_rates (
     fetched_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     PRIMARY KEY (jurisdiction, effective_from)
 );
+
+-- When paydays fall: every 7 ('weekly') or 14 ('bi-weekly') days from
+-- anchor_payday (YYYY-MM-DD). Each payday pays for the 7 or 14 days ending
+-- holdback_days before it (0 = the period ends on payday). When enabled the
+-- Hours view offers a Pay Period timeframe.
+CREATE TABLE IF NOT EXISTS pay_period_settings (
+    org_id TEXT PRIMARY KEY REFERENCES settings(org_id) ON DELETE CASCADE,
+    enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    frequency TEXT NOT NULL DEFAULT 'bi-weekly',
+    anchor_payday TEXT NOT NULL,
+    holdback_days INTEGER NOT NULL DEFAULT 0,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);

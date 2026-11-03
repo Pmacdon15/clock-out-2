@@ -35,6 +35,7 @@ export default function DashboardTabs({
   breakSettingsPromise,
   locationSettingsPromise,
   overtimeSettingsPromise,
+  payPeriodSettingsPromise,
   payRatesPromise,
   payrollPromise,
   sitesPromise,
@@ -87,6 +88,12 @@ export default function DashboardTabs({
     : null;
   const overtimeSettings = overtimeSettingsResult?.ok
     ? overtimeSettingsResult.value
+    : null;
+  const payPeriodSettingsResult = payPeriodSettingsPromise
+    ? use(payPeriodSettingsPromise)
+    : null;
+  const payPeriodSettings = payPeriodSettingsResult?.ok
+    ? payPeriodSettingsResult.value
     : null;
   const payRatesResult = payRatesPromise ? use(payRatesPromise) : null;
   const payRates = payRatesResult?.ok ? payRatesResult.value : [];
@@ -180,6 +187,7 @@ export default function DashboardTabs({
             membersPromise={membersPromise}
             orgTimeEntriesPromise={orgTimeEntriesPromise}
             overtimeSettings={overtimeSettings}
+            payPeriodSettings={payPeriodSettings}
             payRates={payRates}
             payroll={payroll}
             selectedMonthPromise={selectedMonthPromise}
@@ -255,6 +263,7 @@ export default function DashboardTabs({
               membersPromise={membersPromise}
               orgSettingsPromise={orgSettingsPromise}
               overtimeSettingsPromise={overtimeSettingsPromise}
+              payPeriodSettingsPromise={payPeriodSettingsPromise}
               payRates={payRates}
               payroll={payroll}
               sitesPromise={sitesPromise}

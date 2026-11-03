@@ -29,6 +29,7 @@ import {
   updateLocationSettingsDal,
   updateMemberPayRateDal,
   updateOvertimeSettingsDal,
+  updatePayPeriodSettingsDal,
   updateReportingSettingsDal,
 } from "./dal";
 import type { Coordinates } from "./geo";
@@ -39,6 +40,7 @@ import type {
   BreakCountLimits,
   BreakLimits,
   BreakType,
+  PayPeriodSettingsData,
   TimeOffType,
 } from "./types";
 
@@ -213,6 +215,30 @@ export async function updateOvertimeSettingsAction(
   return result.match(
     (entry) => {
       updateTag(`overtime-settings-${entry.org_id}`);
+      return { success: true, data: entry };
+    },
+    (err) => {
+      return { success: false, error: err.reason };
+    },
+  );
+}
+
+export async function updatePayPeriodSettingsAction(
+  enabled: boolean,
+  frequency: PayPeriodSettingsData["frequency"],
+  anchorPayday: string,
+  holdbackDays: number,
+) {
+  const result = await updatePayPeriodSettingsDal(
+    enabled,
+    frequency,
+    anchorPayday,
+    holdbackDays,
+  );
+
+  return result.match(
+    (entry) => {
+      updateTag(`pay-period-settings-${entry.org_id}`);
       return { success: true, data: entry };
     },
     (err) => {

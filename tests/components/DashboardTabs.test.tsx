@@ -432,6 +432,54 @@ describe("DashboardTabs", () => {
     expect(latest(captured.viewHours).overtimeSettings).toBeNull();
   });
 
+  it("passes pay period settings to the hours view and the settings tab", () => {
+    const payPeriodSettings = {
+      org_id: "org_1",
+      enabled: true,
+      frequency: "weekly" as const,
+      anchor_payday: "2026-11-13",
+      holdback_days: 7,
+    };
+    const payPeriodSettingsPromise = ok(payPeriodSettings);
+    render(
+      <DashboardTabs
+        {...props({
+          defaultTabPromise: resolved("view"),
+          payPeriodSettingsPromise,
+        })}
+      />,
+    );
+    expect(latest(captured.viewHours).payPeriodSettings).toEqual(
+      payPeriodSettings,
+    );
+
+    render(
+      <DashboardTabs
+        {...props({
+          defaultTabPromise: resolved("settings"),
+          isAdminPromise: resolved(true),
+          payPeriodSettingsPromise,
+        })}
+      />,
+    );
+    expect(latest(captured.orgSettings).payPeriodSettingsPromise).toBe(
+      payPeriodSettingsPromise,
+    );
+
+    render(
+      <DashboardTabs
+        {...props({
+          defaultTabPromise: resolved("view"),
+          payPeriodSettingsPromise: resolved({
+            ok: false,
+            error: { reason: "err" },
+          }),
+        })}
+      />,
+    );
+    expect(latest(captured.viewHours).payPeriodSettings).toBeNull();
+  });
+
   it("passes pay rates to the hours view and the settings tab", () => {
     const rates = [
       {
