@@ -8,11 +8,17 @@ const mocks = vi.hoisted(() => ({
   updateScheduledShiftDal: vi.fn(),
   after: vi.fn((fn: () => unknown) => fn()),
   notifyScheduleChange: vi.fn(),
+  syncShiftReminderJob: vi.fn(() => Promise.resolve(true)),
 }));
 
 vi.mock("next/server", () => ({ after: mocks.after }));
 vi.mock("@/lib/schedule-notify", () => ({
   notifyScheduleChange: mocks.notifyScheduleChange,
+}));
+
+vi.mock("@/lib/alert-jobs", () => ({
+  queueShiftAlertSync: vi.fn(),
+  syncShiftReminderJob: mocks.syncShiftReminderJob,
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: { protect: vi.fn() } }));
@@ -47,12 +53,14 @@ describe("createScheduledShiftAction", () => {
       ),
     ).resolves.toEqual({ success: true, data: shift });
     // The member is told after the response, in the admin's zone as a fallback.
-    expect(mocks.after).toHaveBeenCalledTimes(1);
+    // The member is told, and the shift's reminder job is scheduled.
+    expect(mocks.after).toHaveBeenCalledTimes(2);
     expect(mocks.notifyScheduleChange).toHaveBeenCalledWith(
       "added",
       shift,
       "America/Regina",
     );
+    expect(mocks.syncShiftReminderJob).toHaveBeenCalledWith("added", shift);
     expect(mocks.createScheduledShiftDal).toHaveBeenCalledWith(
       "user_1",
       new Date("2026-01-05T09:00:00.000Z"),
@@ -85,6 +93,7 @@ describe("deleteScheduledShiftAction", () => {
       shift,
       "UTC",
     );
+    expect(mocks.syncShiftReminderJob).toHaveBeenCalledWith("removed", shift);
   });
 
   it("returns the error", async () => {
@@ -122,6 +131,7 @@ describe("updateScheduledShiftAction", () => {
       shift,
       "UTC",
     );
+    expect(mocks.syncShiftReminderJob).toHaveBeenCalledWith("changed", shift);
   });
 
   it("returns the error", async () => {
@@ -131,5 +141,27 @@ describe("updateScheduledShiftAction", () => {
       error: "nope",
     });
     expect(mocks.notifyScheduleChange).not.toHaveBeenCalled();
+  });
+});
+
+describe("shift reminder scheduling", () => {
+  it("logs, and never fails the save, when the reminder can't be scheduled", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const boom = new Error("qstash down");
+    mocks.syncShiftReminderJob.mockRejectedValueOnce(boom);
+    mocks.createScheduledShiftDal.mockResolvedValue(ok(shift));
+    await expect(
+      createScheduledShiftAction(
+        "user_1",
+        "2026-01-05T09:00:00.000Z",
+        "2026-01-05T17:00:00.000Z",
+      ),
+    ).resolves.toEqual({ success: true, data: shift });
+    await vi.waitFor(() =>
+      expect(error).toHaveBeenCalledWith(
+        "[Jobs] Failed to schedule shift reminder:",
+        boom,
+      ),
+    );
   });
 });

@@ -24,7 +24,7 @@ const valuesOf = (call: number) => sql.mock.calls[call].slice(1);
 const allText = () => sql.mock.calls.map((_c, i) => textOf(i)).join("\n");
 
 /** Number of statements `ensureAlertTables` runs the first time. */
-const ENSURE_STATEMENTS = 11;
+const ENSURE_STATEMENTS = 12;
 
 const input = {
   forgot_clock_out_enabled: true,
@@ -80,6 +80,7 @@ describe("ensureAlertTables", () => {
       "push_subscriptions",
       "sent_alerts",
       "fcm_tokens",
+      "alert_jobs",
     ]) {
       expect(text).toContain(`CREATE TABLE IF NOT EXISTS ${table}`);
     }
@@ -381,5 +382,57 @@ describe("FCM tokens", () => {
     await expect(adb.dbPruneStaleFcmTokens(240)).resolves.toBe(2);
     expect(textOf(0)).toContain("last_seen_at <");
     expect(valuesOf(0)).toEqual([240]);
+  });
+});
+
+describe("alert jobs", () => {
+  const runAt = new Date("2026-11-03T12:00:00Z");
+  const row = {
+    job_key: "shift-alerts:org_1",
+    org_id: "org_1",
+    message_id: "msg_1",
+    run_at: runAt,
+  };
+
+  it("reads a job by key", async () => {
+    await primeTables();
+    sql.mockResolvedValueOnce([row]);
+    await expect(adb.dbGetAlertJob(row.job_key)).resolves.toEqual(row);
+    expect(textOf(0)).toContain("FROM alert_jobs");
+    expect(valuesOf(0)).toEqual([row.job_key]);
+  });
+
+  it("upserts a job", async () => {
+    await primeTables();
+    await adb.dbUpsertAlertJob(row.job_key, "org_1", "msg_2", runAt);
+    expect(textOf(0)).toContain("INSERT INTO alert_jobs");
+    expect(textOf(0)).toContain("ON CONFLICT (job_key)");
+    expect(valuesOf(0)).toEqual([
+      row.job_key,
+      "org_1",
+      "msg_2",
+      runAt,
+      "org_1",
+      "msg_2",
+      runAt,
+    ]);
+  });
+
+  it("deletes a job and returns it", async () => {
+    await primeTables();
+    sql.mockResolvedValueOnce([row]);
+    await expect(adb.dbDeleteAlertJob(row.job_key)).resolves.toEqual(row);
+    expect(textOf(0)).toContain("DELETE FROM alert_jobs");
+  });
+
+  it("reports which alert keys were already sent", async () => {
+    await expect(adb.dbGetClaimedAlertKeys([])).resolves.toEqual(new Set());
+    expect(sql).not.toHaveBeenCalled();
+    await primeTables();
+    sql.mockResolvedValueOnce([{ alert_key: "forgot:1" }]);
+    await expect(
+      adb.dbGetClaimedAlertKeys(["forgot:1", "break:2"]),
+    ).resolves.toEqual(new Set(["forgot:1"]));
+    expect(valuesOf(0)).toEqual([["forgot:1", "break:2"]]);
   });
 });

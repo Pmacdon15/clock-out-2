@@ -180,8 +180,19 @@ CREATE TABLE IF NOT EXISTS fcm_tokens (
 CREATE INDEX IF NOT EXISTS idx_fcm_tokens_user ON fcm_tokens (user_id);
 CREATE INDEX IF NOT EXISTS idx_fcm_tokens_endpoint ON fcm_tokens (endpoint);
 
+-- One delayed QStash message per job (e.g. 'shift-alerts:<org id>' or
+-- 'upcoming:<scheduled shift id>'), so it can be cancelled or moved when the
+-- shift, break or rule behind it changes.
+CREATE TABLE IF NOT EXISTS alert_jobs (
+    job_key TEXT PRIMARY KEY,
+    org_id TEXT NOT NULL,
+    message_id TEXT NOT NULL,
+    run_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 -- Every alert sent, keyed e.g. 'forgot:<entry id>' or 'break:<break id>', so
--- each alert goes out once however often the cron runs.
+-- each alert goes out once however often it is checked.
 CREATE TABLE IF NOT EXISTS sent_alerts (
     alert_key TEXT PRIMARY KEY,
     org_id TEXT NOT NULL,

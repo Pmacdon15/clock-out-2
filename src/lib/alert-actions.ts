@@ -1,6 +1,7 @@
 "use server";
 
 import { updateTag } from "next/cache";
+import { queueShiftAlertSync } from "./alert-jobs";
 import {
   deletePushSubscriptionDal,
   saveFcmTokenDal,
@@ -22,6 +23,8 @@ export async function updateAlertSettingsAction(input: AlertSettingsInput) {
   return result.match(
     (row) => {
       updateTag(`alert-settings-${row.org_id}`);
+      // New thresholds move (or cancel) the org's next alert.
+      queueShiftAlertSync(row.org_id);
       return { success: true as const, data: row };
     },
     (e) => ({ success: false as const, error: e.reason }),

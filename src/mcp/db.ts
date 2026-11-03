@@ -1,5 +1,6 @@
 import { neon } from "@neondatabase/serverless";
 import { revalidateTag } from "next/cache";
+import { queueShiftAlertSync } from "@/lib/alert-jobs";
 import {
   attachBreaks,
   dbClockIn,
@@ -224,6 +225,8 @@ export function invalidateTimeEntryCache(userId: string, orgId: string) {
   } catch (error) {
     console.warn("Cache invalidation warning:", error);
   }
+  // Every entry or break change can move when the org's next alert is due.
+  queueShiftAlertSync(orgId);
 }
 
 export function invalidateReportingSettingsCache(orgId: string) {
@@ -240,6 +243,8 @@ export function invalidateBreakSettingsCache(orgId: string) {
   } catch (error) {
     console.warn("Cache invalidation warning:", error);
   }
+  // Break limits decide when "your break is over" is sent.
+  queueShiftAlertSync(orgId);
 }
 
 export function invalidateLocationSettingsCache(orgId: string) {

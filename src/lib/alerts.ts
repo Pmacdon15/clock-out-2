@@ -308,6 +308,79 @@ export function planShiftAlerts({
   return planned;
 }
 
+/**
+ * When this org's next alert falls due, or null when nothing is pending — the
+ * moment to wake the alert check. Mirrors {@link planShiftAlerts}: alerts
+ * already sent (`claimed`) don't count, a shift's forgot-to-clock-out reminder
+ * only counts while it comes before its automatic clock-out, and breaks on a
+ * shift that is past its auto clock-out are left to that. Pure.
+ */
+export function nextShiftAlertDueAt({
+  settings,
+  breakSettings,
+  shifts,
+  breaks,
+  claimed,
+}: {
+  settings: AlertSettingsInput;
+  breakSettings?: BreakSettingsData | null;
+  shifts: OpenShift[];
+  breaks: OpenShiftBreak[];
+  claimed: Set<string>;
+}): Date | null {
+  let next = Number.POSITIVE_INFINITY;
+  const consider = (ms: number) => {
+    if (ms < next) next = ms;
+  };
+  const autoAt = new Map<number, number>();
+
+  for (const shift of shifts) {
+    const start = new Date(shift.clock_in).getTime();
+    const auto = settings.auto_clock_out_enabled
+      ? start + settings.auto_clock_out_hours * HOUR_MS
+      : Number.POSITIVE_INFINITY;
+    if (settings.auto_clock_out_enabled) {
+      autoAt.set(shift.id, auto);
+      consider(auto);
+    }
+    const forgot = start + settings.forgot_clock_out_hours * HOUR_MS;
+    if (
+      settings.forgot_clock_out_enabled &&
+      forgot < auto &&
+      !claimed.has(`forgot:${shift.id}`)
+    ) {
+      consider(forgot);
+    }
+  }
+
+  if (settings.break_reminder_enabled) {
+    for (const brk of breaks) {
+      if (claimed.has(`break:${brk.id}`)) continue;
+      const limit = getBreakLimitMinutes(brk.break_type, breakSettings);
+      const reminder = settings.break_reminder_minutes;
+      const threshold = limit !== null && limit <= reminder ? limit : reminder;
+      const due = new Date(brk.break_start).getTime() + threshold * MINUTE_MS;
+      // Its shift closes first: the auto clock-out ends the break anyway.
+      const auto = autoAt.get(brk.time_entry_id);
+      if (auto !== undefined && auto <= due) continue;
+      consider(due);
+    }
+  }
+
+  return Number.isFinite(next) ? new Date(next) : null;
+}
+
+/** The alert keys {@link nextShiftAlertDueAt} needs to know were sent. */
+export function pendingAlertKeys(
+  shifts: OpenShift[],
+  breaks: OpenShiftBreak[],
+): string[] {
+  return [
+    ...shifts.map((s) => `forgot:${s.id}`),
+    ...breaks.map((b) => `break:${b.id}`),
+  ];
+}
+
 /* ----------------------------------------------------------- wording -- */
 
 export type AlertCategory =

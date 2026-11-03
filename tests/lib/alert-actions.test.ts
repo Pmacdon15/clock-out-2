@@ -11,9 +11,13 @@ const mocks = vi.hoisted(() => ({
   updateAlertSettingsDal: vi.fn(),
   updateNotificationPreferencesDal: vi.fn(),
   saveFcmTokenDal: vi.fn(),
+  queueShiftAlertSync: vi.fn(),
 }));
 
 vi.mock("next/cache", () => ({ updateTag: mocks.updateTag }));
+vi.mock("@/lib/alert-jobs", () => ({
+  queueShiftAlertSync: mocks.queueShiftAlertSync,
+}));
 vi.mock("@/lib/alerts-dal", () => ({
   saveFcmTokenDal: mocks.saveFcmTokenDal,
   deletePushSubscriptionDal: mocks.deletePushSubscriptionDal,
@@ -48,6 +52,8 @@ describe("alert actions", () => {
       updateAlertSettingsAction(DEFAULT_ALERT_SETTINGS),
     ).resolves.toEqual({ success: true, data: { org_id: "org_1" } });
     expect(mocks.updateTag).toHaveBeenCalledWith("alert-settings-org_1");
+    // New thresholds reschedule the org's next alert.
+    expect(mocks.queueShiftAlertSync).toHaveBeenCalledWith("org_1");
 
     mocks.updateAlertSettingsDal.mockResolvedValueOnce(failure);
     await expect(

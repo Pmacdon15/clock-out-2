@@ -23,12 +23,17 @@ const mocks = vi.hoisted(() => ({
   sendWeeklyReports: vi.fn(),
   reverseGeocode: vi.fn(),
   searchAddress: vi.fn(),
+  queueShiftAlertSync: vi.fn(),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: { protect: mocks.protect } }));
 vi.mock("next/cache", () => ({ updateTag: mocks.updateTag }));
 vi.mock("next/server", () => ({ after: vi.fn() }));
 vi.mock("@/lib/schedule-notify", () => ({ notifyScheduleChange: vi.fn() }));
+vi.mock("@/lib/alert-jobs", () => ({
+  queueShiftAlertSync: mocks.queueShiftAlertSync,
+  syncShiftReminderJob: vi.fn(),
+}));
 vi.mock("@/lib/geoapify", () => ({
   reverseGeocode: mocks.reverseGeocode,
   searchAddress: mocks.searchAddress,
@@ -90,6 +95,8 @@ describe("clockInAction", () => {
     expect(mocks.updateTag).toHaveBeenCalledWith("time-entries-user_1-org_1");
     // The admin schedule reads the org-wide list, so it must refresh too.
     expect(mocks.updateTag).toHaveBeenCalledWith("org-time-entries-org_1");
+    // The new shift's alerts are scheduled.
+    expect(mocks.queueShiftAlertSync).toHaveBeenCalledWith("org_1");
   });
 
   it("skips revalidation when no entry comes back", async () => {
@@ -99,6 +106,7 @@ describe("clockInAction", () => {
       data: undefined,
     });
     expect(mocks.updateTag).not.toHaveBeenCalled();
+    expect(mocks.queueShiftAlertSync).not.toHaveBeenCalled();
   });
 
   it("returns the failure reason", async () => {
@@ -133,6 +141,7 @@ describe.each([
   it("revalidates user and org entries on success", async () => {
     dalFn.mockResolvedValue(ok(entry));
     await expect(action()).resolves.toEqual({ success: true, ...extra });
+    expect(mocks.queueShiftAlertSync).toHaveBeenCalledWith("org_1");
     expect(mocks.updateTag).toHaveBeenCalledWith("time-entries-user_1-org_1");
     expect(mocks.updateTag).toHaveBeenCalledWith("org-time-entries-org_1");
   });
@@ -293,6 +302,8 @@ describe("updateBreakSettingAction", () => {
       undefined,
     );
     expect(mocks.updateTag).toHaveBeenCalledWith("break-settings-org_1");
+    // New break limits can move "your break is over".
+    expect(mocks.queueShiftAlertSync).toHaveBeenCalledWith("org_1");
   });
 
   it("forwards custom duration and min shift hours", async () => {
@@ -354,6 +365,8 @@ describe("startBreakAction", () => {
     expect(mocks.startBreak).toHaveBeenCalledWith("unpaid_meal");
     expect(mocks.updateTag).toHaveBeenCalledWith("time-entries-user_1-org_1");
     expect(mocks.updateTag).toHaveBeenCalledWith("org-time-entries-org_1");
+    // The break's reminder is scheduled.
+    expect(mocks.queueShiftAlertSync).toHaveBeenCalledWith("org_1");
   });
 
   it("leaves the default (the org's lunch) to the server", async () => {

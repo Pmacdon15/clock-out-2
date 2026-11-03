@@ -21,8 +21,8 @@ import type {
 let alertTablesReady: Promise<void> | null = null;
 
 /**
- * Alert rules, notification preferences, push subscriptions, FCM tokens and
- * the sent-alert log. Production databases that predate them in schema.sql don't have the
+ * Alert rules, notification preferences, push subscriptions, FCM tokens, the
+ * sent-alert log and the scheduled alert jobs. Production databases that predate them in schema.sql don't have the
  * tables, so create them on first use, the same way `ensureBreakSettingsTable`
  * does. Runs once per server instance; a failure is not cached, so the next
  * call retries.
@@ -105,6 +105,15 @@ export function ensureAlertTables(): Promise<void> {
 	`;
     await sql`
 		CREATE INDEX IF NOT EXISTS idx_fcm_tokens_endpoint ON fcm_tokens (endpoint)
+	`;
+    await sql`
+		CREATE TABLE IF NOT EXISTS alert_jobs (
+			job_key TEXT PRIMARY KEY,
+			org_id TEXT NOT NULL,
+			message_id TEXT NOT NULL,
+			run_at TIMESTAMP WITH TIME ZONE NOT NULL,
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+		)
 	`;
   })().catch((error) => {
     alertTablesReady = null;
@@ -392,6 +401,64 @@ export async function dbPruneStaleFcmTokens(days: number) {
 		RETURNING token
 	`;
   return rows.length;
+}
+
+/* ---------------------------------------------------------- alert jobs -- */
+
+/** A delayed QStash message waiting to run an alert check. */
+export type AlertJobRow = {
+  job_key: string;
+  org_id: string;
+  message_id: string;
+  run_at: Date;
+};
+
+export async function dbGetAlertJob(jobKey: string) {
+  await ensureAlertTables();
+  const [row] = await sql`
+		SELECT job_key, org_id, message_id, run_at
+		FROM alert_jobs WHERE job_key = ${jobKey}
+	`;
+  return row as unknown as AlertJobRow | undefined;
+}
+
+export async function dbUpsertAlertJob(
+  jobKey: string,
+  orgId: string,
+  messageId: string,
+  runAt: Date,
+) {
+  await ensureAlertTables();
+  await sql`
+		INSERT INTO alert_jobs (job_key, org_id, message_id, run_at, updated_at)
+		VALUES (${jobKey}, ${orgId}, ${messageId}, ${runAt}, NOW())
+		ON CONFLICT (job_key)
+		DO UPDATE SET
+			org_id = ${orgId},
+			message_id = ${messageId},
+			run_at = ${runAt},
+			updated_at = NOW()
+	`;
+}
+
+/** Forgets a job, returning it (so its message can be cancelled). */
+export async function dbDeleteAlertJob(jobKey: string) {
+  await ensureAlertTables();
+  const [row] = await sql`
+		DELETE FROM alert_jobs WHERE job_key = ${jobKey}
+		RETURNING job_key, org_id, message_id, run_at
+	`;
+  return row as unknown as AlertJobRow | undefined;
+}
+
+/** Which of these alert keys have already been sent. */
+export async function dbGetClaimedAlertKeys(alertKeys: string[]) {
+  if (alertKeys.length === 0) return new Set<string>();
+  await ensureAlertTables();
+  const rows = (await sql`
+		SELECT alert_key FROM sent_alerts WHERE alert_key = ANY(${alertKeys})
+	`) as unknown as { alert_key: string }[];
+  return new Set(rows.map((r) => r.alert_key));
 }
 
 /* ---------------------------------------------------------- cron reads -- */

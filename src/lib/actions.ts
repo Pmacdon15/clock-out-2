@@ -5,6 +5,7 @@ import { startOfDay, subDays } from "date-fns";
 import type { Result } from "neverthrow";
 import { updateTag } from "next/cache";
 import { after } from "next/server";
+import { queueShiftAlertSync, syncShiftReminderJob } from "./alert-jobs";
 import {
   cancelTimeOffRequestDal as dalCancelTimeOffRequest,
   clockIn as dalClockIn,
@@ -56,6 +57,8 @@ export async function clockInAction(coordinates?: Coordinates | null) {
         // The admin schedule compares shifts with the org-wide list, so a
         // clock-in has to show there right away, not only at clock-out.
         updateTag(`org-time-entries-${entry.org_id}`);
+        // When this shift's next alert is due may have changed.
+        queueShiftAlertSync(entry.org_id);
       }
       return { success: true, data: entry };
     },
@@ -73,6 +76,8 @@ export async function clockOutAction(coordinates?: Coordinates | null) {
       if (entry) {
         updateTag(`time-entries-${entry.user_id}-${entry.org_id}`);
         updateTag(`org-time-entries-${entry.org_id}`);
+        // When this shift's next alert is due may have changed.
+        queueShiftAlertSync(entry.org_id);
       }
       return { success: true, data: entry };
     },
@@ -90,6 +95,8 @@ export async function deleteTimeEntryAction(id: number) {
       if (entry) {
         updateTag(`time-entries-${entry.user_id}-${entry.org_id}`);
         updateTag(`org-time-entries-${entry.org_id}`);
+        // When this shift's next alert is due may have changed.
+        queueShiftAlertSync(entry.org_id);
       }
       return { success: true };
     },
@@ -117,6 +124,8 @@ export async function updateTimeEntryAction(
       if (entry) {
         updateTag(`time-entries-${entry.user_id}-${entry.org_id}`);
         updateTag(`org-time-entries-${entry.org_id}`);
+        // When this shift's next alert is due may have changed.
+        queueShiftAlertSync(entry.org_id);
       }
       return { success: true, data: entry };
     },
@@ -182,6 +191,8 @@ export async function updateBreakSettingAction(
   return result.match(
     (entry) => {
       updateTag(`break-settings-${entry.org_id}`);
+      // Break time limits decide when "your break is over" is sent.
+      queueShiftAlertSync(entry.org_id);
       return { success: true, data: entry };
     },
     (err) => {
@@ -220,6 +231,8 @@ function updateBreakTags(entry: { user_id: string; org_id: string }) {
     updateTag(`time-entries-${entry.user_id}-${entry.org_id}`);
   }
   updateTag(`org-time-entries-${entry.org_id}`);
+  // A break starting, ending or moving changes when its reminder is due.
+  queueShiftAlertSync(entry.org_id);
 }
 
 export async function startBreakAction(breakType?: BreakType) {
@@ -421,6 +434,7 @@ export async function createScheduledShiftAction(
     (shift) => {
       updateTag(`scheduled-shifts-${shift.org_id}`);
       after(() => notifyScheduleChange("added", shift, timezone));
+      after(() => syncShiftReminderJob("added", shift).catch(logJobError));
       return { success: true as const, data: shift };
     },
     (err) => {
@@ -449,6 +463,7 @@ export async function updateScheduledShiftAction(
     (shift) => {
       updateTag(`scheduled-shifts-${shift.org_id}`);
       after(() => notifyScheduleChange("changed", shift, timezone));
+      after(() => syncShiftReminderJob("changed", shift).catch(logJobError));
       return { success: true as const, data: shift };
     },
     (err) => {
@@ -467,12 +482,17 @@ export async function deleteScheduledShiftAction(
     (shift) => {
       updateTag(`scheduled-shifts-${shift.org_id}`);
       after(() => notifyScheduleChange("removed", shift, timezone));
+      after(() => syncShiftReminderJob("removed", shift).catch(logJobError));
       return { success: true as const };
     },
     (err) => {
       return { success: false as const, error: err.reason };
     },
   );
+}
+
+function logJobError(error: unknown) {
+  console.error("[Jobs] Failed to schedule shift reminder:", error);
 }
 
 /** Time off shows in the time off tab, the Hours view and reports. */

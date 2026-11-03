@@ -5,6 +5,14 @@ const mocks = vi.hoisted(() => ({
   runShiftAlerts: vi.fn(),
   runWeeklyScheduleDigests: vi.fn(),
   runUpcomingShiftReminders: vi.fn(),
+  scheduleAllAlertJobs: vi.fn(),
+  dbPruneStaleFcmTokens: vi.fn(),
+}));
+vi.mock("@/lib/alert-jobs", () => ({
+  scheduleAllAlertJobs: mocks.scheduleAllAlertJobs,
+}));
+vi.mock("@/lib/alerts-db", () => ({
+  dbPruneStaleFcmTokens: mocks.dbPruneStaleFcmTokens,
 }));
 vi.mock("@/lib/alerts-runner", () => ({
   runShiftAlerts: mocks.runShiftAlerts,
@@ -23,6 +31,7 @@ const request = (auth?: string) =>
 
 const digests = { digests: 1, emails: 1, pushes: 0 };
 const reminders = { reminders: 2, emails: 2, pushes: 1 };
+const jobs = { orgs: 1, reminders: 3, digests: 2 };
 
 beforeEach(() => {
   vi.stubEnv("CRON_SECRET", "cron-secret");
@@ -30,6 +39,8 @@ beforeEach(() => {
   mocks.runShiftAlerts.mockResolvedValue([{ orgId: "org_1", status: "ok" }]);
   mocks.runWeeklyScheduleDigests.mockResolvedValue(digests);
   mocks.runUpcomingShiftReminders.mockResolvedValue(reminders);
+  mocks.scheduleAllAlertJobs.mockResolvedValue(jobs);
+  mocks.dbPruneStaleFcmTokens.mockResolvedValue(4);
 });
 
 describe("/api/cron/shift-alerts", () => {
@@ -49,8 +60,15 @@ describe("/api/cron/shift-alerts", () => {
         orgs: [{ orgId: "org_1", status: "ok" }],
         schedules: digests,
         reminders,
+        jobs,
+        prunedTokens: 4,
       });
     }
+    // The sweep schedules the exactly-timed jobs from the same clock.
+    expect(mocks.scheduleAllAlertJobs.mock.calls[0][0]).toBe(
+      mocks.runShiftAlerts.mock.calls[0][0],
+    );
+    expect(mocks.dbPruneStaleFcmTokens).toHaveBeenCalledWith(240);
     expect(mocks.runShiftAlerts.mock.calls[0][0]).toBe(
       mocks.runWeeklyScheduleDigests.mock.calls[0][0],
     );
@@ -92,5 +110,22 @@ describe("/api/cron/shift-alerts", () => {
       schedules: digests,
       reminders: null,
     });
+  });
+
+  it("still runs everything else when scheduling or token cleanup fail", async () => {
+    mocks.scheduleAllAlertJobs.mockRejectedValue(new Error("qstash"));
+    mocks.dbPruneStaleFcmTokens.mockRejectedValue(new Error("db"));
+    const res = await GET(request("Bearer cron-secret"));
+    expect(res.status).toBe(500);
+    await expect(res.json()).resolves.toMatchObject({
+      orgs: [{ orgId: "org_1", status: "ok" }],
+      reminders,
+      jobs: null,
+      prunedTokens: null,
+    });
+    expect(console.error).toHaveBeenCalledWith(
+      "[Cron] Alert scheduling failed:",
+      expect.any(Error),
+    );
   });
 });
