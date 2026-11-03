@@ -19,6 +19,16 @@ import { Card } from "./ui";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import ViewHours from "./ViewHours";
 
+// Keep the open tab in the URL so a refresh (or a shared link) lands back on
+// it. replaceState is wired into Next's router (useSearchParams sees it) but
+// does not trigger a server render, so switching tabs stays instant and
+// other params (timeframe, userId, ...) are preserved.
+function syncTabToUrl(tab: string) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("defaultTab", tab);
+  window.history.replaceState(null, "", url);
+}
+
 export default function DashboardTabs({
   defaultTabPromise,
   orgSettingsPromise,
@@ -91,7 +101,21 @@ export default function DashboardTabs({
     hasGeofencing && locationSettingsResult?.ok
       ? locationSettingsResult.value
       : null;
-  const defaultTab = use(defaultTabPromise) || "time-clock";
+  // Only honour ?defaultTab= for a tab this user can actually see, otherwise
+  // a stale or hand-edited link would open onto an empty page.
+  const requestedTab = use(defaultTabPromise);
+  const visibleTabs = [
+    "time-clock",
+    "view",
+    ...(notificationSettingsPromise ? ["notifications"] : []),
+    "schedule",
+    "time-off",
+    ...(isAdmin ? ["settings"] : []),
+  ];
+  const defaultTab =
+    requestedTab && visibleTabs.includes(requestedTab)
+      ? requestedTab
+      : "time-clock";
 
   const [optimisticEntries, setOptimisticEntries] = useOptimistic(
     result.ok ? (result.value ?? []) : [],
@@ -113,7 +137,11 @@ export default function DashboardTabs({
   }
 
   return (
-    <Tabs className="space-y-8" defaultValue={defaultTab}>
+    <Tabs
+      className="space-y-8"
+      defaultValue={defaultTab}
+      onValueChange={syncTabToUrl}
+    >
       {notificationSettingsPromise && (
         <Suspense fallback={null}>
           <TimezoneSync settingsPromise={notificationSettingsPromise} />
