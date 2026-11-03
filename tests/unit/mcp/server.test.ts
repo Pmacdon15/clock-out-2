@@ -194,6 +194,7 @@ describe("Clock Out MCP server", () => {
       "manage_member",
       "manage_notification_preferences",
       "manage_overtime_settings",
+      "manage_pay_period_settings",
       "manage_reporting_settings",
       "manage_schedule",
       "manage_time_off",

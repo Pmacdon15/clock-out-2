@@ -9,6 +9,8 @@ import {
   manageMemberTool,
   manageOvertimeSettingsInputSchema,
   manageOvertimeSettingsTool,
+  managePayPeriodSettingsInputSchema,
+  managePayPeriodSettingsTool,
   manageScheduleInputSchema,
   manageScheduleTool,
   manageTimeOffInputSchema,
@@ -559,6 +561,26 @@ export function registerClockOutTools(server: McpServer) {
     (args, ctx) =>
       run(server, ctx.http?.authInfo, (caller) =>
         manageOvertimeSettingsTool(caller, args),
+      ),
+  );
+
+  server.registerTool(
+    "manage_pay_period_settings",
+    {
+      title: "View or update pay periods",
+      description:
+        "Views or updates the organization's pay periods: how often members are paid ('weekly' or 'bi-weekly'), one payday the rest repeat from, and the hold-back (days between a period's last day and its payday, e.g. 7 for one week). 'get' also returns the pay period that includes a date (today by default) with its start/end dates, payday and report date, plus the previous and next periods — pass those dates to run_hours_report or get_weekly_timecard to see hours for a pay period. Anyone can view; updating is admin-only ('org:admin').",
+      inputSchema: portable(managePayPeriodSettingsInputSchema),
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    (args, ctx) =>
+      run(server, ctx.http?.authInfo, (caller) =>
+        managePayPeriodSettingsTool(caller, args),
       ),
   );
 
