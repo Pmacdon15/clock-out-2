@@ -193,6 +193,7 @@ export default function OrgSettings({
         hasReporting={hasReporting}
         initialData={optimisticReportingSettings}
         onUpdateOptimistic={(next) => setOptimisticReportingSettings(next)}
+        payPeriodSettings={optimisticPayPeriodSettings}
       />
     </div>
   );

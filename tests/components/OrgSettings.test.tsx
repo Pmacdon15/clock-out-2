@@ -13,6 +13,7 @@ import { resolved } from "../utils";
 
 type CapturedProps = {
   hasReporting: boolean;
+  payPeriodSettings?: PayPeriodSettingsData | null;
   initialData: ReportingSettingsData | null;
   onUpdateOptimistic: (next: Partial<ReportingSettingsData>) => void;
 };
@@ -456,6 +457,8 @@ describe("OrgSettings", () => {
       />,
     );
     expect(latestPayPeriod().initialData).toEqual(payPeriodValue);
+    // Reporting follows the pay periods for end-of-period reports.
+    expect(latest().payPeriodSettings).toEqual(payPeriodValue);
 
     updatePayPeriodOptimistically({ holdback_days: 14 });
     expect(latestPayPeriod().initialData).toEqual({

@@ -100,7 +100,8 @@ export default function PayPeriodSettings({
         </h3>
         <p className="text-muted-foreground">
           Set your paydays and any hold-back so everyone can see which days each
-          payday covers. When on, the Hours view gets a Pay Period timeframe.
+          payday covers. When on, the Hours view gets a Pay Period timeframe and
+          emailed reports can go out at the end of each pay period.
         </p>
       </div>
 
