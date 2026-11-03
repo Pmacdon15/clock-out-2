@@ -172,6 +172,34 @@ describe("Service worker push alerts", () => {
     });
   });
 
+  it("unwraps alerts delivered by Firebase Cloud Messaging", async () => {
+    const { listeners, showNotification } = loadWorker();
+    await dispatch(listeners.push, {
+      data: {
+        json: () => ({
+          data: {
+            title: "Your break is over",
+            body: "15m",
+            url: "/?defaultTab=time-clock",
+            tag: "break:3",
+          },
+          from: "123",
+          priority: "high",
+          fcmMessageId: "m-1",
+        }),
+      },
+    });
+    const [title, options] = showNotification.mock.calls[0];
+    expect(title).toBe("Your break is over");
+    expect(options).toMatchObject({ body: "15m", tag: "break:3" });
+  });
+
+  it("shows a bare JSON null push with the defaults", async () => {
+    const { listeners, showNotification } = loadWorker();
+    await dispatch(listeners.push, { data: { json: () => null } });
+    expect(showNotification.mock.calls[0][0]).toBe("Clock Out");
+  });
+
   it("falls back for empty and plain-text pushes", async () => {
     const { listeners, showNotification } = loadWorker();
     await dispatch(listeners.push, { data: null });

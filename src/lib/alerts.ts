@@ -4,6 +4,7 @@ import type {
   AlertSettingsData,
   AlertSettingsInput,
   BreakSettingsData,
+  FcmTokenInput,
   NotificationPreferencesData,
   NotificationPreferencesInput,
   PushSubscriptionInput,
@@ -179,6 +180,31 @@ export function isValidPushSubscription(
     typeof keys.auth === "string" &&
     keys.auth.length > 0 &&
     keys.auth.length <= 512
+  );
+}
+
+const isOptionalHttpsUrl = (value: unknown) =>
+  value === undefined ||
+  value === null ||
+  (typeof value === "string" &&
+    value.length <= 2048 &&
+    value.startsWith("https://"));
+
+/**
+ * FCM registration tokens are opaque, but always URL-safe text of a bounded
+ * length; the endpoints beside them are push service URLs.
+ */
+export function isValidFcmToken(input: unknown): input is FcmTokenInput {
+  if (!input || typeof input !== "object") return false;
+  const { token, endpoint, replacedEndpoint } = input as Record<
+    string,
+    unknown
+  >;
+  return (
+    typeof token === "string" &&
+    /^[A-Za-z0-9_:-]{20,4096}$/.test(token) &&
+    isOptionalHttpsUrl(endpoint) &&
+    isOptionalHttpsUrl(replacedEndpoint)
   );
 }
 

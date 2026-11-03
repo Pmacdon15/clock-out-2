@@ -9,6 +9,7 @@ import { ViewHoursFallback } from "./fallbacks/view-hours-fallback";
 import NotificationSettings from "./NotificationSettings";
 import OrgSettings from "./OrgSettings";
 import { useOrgSwitcher } from "./OrgSwitcher";
+import PushTokenSync from "./PushTokenSync";
 import Schedule from "./Schedule";
 import TimeOff from "./TimeOff";
 import TimezoneSync from "./TimezoneSync";
@@ -106,6 +107,7 @@ export default function DashboardTabs({
       {notificationSettingsPromise && (
         <Suspense fallback={null}>
           <TimezoneSync settingsPromise={notificationSettingsPromise} />
+          <PushTokenSync settingsPromise={notificationSettingsPromise} />
         </Suspense>
       )}
       <TabsList>

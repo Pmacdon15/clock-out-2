@@ -166,6 +166,20 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
 );
 CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions (user_id);
 
+-- Firebase Cloud Messaging registration tokens, one per app install. The
+-- endpoint is the browser push subscription the token wraps, so turning a
+-- device off (or replacing a legacy Web Push row above) can find it.
+CREATE TABLE IF NOT EXISTS fcm_tokens (
+    token TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    endpoint TEXT,
+    user_agent TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    last_seen_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_fcm_tokens_user ON fcm_tokens (user_id);
+CREATE INDEX IF NOT EXISTS idx_fcm_tokens_endpoint ON fcm_tokens (endpoint);
+
 -- Every alert sent, keyed e.g. 'forgot:<entry id>' or 'break:<break id>', so
 -- each alert goes out once however often the cron runs.
 CREATE TABLE IF NOT EXISTS sent_alerts (

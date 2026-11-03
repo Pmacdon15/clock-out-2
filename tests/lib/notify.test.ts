@@ -9,6 +9,10 @@ const mocks = vi.hoisted(() => ({
   dbDeleteExpiredPushSubscription: vi.fn(),
   dbGetNotificationPreferencesFor: vi.fn(),
   dbGetPushSubscriptionsFor: vi.fn(),
+  dbGetFcmTokensFor: vi.fn(),
+  dbDeleteFcmTokens: vi.fn(),
+  readServiceAccount: vi.fn(),
+  sendFcmMessage: vi.fn(),
 }));
 
 vi.mock("@aws-sdk/client-ses", () => ({
@@ -30,6 +34,13 @@ vi.mock("@/lib/alerts-db", () => ({
   dbDeleteExpiredPushSubscription: mocks.dbDeleteExpiredPushSubscription,
   dbGetNotificationPreferencesFor: mocks.dbGetNotificationPreferencesFor,
   dbGetPushSubscriptionsFor: mocks.dbGetPushSubscriptionsFor,
+  dbGetFcmTokensFor: mocks.dbGetFcmTokensFor,
+  dbDeleteFcmTokens: mocks.dbDeleteFcmTokens,
+}));
+vi.mock("@/lib/fcm", () => ({
+  isFcmConfigured: () => mocks.readServiceAccount() !== null,
+  readServiceAccount: mocks.readServiceAccount,
+  sendFcmMessage: mocks.sendFcmMessage,
 }));
 
 import {
@@ -38,9 +49,11 @@ import {
   deliver,
   isEmailConfigured,
   isPushConfigured,
+  isWebPushConfigured,
   resetVapidConfig,
   sendAlertEmail,
   sendAlertPush,
+  sendFcmPush,
 } from "@/lib/notify";
 
 const message = {
@@ -84,6 +97,16 @@ beforeEach(() => {
   mocks.dbDeleteExpiredPushSubscription.mockResolvedValue(undefined);
   mocks.dbGetNotificationPreferencesFor.mockResolvedValue([]);
   mocks.dbGetPushSubscriptionsFor.mockResolvedValue([]);
+  mocks.dbGetFcmTokensFor.mockResolvedValue([]);
+  mocks.dbDeleteFcmTokens.mockResolvedValue(undefined);
+  mocks.readServiceAccount.mockReturnValue(null);
+  mocks.sendFcmMessage.mockResolvedValue("sent");
+});
+
+const account = { projectId: "p", clientEmail: "e", privateKey: "k" };
+const fcmDevice = (token: string, userId = "u1") => ({
+  token,
+  user_id: userId,
 });
 
 describe("configuration", () => {
@@ -99,6 +122,13 @@ describe("configuration", () => {
     configureEmail();
     configurePush();
     expect(isEmailConfigured()).toBe(true);
+    expect(isPushConfigured()).toBe(true);
+    expect(isWebPushConfigured()).toBe(true);
+  });
+
+  it("counts FCM alone as push", () => {
+    mocks.readServiceAccount.mockReturnValue(account);
+    expect(isWebPushConfigured()).toBe(false);
     expect(isPushConfigured()).toBe(true);
   });
 });
@@ -216,6 +246,51 @@ describe("sendAlertPush", () => {
   });
 });
 
+describe("sendFcmPush", () => {
+  it("does nothing without a service account or devices", async () => {
+    await expect(sendFcmPush([fcmDevice("t1")], message)).resolves.toBe(0);
+    mocks.readServiceAccount.mockReturnValue(account);
+    await expect(sendFcmPush([], message)).resolves.toBe(0);
+    expect(mocks.sendFcmMessage).not.toHaveBeenCalled();
+  });
+
+  it("sends the payload to each device and forgets dead tokens", async () => {
+    mocks.readServiceAccount.mockReturnValue(account);
+    mocks.sendFcmMessage
+      .mockResolvedValueOnce("sent")
+      .mockResolvedValueOnce("invalid")
+      .mockResolvedValueOnce("failed");
+    await expect(
+      sendFcmPush([fcmDevice("t1"), fcmDevice("t2"), fcmDevice("t3")], message),
+    ).resolves.toBe(1);
+    expect(mocks.sendFcmMessage).toHaveBeenCalledWith(
+      account,
+      "t1",
+      {
+        title: message.title,
+        body: message.body,
+        url: message.url,
+        tag: message.tag,
+        icon: "/icon-192.png",
+        badge: "/notification-badge.png",
+      },
+      43_200,
+    );
+    expect(mocks.dbDeleteFcmTokens).toHaveBeenCalledWith(["t2"]);
+  });
+
+  it("keeps going when dead tokens can't be deleted", async () => {
+    mocks.readServiceAccount.mockReturnValue(account);
+    mocks.sendFcmMessage.mockResolvedValue("invalid");
+    mocks.dbDeleteFcmTokens.mockRejectedValue(new Error("db"));
+    await expect(sendFcmPush([fcmDevice("t1")], message)).resolves.toBe(0);
+    expect(console.error).toHaveBeenCalledWith(
+      "[Notify] Failed to drop invalid FCM tokens:",
+      expect.any(Error),
+    );
+  });
+});
+
 describe("deliver", () => {
   it("does nothing for no deliveries", async () => {
     await expect(deliver([])).resolves.toEqual({ email: 0, push: 0 });
@@ -320,5 +395,38 @@ describe("deliver", () => {
     expect(input.Message.Body.Text.Data).toBe(
       `${message.body}\nMon 9-5\nTue 9-5\n\n${DEFAULT_APP_URL}${message.url}`,
     );
+  });
+
+  it("pushes over FCM and legacy Web Push together", async () => {
+    configurePush();
+    mocks.readServiceAccount.mockReturnValue(account);
+    mocks.dbGetPushSubscriptionsFor.mockResolvedValue([device(1, "u1")]);
+    mocks.dbGetFcmTokensFor.mockResolvedValue([
+      fcmDevice("t1", "u1"),
+      fcmDevice("t2", "u2"),
+    ]);
+    const counts = await deliver([
+      {
+        recipient: { userId: "u1", email: null },
+        category: "shift_alerts",
+        message,
+      },
+    ]);
+    expect(counts).toEqual({ email: 0, push: 2 });
+    expect(mocks.dbGetFcmTokensFor).toHaveBeenCalledWith(["u1"]);
+    expect(mocks.sendFcmMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.sendFcmMessage.mock.calls[0][1]).toBe("t1");
+  });
+
+  it("skips loading FCM tokens when FCM isn't configured", async () => {
+    configurePush();
+    await deliver([
+      {
+        recipient: { userId: "u1", email: null },
+        category: "shift_alerts",
+        message,
+      },
+    ]);
+    expect(mocks.dbGetFcmTokensFor).not.toHaveBeenCalled();
   });
 });

@@ -46,6 +46,9 @@ vi.mock("@/components/Schedule", () => ({
 vi.mock("@/components/TimezoneSync", () => ({
   default: () => <div data-testid="timezone-sync" />,
 }));
+vi.mock("@/components/PushTokenSync", () => ({
+  default: () => <div data-testid="push-token-sync" />,
+}));
 vi.mock("@/components/TimeOff", () => ({
   default: (props: Record<string, unknown>) => {
     captured.timeOff.push(props);
@@ -113,6 +116,7 @@ describe("DashboardTabs", () => {
     );
     expect(screen.getByTestId("notification-settings")).toBeInTheDocument();
     expect(screen.getByTestId("timezone-sync")).toBeInTheDocument();
+    expect(screen.getByTestId("push-token-sync")).toBeInTheDocument();
     expect(latest(captured.notifications)).toEqual({
       isAdmin: true,
       settingsPromise: notificationSettingsPromise,

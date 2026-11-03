@@ -24,7 +24,7 @@ const valuesOf = (call: number) => sql.mock.calls[call].slice(1);
 const allText = () => sql.mock.calls.map((_c, i) => textOf(i)).join("\n");
 
 /** Number of statements `ensureAlertTables` runs the first time. */
-const ENSURE_STATEMENTS = 8;
+const ENSURE_STATEMENTS = 11;
 
 const input = {
   forgot_clock_out_enabled: true,
@@ -79,6 +79,7 @@ describe("ensureAlertTables", () => {
       "notification_preferences",
       "push_subscriptions",
       "sent_alerts",
+      "fcm_tokens",
     ]) {
       expect(text).toContain(`CREATE TABLE IF NOT EXISTS ${table}`);
     }
@@ -196,13 +197,16 @@ describe("push subscriptions", () => {
     ]);
   });
 
-  it("deletes only the caller's own device", async () => {
+  it("deletes only the caller's own device, on both channels", async () => {
     await primeTables();
-    sql.mockResolvedValueOnce([{ id: 1 }]);
+    sql.mockResolvedValueOnce([]).mockResolvedValueOnce([{ id: 1 }]);
     await expect(
       adb.dbDeletePushSubscription("u1", sub.endpoint),
     ).resolves.toEqual({ id: 1 });
+    expect(textOf(0)).toContain("DELETE FROM fcm_tokens");
     expect(valuesOf(0)).toEqual(["u1", sub.endpoint]);
+    expect(textOf(1)).toContain("DELETE FROM push_subscriptions");
+    expect(valuesOf(1)).toEqual(["u1", sub.endpoint]);
   });
 
   it("drops an expired endpoint", async () => {
@@ -307,5 +311,75 @@ describe("schedule notification queries", () => {
     expect(textOf(0)).toContain("FROM scheduled_shifts");
     expect(valuesOf(0)).toEqual([start, end]);
     expect(cacheTag).not.toHaveBeenCalled();
+  });
+});
+
+describe("FCM tokens", () => {
+  const token = "fcm-token-1";
+
+  it("saves a token, drops the legacy row and older tokens for its endpoint", async () => {
+    await primeTables();
+    sql.mockResolvedValueOnce([{ token }]);
+    await expect(
+      adb.dbSaveFcmToken(
+        "u1",
+        {
+          token,
+          endpoint: "https://fcm/ep",
+          replacedEndpoint: "https://legacy/ep",
+        },
+        "UA",
+      ),
+    ).resolves.toEqual({ token });
+    expect(textOf(0)).toContain("INSERT INTO fcm_tokens");
+    expect(textOf(0)).toContain("ON CONFLICT (token)");
+    expect(valuesOf(0)).toEqual([
+      token,
+      "u1",
+      "https://fcm/ep",
+      "UA",
+      "u1",
+      "https://fcm/ep",
+      "UA",
+    ]);
+    expect(textOf(1)).toContain("DELETE FROM push_subscriptions");
+    expect(valuesOf(1)).toEqual([["https://fcm/ep", "https://legacy/ep"]]);
+    expect(textOf(2)).toContain("DELETE FROM fcm_tokens");
+    expect(valuesOf(2)).toEqual(["https://fcm/ep", token]);
+  });
+
+  it("saves a token without an endpoint and touches nothing else", async () => {
+    await primeTables();
+    sql.mockResolvedValueOnce([{ token }]);
+    await adb.dbSaveFcmToken("u1", { token }, null);
+    expect(sql).toHaveBeenCalledTimes(1);
+    expect(valuesOf(0)).toEqual([token, "u1", null, null, "u1", null, null]);
+  });
+
+  it("lists tokens for many users, skipping the query for nobody", async () => {
+    await expect(adb.dbGetFcmTokensFor([])).resolves.toEqual([]);
+    expect(sql).not.toHaveBeenCalled();
+    await primeTables();
+    sql.mockResolvedValueOnce([{ token }]);
+    await expect(adb.dbGetFcmTokensFor(["u1"])).resolves.toEqual([{ token }]);
+    expect(textOf(0)).toContain("FROM fcm_tokens");
+    expect(valuesOf(0)).toEqual([["u1"]]);
+  });
+
+  it("deletes dead tokens, skipping the query for none", async () => {
+    await adb.dbDeleteFcmTokens([]);
+    expect(sql).not.toHaveBeenCalled();
+    await primeTables();
+    await adb.dbDeleteFcmTokens([token]);
+    expect(textOf(0)).toContain("DELETE FROM fcm_tokens");
+    expect(valuesOf(0)).toEqual([[token]]);
+  });
+
+  it("prunes tokens not seen for a while", async () => {
+    await primeTables();
+    sql.mockResolvedValueOnce([{ token: "a" }, { token: "b" }]);
+    await expect(adb.dbPruneStaleFcmTokens(240)).resolves.toBe(2);
+    expect(textOf(0)).toContain("last_seen_at <");
+    expect(valuesOf(0)).toEqual([240]);
   });
 });

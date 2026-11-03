@@ -17,10 +17,15 @@ const mocks = vi.hoisted(() => ({
     keys: { p256dh: "p", auth: "a" },
   })),
   toast: { success: vi.fn(), error: vi.fn() },
+  saveFcmTokenAction: vi.fn(),
+  isFcmSupported: vi.fn(),
+  registerFcm: vi.fn(),
+  unregisterFcm: vi.fn(),
 }));
 
 vi.mock("@/lib/alert-actions", () => ({
   deletePushSubscriptionAction: mocks.deletePushSubscriptionAction,
+  saveFcmTokenAction: mocks.saveFcmTokenAction,
   savePushSubscriptionAction: mocks.savePushSubscriptionAction,
   sendTestNotificationAction: mocks.sendTestNotificationAction,
   updateNotificationPreferencesAction:
@@ -31,6 +36,11 @@ vi.mock("@/lib/push-client", () => ({
   getPushSupport: mocks.getPushSupport,
   subscribeThisDevice: mocks.subscribeThisDevice,
   toSubscriptionInput: mocks.toSubscriptionInput,
+}));
+vi.mock("@/lib/fcm-client", () => ({
+  isFcmSupported: mocks.isFcmSupported,
+  registerFcm: mocks.registerFcm,
+  unregisterFcm: mocks.unregisterFcm,
 }));
 vi.mock("sonner", () => ({ toast: mocks.toast }));
 
@@ -43,8 +53,18 @@ const view = (
   emailAvailable: true,
   pushAvailable: true,
   vapidPublicKey: "vapid",
+  firebase: null,
+  timezone: null,
   ...overrides,
 });
+
+const firebase = {
+  apiKey: "key",
+  projectId: "proj",
+  messagingSenderId: "123",
+  appId: "app",
+  vapidKey: "vapid",
+};
 
 function renderSettings(
   overrides: Partial<NotificationSettingsView> = {},
@@ -72,6 +92,8 @@ beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
   mocks.getPushSupport.mockReturnValue("supported");
   mocks.getCurrentSubscription.mockResolvedValue(null);
+  mocks.isFcmSupported.mockResolvedValue(true);
+  mocks.unregisterFcm.mockResolvedValue(undefined);
 });
 
 describe("NotificationSettings", () => {
@@ -246,17 +268,128 @@ describe("NotificationSettings", () => {
       await screen.findByText(/off for this device/, {}, SLOW),
     ).toBeInTheDocument();
 
-    // A clean unsubscribe works too.
+    // A clean unsubscribe works too. Wait for each button to be enabled
+    // again: a click while the previous step is still pending is ignored.
     const second = fakeSub("https://push.example/2");
     mocks.subscribeThisDevice.mockResolvedValue(second);
     mocks.savePushSubscriptionAction.mockResolvedValue({ success: true });
-    fireEvent.click(button(/Turn on/));
-    fireEvent.click(
-      await screen.findByRole("button", { name: /Turn off/ }, SLOW),
+    const turnOn = button(/Turn on/);
+    await waitFor(() => expect(turnOn).toBeEnabled(), SLOW);
+    fireEvent.click(turnOn);
+    const turnOff = await screen.findByRole(
+      "button",
+      { name: /Turn off/ },
+      SLOW,
     );
+    await waitFor(() => expect(turnOff).toBeEnabled(), SLOW);
+    fireEvent.click(turnOff);
     await waitFor(() => expect(second.unsubscribe).toHaveBeenCalled(), SLOW);
     // Several SLOW waits in a row: the default 5s test cap times out on CI.
   }, 20_000);
+
+  it("turns push on with Firebase Cloud Messaging when it is set up", async () => {
+    const reg = {
+      token: "fcm-token",
+      endpoint: "https://fcm/1",
+      replacedEndpoint: null,
+    };
+    mocks.registerFcm.mockResolvedValue(reg);
+    mocks.saveFcmTokenAction.mockResolvedValue({ success: true });
+    renderSettings({ firebase, vapidPublicKey: null });
+    const turnOn = await screen.findByRole("button", { name: /Turn on/ });
+    mocks.getCurrentSubscription.mockResolvedValue(fakeSub("https://fcm/1"));
+    fireEvent.click(turnOn);
+    await waitFor(() =>
+      expect(mocks.toast.success).toHaveBeenCalledWith(
+        "Push notifications are on for this device",
+      ),
+    );
+    expect(mocks.registerFcm).toHaveBeenCalledWith(firebase, {
+      requestPermission: true,
+    });
+    expect(mocks.saveFcmTokenAction).toHaveBeenCalledWith(
+      reg,
+      navigator.userAgent,
+    );
+    expect(mocks.subscribeThisDevice).not.toHaveBeenCalled();
+    expect(await screen.findByText(/on for this device\./)).toBeInTheDocument();
+  });
+
+  it("handles a refused permission and failed saves on FCM", async () => {
+    renderSettings({ firebase });
+    const turnOn = await screen.findByRole("button", { name: /Turn on/ });
+
+    mocks.registerFcm.mockResolvedValueOnce(null);
+    fireEvent.click(turnOn);
+    await waitFor(() =>
+      expect(mocks.toast.error).toHaveBeenCalledWith(
+        expect.stringContaining("Notifications are blocked"),
+      ),
+    );
+
+    mocks.registerFcm.mockResolvedValue({ token: "t" });
+    mocks.saveFcmTokenAction.mockResolvedValueOnce({
+      success: false,
+      error: "Invalid device registration",
+    });
+    fireEvent.click(turnOn);
+    await waitFor(() =>
+      expect(mocks.toast.error).toHaveBeenCalledWith(
+        "Invalid device registration",
+      ),
+    );
+
+    mocks.saveFcmTokenAction.mockResolvedValueOnce({ success: false });
+    fireEvent.click(turnOn);
+    await waitFor(() =>
+      expect(mocks.toast.error).toHaveBeenCalledWith(
+        "Could not save this device",
+      ),
+    );
+    expect(mocks.subscribeThisDevice).not.toHaveBeenCalled();
+  });
+
+  it("falls back to Web Push where FCM isn't supported", async () => {
+    mocks.isFcmSupported.mockResolvedValue(false);
+    mocks.subscribeThisDevice.mockResolvedValue(fakeSub());
+    mocks.savePushSubscriptionAction.mockResolvedValue({ success: true });
+    renderSettings({ firebase });
+    fireEvent.click(await screen.findByRole("button", { name: /Turn on/ }));
+    await waitFor(() =>
+      expect(mocks.subscribeThisDevice).toHaveBeenCalledWith("vapid"),
+    );
+    expect(mocks.registerFcm).not.toHaveBeenCalled();
+  });
+
+  it("says so when neither FCM nor Web Push can be used here", async () => {
+    mocks.isFcmSupported.mockResolvedValue(false);
+    renderSettings({ firebase, vapidPublicKey: null });
+    fireEvent.click(await screen.findByRole("button", { name: /Turn on/ }));
+    await waitFor(() =>
+      expect(mocks.toast.error).toHaveBeenCalledWith(
+        "This browser can't receive push notifications.",
+      ),
+    );
+    expect(mocks.subscribeThisDevice).not.toHaveBeenCalled();
+  });
+
+  it("unregisters from FCM when push is turned off", async () => {
+    const sub = fakeSub();
+    mocks.getCurrentSubscription.mockResolvedValue(sub);
+    mocks.deletePushSubscriptionAction.mockResolvedValue({ success: true });
+    renderSettings({ firebase });
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Turn off/ }, SLOW),
+    );
+    await waitFor(
+      () =>
+        expect(mocks.deletePushSubscriptionAction).toHaveBeenCalledWith(
+          sub.endpoint,
+        ),
+      SLOW,
+    );
+    expect(mocks.unregisterFcm).toHaveBeenCalledWith(firebase);
+  });
 
   it("sends a test notification and summarises what went out", async () => {
     renderSettings();

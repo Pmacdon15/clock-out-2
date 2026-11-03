@@ -10,10 +10,12 @@ const mocks = vi.hoisted(() => ({
   setMyTimezoneDal: vi.fn(),
   updateAlertSettingsDal: vi.fn(),
   updateNotificationPreferencesDal: vi.fn(),
+  saveFcmTokenDal: vi.fn(),
 }));
 
 vi.mock("next/cache", () => ({ updateTag: mocks.updateTag }));
 vi.mock("@/lib/alerts-dal", () => ({
+  saveFcmTokenDal: mocks.saveFcmTokenDal,
   deletePushSubscriptionDal: mocks.deletePushSubscriptionDal,
   savePushSubscriptionDal: mocks.savePushSubscriptionDal,
   sendTestNotificationDal: mocks.sendTestNotificationDal,
@@ -24,6 +26,7 @@ vi.mock("@/lib/alerts-dal", () => ({
 
 import {
   deletePushSubscriptionAction,
+  saveFcmTokenAction,
   savePushSubscriptionAction,
   sendTestNotificationAction,
   setMyTimezoneAction,
@@ -65,6 +68,20 @@ describe("alert actions", () => {
     await expect(
       updateNotificationPreferencesAction(DEFAULT_NOTIFICATION_PREFERENCES),
     ).resolves.toEqual({ success: false, error: "nope" });
+  });
+
+  it("saves FCM registrations", async () => {
+    const reg = { token: "t".repeat(40), endpoint: "https://fcm/1" };
+    mocks.saveFcmTokenDal.mockResolvedValueOnce(ok(true));
+    await expect(saveFcmTokenAction(reg, "UA")).resolves.toEqual({
+      success: true,
+    });
+    expect(mocks.saveFcmTokenDal).toHaveBeenCalledWith(reg, "UA");
+    mocks.saveFcmTokenDal.mockResolvedValueOnce(failure);
+    await expect(saveFcmTokenAction(reg)).resolves.toEqual({
+      success: false,
+      error: "nope",
+    });
   });
 
   it("saves and removes devices", async () => {

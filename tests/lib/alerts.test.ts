@@ -7,6 +7,7 @@ import {
   DEFAULT_NOTIFICATION_PREFERENCES,
   describeAlert,
   formatElapsed,
+  isValidFcmToken,
   isValidNotificationPreferences,
   isValidPushSubscription,
   normalizeAlertSettings,
@@ -374,5 +375,36 @@ describe("isValidTimeZone", () => {
     expect(isValidTimeZone("")).toBe(false);
     expect(isValidTimeZone("A".repeat(65))).toBe(false);
     expect(isValidTimeZone(42)).toBe(false);
+  });
+});
+
+describe("isValidFcmToken", () => {
+  const token = "dGVzdA:APA91bH-abc_123456789";
+
+  it("accepts a token with optional https endpoints", () => {
+    expect(isValidFcmToken({ token })).toBe(true);
+    expect(
+      isValidFcmToken({
+        token,
+        endpoint: "https://fcm.googleapis.com/fcm/send/x",
+        replacedEndpoint: null,
+      }),
+    ).toBe(true);
+  });
+
+  it("refuses anything else", () => {
+    expect(isValidFcmToken(null)).toBe(false);
+    expect(isValidFcmToken("token")).toBe(false);
+    expect(isValidFcmToken({ token: 5 })).toBe(false);
+    expect(isValidFcmToken({ token: "short" })).toBe(false);
+    expect(isValidFcmToken({ token: `${token} with spaces` })).toBe(false);
+    expect(isValidFcmToken({ token, endpoint: "http://insecure" })).toBe(false);
+    expect(isValidFcmToken({ token, endpoint: 7 })).toBe(false);
+    expect(
+      isValidFcmToken({
+        token,
+        replacedEndpoint: `https://${"a".repeat(2050)}`,
+      }),
+    ).toBe(false);
   });
 });

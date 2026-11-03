@@ -3,6 +3,7 @@
 import { updateTag } from "next/cache";
 import {
   deletePushSubscriptionDal,
+  saveFcmTokenDal,
   savePushSubscriptionDal,
   sendTestNotificationDal,
   setMyTimezoneDal,
@@ -11,6 +12,7 @@ import {
 } from "./alerts-dal";
 import type {
   AlertSettingsInput,
+  FcmTokenInput,
   NotificationPreferencesInput,
   PushSubscriptionInput,
 } from "./types";
@@ -44,6 +46,17 @@ export async function savePushSubscriptionAction(
   userAgent?: string | null,
 ) {
   const result = await savePushSubscriptionDal(subscription, userAgent);
+  return result.match(
+    () => ({ success: true as const }),
+    (e) => ({ success: false as const, error: e.reason }),
+  );
+}
+
+export async function saveFcmTokenAction(
+  input: FcmTokenInput,
+  userAgent?: string | null,
+) {
+  const result = await saveFcmTokenDal(input, userAgent);
   return result.match(
     () => ({ success: true as const }),
     (e) => ({ success: false as const, error: e.reason }),
