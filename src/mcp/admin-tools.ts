@@ -3,6 +3,7 @@ import { addDays, format, startOfDay, subDays } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
 import { revalidateTag } from "next/cache";
 import { z } from "zod";
+import { queueShiftAlertSync, syncShiftReminderJob } from "@/lib/alert-jobs";
 import {
   ALERT_BOUNDS,
   normalizeAlertSettings,
@@ -385,6 +386,16 @@ function invalid(summary: string, data: Record<string, unknown> = {}) {
   } satisfies ToolResult;
 }
 
+/** Keeps the shift's "starts in an hour" reminder job in step; never throws. */
+async function scheduleReminder(
+  change: "added" | "changed" | "removed",
+  shift: Parameters<typeof syncShiftReminderJob>[1],
+) {
+  await syncShiftReminderJob(change, shift).catch((error) => {
+    console.error("[Jobs] Failed to schedule shift reminder:", error);
+  });
+}
+
 function revalidate(...tags: string[]) {
   for (const tag of tags) {
     try {
@@ -614,6 +625,7 @@ export async function manageScheduleTool(
     );
     revalidate(`scheduled-shifts-${org.orgId}`);
     await notifyScheduleChange("added", created, tz);
+    await scheduleReminder("added", created);
     const names = new Map(members.map((m) => [m.userId, m.name]));
     return {
       summary: `Scheduled ${member.name} for ${describeShift(created, tz)}.`,
@@ -685,6 +697,7 @@ export async function manageScheduleTool(
     }
     revalidate(`scheduled-shifts-${org.orgId}`);
     await notifyScheduleChange("removed", deleted, tz);
+    await scheduleReminder("removed", deleted);
     return {
       summary: `Cancelled ${memberName}'s shift on ${describeShift(deleted, tz)}.`,
       data: {
@@ -754,6 +767,7 @@ export async function manageScheduleTool(
   }
   revalidate(`scheduled-shifts-${org.orgId}`);
   await notifyScheduleChange("changed", updated, tz);
+  await scheduleReminder("changed", updated);
   return {
     summary: `Updated ${memberName}'s shift: now ${describeShift(updated, tz)}.`,
     data: {
@@ -1086,6 +1100,7 @@ export async function manageAlertSettingsTool(
     await dbUpdateAlertSettings(org.orgId, next),
   );
   revalidate(`alert-settings-${org.orgId}`);
+  queueShiftAlertSync(org.orgId);
   return {
     summary: `Updated alert rules for ${org.orgName}: ${describeAlerts(updated)}.`,
     data: { status: "updated", organization: orgInfo(org), settings: updated },

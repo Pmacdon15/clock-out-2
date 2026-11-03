@@ -1,8 +1,10 @@
 "use server";
 
 import { updateTag } from "next/cache";
+import { queueShiftAlertSync } from "./alert-jobs";
 import {
   deletePushSubscriptionDal,
+  saveFcmTokenDal,
   savePushSubscriptionDal,
   sendTestNotificationDal,
   setMyTimezoneDal,
@@ -11,6 +13,7 @@ import {
 } from "./alerts-dal";
 import type {
   AlertSettingsInput,
+  FcmTokenInput,
   NotificationPreferencesInput,
   PushSubscriptionInput,
 } from "./types";
@@ -20,6 +23,8 @@ export async function updateAlertSettingsAction(input: AlertSettingsInput) {
   return result.match(
     (row) => {
       updateTag(`alert-settings-${row.org_id}`);
+      // New thresholds move (or cancel) the org's next alert.
+      queueShiftAlertSync(row.org_id);
       return { success: true as const, data: row };
     },
     (e) => ({ success: false as const, error: e.reason }),
@@ -44,6 +49,17 @@ export async function savePushSubscriptionAction(
   userAgent?: string | null,
 ) {
   const result = await savePushSubscriptionDal(subscription, userAgent);
+  return result.match(
+    () => ({ success: true as const }),
+    (e) => ({ success: false as const, error: e.reason }),
+  );
+}
+
+export async function saveFcmTokenAction(
+  input: FcmTokenInput,
+  userAgent?: string | null,
+) {
+  const result = await saveFcmTokenDal(input, userAgent);
   return result.match(
     () => ({ success: true as const }),
     (e) => ({ success: false as const, error: e.reason }),

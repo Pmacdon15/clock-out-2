@@ -7,11 +7,14 @@ import {
   DEFAULT_NOTIFICATION_PREFERENCES,
   describeAlert,
   formatElapsed,
+  isValidFcmToken,
   isValidNotificationPreferences,
   isValidPushSubscription,
+  nextShiftAlertDueAt,
   normalizeAlertSettings,
   normalizeNotificationPreferences,
   type PlannedAlert,
+  pendingAlertKeys,
   planShiftAlerts,
   validateAlertSettings,
 } from "@/lib/alerts";
@@ -374,5 +377,193 @@ describe("isValidTimeZone", () => {
     expect(isValidTimeZone("")).toBe(false);
     expect(isValidTimeZone("A".repeat(65))).toBe(false);
     expect(isValidTimeZone(42)).toBe(false);
+  });
+});
+
+describe("isValidFcmToken", () => {
+  const token = "dGVzdA:APA91bH-abc_123456789";
+
+  it("accepts a token with optional https endpoints", () => {
+    expect(isValidFcmToken({ token })).toBe(true);
+    expect(
+      isValidFcmToken({
+        token,
+        endpoint: "https://fcm.googleapis.com/fcm/send/x",
+        replacedEndpoint: null,
+      }),
+    ).toBe(true);
+  });
+
+  it("refuses anything else", () => {
+    expect(isValidFcmToken(null)).toBe(false);
+    expect(isValidFcmToken("token")).toBe(false);
+    expect(isValidFcmToken({ token: 5 })).toBe(false);
+    expect(isValidFcmToken({ token: "short" })).toBe(false);
+    expect(isValidFcmToken({ token: `${token} with spaces` })).toBe(false);
+    expect(isValidFcmToken({ token, endpoint: "http://insecure" })).toBe(false);
+    expect(isValidFcmToken({ token, endpoint: 7 })).toBe(false);
+    expect(
+      isValidFcmToken({
+        token,
+        replacedEndpoint: `https://${"a".repeat(2050)}`,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("nextShiftAlertDueAt", () => {
+  const at = (ms: number) => new Date(now.getTime() + ms);
+  const none = new Set<string>();
+
+  it("is null when nothing is open or no rule applies", () => {
+    expect(
+      nextShiftAlertDueAt({
+        settings: allOn,
+        shifts: [],
+        breaks: [],
+        claimed: none,
+      }),
+    ).toBeNull();
+    expect(
+      nextShiftAlertDueAt({
+        settings: DEFAULT_ALERT_SETTINGS,
+        shifts: [shift(1, HOUR)],
+        breaks: [brk(1, 1, MIN)],
+        claimed: none,
+      }),
+    ).toBeNull();
+  });
+
+  it("is the forgot-to-clock-out reminder until it has been sent", () => {
+    const shifts = [shift(1, 2 * HOUR), shift(2, 3 * HOUR)];
+    // Reminder at 10h; shift 2 started an hour earlier.
+    expect(
+      nextShiftAlertDueAt({
+        settings: allOn,
+        shifts,
+        breaks: [],
+        claimed: none,
+      }),
+    ).toEqual(at(7 * HOUR));
+    expect(
+      nextShiftAlertDueAt({
+        settings: allOn,
+        shifts,
+        breaks: [],
+        claimed: new Set(["forgot:2"]),
+      }),
+    ).toEqual(at(8 * HOUR));
+    // Both reminded: next is shift 2's automatic clock-out at 16h.
+    expect(
+      nextShiftAlertDueAt({
+        settings: allOn,
+        shifts,
+        breaks: [],
+        claimed: new Set(["forgot:1", "forgot:2"]),
+      }),
+    ).toEqual(at(13 * HOUR));
+  });
+
+  it("is a past moment for a reminder that is already overdue", () => {
+    expect(
+      nextShiftAlertDueAt({
+        settings: { ...allOn, auto_clock_out_enabled: false },
+        shifts: [shift(1, 11 * HOUR)],
+        breaks: [],
+        claimed: none,
+      }),
+    ).toEqual(at(-HOUR));
+  });
+
+  it("skips the reminder when the automatic clock-out comes first", () => {
+    expect(
+      nextShiftAlertDueAt({
+        settings: {
+          ...allOn,
+          forgot_clock_out_hours: 12,
+          auto_clock_out_hours: 12,
+        },
+        shifts: [shift(1, HOUR)],
+        breaks: [],
+        claimed: none,
+      }),
+    ).toEqual(at(11 * HOUR));
+  });
+
+  it("counts running breaks at the reminder or their type's limit", () => {
+    const settings = {
+      ...allOn,
+      forgot_clock_out_enabled: false,
+      auto_clock_out_enabled: false,
+      break_reminder_minutes: 60,
+    };
+    const breakSettings = {
+      org_id: "org_1",
+      dock_lunch: false,
+      lunch_duration_minutes: 30,
+      lunch_min_shift_hours: 5,
+      max_paid_break_minutes: 15,
+      max_meal_break_minutes: 90,
+    };
+    const shifts = [shift(1, HOUR), shift(2, HOUR)];
+    expect(
+      nextShiftAlertDueAt({
+        settings,
+        breakSettings,
+        shifts,
+        // Meal: reminder (60) before its limit (90). Rest: its limit (15).
+        breaks: [
+          brk(1, 1, 10 * MIN, "unpaid_meal"),
+          brk(2, 2, 5 * MIN, "paid_rest"),
+        ],
+        claimed: none,
+      }),
+    ).toEqual(at(10 * MIN));
+    expect(
+      nextShiftAlertDueAt({
+        settings,
+        breakSettings,
+        shifts,
+        breaks: [
+          brk(1, 1, 10 * MIN, "unpaid_meal"),
+          brk(2, 2, 5 * MIN, "paid_rest"),
+        ],
+        claimed: new Set(["break:2"]),
+      }),
+    ).toEqual(at(50 * MIN));
+  });
+
+  it("leaves a break to its shift's automatic clock-out when that is sooner", () => {
+    expect(
+      nextShiftAlertDueAt({
+        settings: { ...allOn, forgot_clock_out_enabled: false },
+        // 15h59m in, on a break that started a minute ago (reminder at 45m).
+        shifts: [shift(1, 16 * HOUR - MIN)],
+        breaks: [brk(1, 1, MIN)],
+        claimed: none,
+      }),
+    ).toEqual(at(MIN));
+    // With no auto clock-out the break's own reminder counts.
+    expect(
+      nextShiftAlertDueAt({
+        settings: {
+          ...allOn,
+          forgot_clock_out_enabled: false,
+          auto_clock_out_enabled: false,
+        },
+        shifts: [shift(1, HOUR)],
+        breaks: [brk(1, 1, MIN)],
+        claimed: none,
+      }),
+    ).toEqual(at(44 * MIN));
+  });
+});
+
+describe("pendingAlertKeys", () => {
+  it("lists the keys whose sending decides the next due time", () => {
+    expect(pendingAlertKeys([shift(1, 0)], [brk(7, 1, 0)])).toEqual([
+      "forgot:1",
+      "break:7",
+    ]);
   });
 });

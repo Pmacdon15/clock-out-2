@@ -24,6 +24,7 @@ const view = (timezone: string | null): NotificationSettingsView => ({
   emailAvailable: true,
   pushAvailable: false,
   vapidPublicKey: null,
+  firebase: null,
   timezone,
 });
 

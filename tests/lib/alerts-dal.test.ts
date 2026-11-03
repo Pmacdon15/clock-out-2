@@ -14,6 +14,9 @@ const mocks = vi.hoisted(() => ({
   deliver: vi.fn(),
   isEmailConfigured: vi.fn(),
   isPushConfigured: vi.fn(),
+  isWebPushConfigured: vi.fn(),
+  firebaseClientConfig: vi.fn(),
+  dbSaveFcmToken: vi.fn(),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({
@@ -24,6 +27,7 @@ vi.mock("@/lib/alerts-db", () => ({
   dbDeletePushSubscription: mocks.dbDeletePushSubscription,
   dbGetAlertSettings: mocks.dbGetAlertSettings,
   dbGetNotificationPreferences: mocks.dbGetNotificationPreferences,
+  dbSaveFcmToken: mocks.dbSaveFcmToken,
   dbSavePushSubscription: mocks.dbSavePushSubscription,
   dbSetUserTimezone: mocks.dbSetUserTimezone,
   dbUpdateAlertSettings: mocks.dbUpdateAlertSettings,
@@ -33,6 +37,10 @@ vi.mock("@/lib/notify", () => ({
   deliver: mocks.deliver,
   isEmailConfigured: mocks.isEmailConfigured,
   isPushConfigured: mocks.isPushConfigured,
+  isWebPushConfigured: mocks.isWebPushConfigured,
+}));
+vi.mock("@/lib/fcm", () => ({
+  firebaseClientConfig: mocks.firebaseClientConfig,
 }));
 
 import {
@@ -43,6 +51,7 @@ import {
   deletePushSubscriptionDal,
   getMyNotificationSettings,
   getOrgAlertSettings,
+  saveFcmTokenDal,
   savePushSubscriptionDal,
   sendTestNotificationDal,
   setMyTimezoneDal,
@@ -64,6 +73,8 @@ beforeEach(() => {
   mocks.protect.mockResolvedValue(admin);
   mocks.isEmailConfigured.mockReturnValue(true);
   mocks.isPushConfigured.mockReturnValue(false);
+  mocks.isWebPushConfigured.mockReturnValue(false);
+  mocks.firebaseClientConfig.mockReturnValue(null);
 });
 
 describe("getOrgAlertSettings", () => {
@@ -150,14 +161,28 @@ describe("getMyNotificationSettings", () => {
         emailAvailable: true,
         pushAvailable: false,
         vapidPublicKey: null,
+        firebase: null,
         timezone: null,
       },
     });
 
+    const firebase = {
+      apiKey: "k",
+      projectId: "p",
+      messagingSenderId: "s",
+      appId: "a",
+      vapidKey: "v",
+    };
     mocks.isPushConfigured.mockReturnValue(true);
+    mocks.isWebPushConfigured.mockReturnValue(true);
+    mocks.firebaseClientConfig.mockReturnValue(firebase);
     vi.stubEnv("NEXT_PUBLIC_VAPID_PUBLIC_KEY", "pub");
     const result = await getMyNotificationSettings();
-    expect(result.ok && result.value.vapidPublicKey).toBe("pub");
+    expect(result.ok && result.value).toMatchObject({
+      pushAvailable: true,
+      vapidPublicKey: "pub",
+      firebase,
+    });
   });
 
   it("reports read failures", async () => {
@@ -237,6 +262,55 @@ describe("updateNotificationPreferencesDal", () => {
         await updateNotificationPreferencesDal(DEFAULT_NOTIFICATION_PREFERENCES)
       )._unsafeUnwrapErr(),
     ).toEqual({ reason: "Failed to update notification preferences" });
+  });
+});
+
+describe("saveFcmTokenDal", () => {
+  const reg = {
+    token: "fcm_token-abc:123456789012345",
+    endpoint: "https://fcm.googleapis.com/fcm/send/x",
+  };
+
+  it("requires a user and a valid registration", async () => {
+    mocks.protect.mockResolvedValueOnce({ userId: null });
+    expect((await saveFcmTokenDal(reg))._unsafeUnwrapErr()).toEqual({
+      reason: "Unauthorized",
+    });
+    expect(
+      (
+        await saveFcmTokenDal({ ...reg, token: "bad token" })
+      )._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Invalid device registration" });
+  });
+
+  it("saves the token with a trimmed user agent", async () => {
+    mocks.dbSaveFcmToken.mockResolvedValue({ token: reg.token });
+    expect((await saveFcmTokenDal(reg, "A".repeat(600))).isOk()).toBe(true);
+    expect(mocks.dbSaveFcmToken).toHaveBeenCalledWith(
+      "u1",
+      { token: reg.token, endpoint: reg.endpoint, replacedEndpoint: null },
+      "A".repeat(512),
+    );
+    await saveFcmTokenDal({
+      token: reg.token,
+      replacedEndpoint: "https://legacy/1",
+    });
+    expect(mocks.dbSaveFcmToken).toHaveBeenLastCalledWith(
+      "u1",
+      {
+        token: reg.token,
+        endpoint: null,
+        replacedEndpoint: "https://legacy/1",
+      },
+      null,
+    );
+  });
+
+  it("reports save failures", async () => {
+    mocks.dbSaveFcmToken.mockRejectedValue(new Error("db"));
+    expect((await saveFcmTokenDal(reg))._unsafeUnwrapErr()).toEqual({
+      reason: "Failed to save this device",
+    });
   });
 });
 

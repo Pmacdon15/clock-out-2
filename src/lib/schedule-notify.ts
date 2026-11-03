@@ -252,8 +252,8 @@ export type DigestRunResult = {
 };
 
 /**
- * Sends every weekly schedule that's due. Safe to run every few minutes: a
- * member gets one digest per week (`sent_alerts`), and a failing org never
+ * Sends every weekly schedule that's due. Safe to run as often as you like:
+ * a member gets one digest per week (`sent_alerts`), and a failing org never
  * stops the others.
  */
 export async function runWeeklyScheduleDigests(
@@ -369,10 +369,10 @@ export type ReminderRunResult = {
 };
 
 /**
- * Reminds members an hour before each scheduled shift. Safe to run every few
- * minutes: each shift is reminded once (`sent_alerts`). Skipped for orgs
- * that switched schedule notices off and for members already clocked in; a
- * failing org never stops the others.
+ * Reminds members of every shift starting within the next hour. Safe to run
+ * as often as you like: each shift is reminded once (`sent_alerts`). Skipped
+ * for orgs that switched schedule notices off and for members already clocked
+ * in; a failing org never stops the others.
  */
 export async function runUpcomingShiftReminders(
   now: Date = new Date(),
@@ -380,12 +380,30 @@ export async function runUpcomingShiftReminders(
     NOTIFICATIONS_FEATURE,
   ),
 ): Promise<ReminderRunResult> {
-  const result: ReminderRunResult = { reminders: 0, emails: 0, pushes: 0 };
   const shifts = await dbGetScheduledShiftsBetween(
     now,
     new Date(now.getTime() + SHIFT_REMINDER_MINUTES * MINUTE_MS + 1),
   );
-  const due = planUpcomingShiftReminders(shifts, now);
+  return await sendUpcomingShiftReminders(
+    planUpcomingShiftReminders(shifts, now),
+    now,
+    hasNotifications,
+  );
+}
+
+/**
+ * Sends the "starts in an hour" reminder for each of these shifts, once each
+ * (`sent_alerts`). Used by the daily sweep and by the exactly-timed job for
+ * one shift.
+ */
+export async function sendUpcomingShiftReminders(
+  due: ScheduledShift[],
+  now: Date,
+  hasNotifications: (orgId: string) => Promise<boolean> = createFeatureCheck(
+    NOTIFICATIONS_FEATURE,
+  ),
+): Promise<ReminderRunResult> {
+  const result: ReminderRunResult = { reminders: 0, emails: 0, pushes: 0 };
   if (due.length === 0) return result;
 
   const orgIds = [...new Set(due.map((s) => s.org_id))];

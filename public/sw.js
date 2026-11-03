@@ -92,13 +92,22 @@ self.addEventListener("fetch", (event) => {
 });
 
 // ------------------------------------------------------------ push alerts --
-// Shift alerts ("forgot to clock out", "still on break") arrive as Web Push
-// messages carrying JSON: { title, body, url, tag, icon, badge }.
+// Shift alerts ("forgot to clock out", "still on break") carry JSON:
+// { title, body, url, tag, icon, badge }. Firebase Cloud Messaging wraps it
+// as { data: {...}, from, fcmMessageId, ... }; legacy Web Push sends it bare.
+
+/** The alert inside a push message, whichever channel sent it. */
+function readAlert(json) {
+  if (json && json.fcmMessageId && json.data && typeof json.data === "object") {
+    return json.data;
+  }
+  return json || {};
+}
 
 self.addEventListener("push", (event) => {
   let data = {};
   try {
-    data = event.data ? event.data.json() : {};
+    data = readAlert(event.data ? event.data.json() : {});
   } catch {
     data = { body: event.data ? event.data.text() : "" };
   }

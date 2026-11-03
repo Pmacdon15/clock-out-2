@@ -1,6 +1,7 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { err, ok, type Result } from "neverthrow";
 import {
+  isValidFcmToken,
   isValidNotificationPreferences,
   isValidPushSubscription,
   isValidTimeZone,
@@ -12,21 +13,25 @@ import {
   dbDeletePushSubscription,
   dbGetAlertSettings,
   dbGetNotificationPreferences,
+  dbSaveFcmToken,
   dbSavePushSubscription,
   dbSetUserTimezone,
   dbUpdateAlertSettings,
   dbUpdateNotificationPreferences,
 } from "./alerts-db";
 import { NOTIFICATIONS_FEATURE } from "./billing";
+import { type FirebaseClientConfig, firebaseClientConfig } from "./fcm";
 import {
   type DeliveryCounts,
   deliver,
   isEmailConfigured,
   isPushConfigured,
+  isWebPushConfigured,
 } from "./notify";
 import type {
   AlertSettingsData,
   AlertSettingsInput,
+  FcmTokenInput,
   NotificationPreferencesData,
   NotificationPreferencesInput,
   PushSubscriptionInput,
@@ -98,8 +103,10 @@ export type NotificationSettingsView = {
   preferences: NotificationPreferencesInput;
   emailAvailable: boolean;
   pushAvailable: boolean;
-  /** Public VAPID key browsers subscribe with (null when push is off). */
+  /** Public VAPID key for legacy Web Push (null when that is off). */
   vapidPublicKey: string | null;
+  /** Firebase Cloud Messaging browser config (null when FCM is off). */
+  firebase: FirebaseClientConfig | null;
   /** The time zone remembered for this person, if any. */
   timezone: string | null;
 };
@@ -118,9 +125,10 @@ export async function getMyNotificationSettings(): Promise<
         preferences: normalizeNotificationPreferences(row),
         emailAvailable: isEmailConfigured(),
         pushAvailable: isPushConfigured(),
-        vapidPublicKey: isPushConfigured()
+        vapidPublicKey: isWebPushConfigured()
           ? (process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY as string)
           : null,
+        firebase: firebaseClientConfig(),
         timezone: row?.timezone ?? null,
       },
     }))
@@ -191,6 +199,33 @@ export async function savePushSubscriptionDal(
     .then(() => ok(true as const))
     .catch((e) => {
       console.error("Save push subscription error: ", e);
+      return err({ reason: "Failed to save this device" });
+    });
+}
+
+/** Saves (or refreshes) this device's FCM token for the caller. */
+export async function saveFcmTokenDal(
+  input: FcmTokenInput,
+  userAgent?: string | null,
+): Promise<Result<true, Failure>> {
+  const { userId } = await auth.protect();
+  if (!userId) return err({ reason: "Unauthorized" });
+  if (!isValidFcmToken(input)) {
+    return err({ reason: "Invalid device registration" });
+  }
+  const agent = typeof userAgent === "string" ? userAgent.slice(0, 512) : null;
+  return await dbSaveFcmToken(
+    userId,
+    {
+      token: input.token,
+      endpoint: input.endpoint ?? null,
+      replacedEndpoint: input.replacedEndpoint ?? null,
+    },
+    agent,
+  )
+    .then(() => ok(true as const))
+    .catch((e) => {
+      console.error("Save FCM token error: ", e);
       return err({ reason: "Failed to save this device" });
     });
 }

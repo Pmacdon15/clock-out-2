@@ -333,6 +333,26 @@ export type PushSubscriptionRow = {
   created_at?: Date;
 };
 
+/** A device registered with Firebase Cloud Messaging. */
+export type FcmTokenRow = {
+  token: string;
+  user_id: string;
+  /** The browser push subscription the token wraps, when the client sent it. */
+  endpoint?: string | null;
+  user_agent?: string | null;
+  created_at?: Date;
+  last_seen_at?: Date;
+};
+
+/** A device's FCM registration, as the browser sends it after `getToken`. */
+export type FcmTokenInput = {
+  token: string;
+  /** Push subscription endpoint the token wraps. */
+  endpoint?: string | null;
+  /** A legacy Web Push endpoint this registration replaced, to forget. */
+  replacedEndpoint?: string | null;
+};
+
 /** A shift an admin has published for a member. */
 export type ScheduledShift = {
   id: number;

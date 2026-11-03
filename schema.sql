@@ -166,8 +166,33 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
 );
 CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions (user_id);
 
+-- Firebase Cloud Messaging registration tokens, one per app install. The
+-- endpoint is the browser push subscription the token wraps, so turning a
+-- device off (or replacing a legacy Web Push row above) can find it.
+CREATE TABLE IF NOT EXISTS fcm_tokens (
+    token TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    endpoint TEXT,
+    user_agent TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    last_seen_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_fcm_tokens_user ON fcm_tokens (user_id);
+CREATE INDEX IF NOT EXISTS idx_fcm_tokens_endpoint ON fcm_tokens (endpoint);
+
+-- One delayed QStash message per job (e.g. 'shift-alerts:<org id>' or
+-- 'upcoming:<scheduled shift id>'), so it can be cancelled or moved when the
+-- shift, break or rule behind it changes.
+CREATE TABLE IF NOT EXISTS alert_jobs (
+    job_key TEXT PRIMARY KEY,
+    org_id TEXT NOT NULL,
+    message_id TEXT NOT NULL,
+    run_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 -- Every alert sent, keyed e.g. 'forgot:<entry id>' or 'break:<break id>', so
--- each alert goes out once however often the cron runs.
+-- each alert goes out once however often it is checked.
 CREATE TABLE IF NOT EXISTS sent_alerts (
     alert_key TEXT PRIMARY KEY,
     org_id TEXT NOT NULL,

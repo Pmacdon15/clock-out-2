@@ -14,12 +14,14 @@ import { use, useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
 import {
   deletePushSubscriptionAction,
+  saveFcmTokenAction,
   savePushSubscriptionAction,
   sendTestNotificationAction,
   updateNotificationPreferencesAction,
 } from "@/lib/alert-actions";
 import { DEFAULT_NOTIFICATION_PREFERENCES } from "@/lib/alerts";
 import type { NotificationSettingsView } from "@/lib/alerts-dal";
+import { isFcmSupported, registerFcm, unregisterFcm } from "@/lib/fcm-client";
 import {
   getCurrentSubscription,
   getPushSupport,
@@ -137,7 +139,7 @@ export default function NotificationSettings({
   const [isDeviceBusy, startDevice] = useTransition();
   const [isTesting, startTest] = useTransition();
 
-  const pushAvailable = Boolean(view?.vapidPublicKey);
+  const pushAvailable = Boolean(view?.firebase || view?.vapidPublicKey);
 
   useEffect(() => {
     const detected = getPushSupport();
@@ -191,16 +193,42 @@ export default function NotificationSettings({
     });
   };
 
+  const blocked = () =>
+    toast.error(
+      "Notifications are blocked. Allow them in your browser or device settings.",
+    );
+
+  /** Registers with Firebase Cloud Messaging. False when FCM can't be used. */
+  const enableWithFcm = async () => {
+    if (!settings.firebase || !(await isFcmSupported())) return false;
+    const registration = await registerFcm(settings.firebase, {
+      requestPermission: true,
+    });
+    if (!registration) {
+      blocked();
+      return true;
+    }
+    const res = await saveFcmTokenAction(registration, navigator.userAgent);
+    if (!res.success) {
+      toast.error(res.error || "Could not save this device");
+      return true;
+    }
+    setSubscription(await getCurrentSubscription());
+    toast.success("Push notifications are on for this device");
+    return true;
+  };
+
   const enableDevice = () => {
     startDevice(async () => {
       try {
-        const sub = await subscribeThisDevice(
-          settings.vapidPublicKey as string,
-        );
+        if (await enableWithFcm()) return;
+        if (!settings.vapidPublicKey) {
+          toast.error("This browser can't receive push notifications.");
+          return;
+        }
+        const sub = await subscribeThisDevice(settings.vapidPublicKey);
         if (!sub) {
-          toast.error(
-            "Notifications are blocked. Allow them in your browser or device settings.",
-          );
+          blocked();
           return;
         }
         const res = await savePushSubscriptionAction(
@@ -223,6 +251,7 @@ export default function NotificationSettings({
   const disableDevice = () => {
     startDevice(async () => {
       const current = subscription as PushSubscription;
+      if (settings.firebase) await unregisterFcm(settings.firebase);
       try {
         await current.unsubscribe();
       } catch (error) {

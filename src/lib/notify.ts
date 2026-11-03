@@ -9,10 +9,13 @@ import {
 } from "./alerts";
 import {
   dbDeleteExpiredPushSubscription,
+  dbDeleteFcmTokens,
+  dbGetFcmTokensFor,
   dbGetNotificationPreferencesFor,
   dbGetPushSubscriptionsFor,
 } from "./alerts-db";
-import type { PushSubscriptionRow } from "./types";
+import { isFcmConfigured, readServiceAccount, sendFcmMessage } from "./fcm";
+import type { FcmTokenRow, PushSubscriptionRow } from "./types";
 
 const sesClient = new SESClient({
   region: process.env.AWS_REGION || "us-east-1",
@@ -39,10 +42,31 @@ export function isEmailConfigured(): boolean {
   );
 }
 
-export function isPushConfigured(): boolean {
+/** Legacy Web Push (VAPID) devices can be reached. */
+export function isWebPushConfigured(): boolean {
   return Boolean(
     process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY,
   );
+}
+
+/** Some push channel (FCM or legacy Web Push) can be used. */
+export function isPushConfigured(): boolean {
+  return isFcmConfigured() || isWebPushConfigured();
+}
+
+/** How long a push service keeps an undelivered alert (12 hours). */
+const PUSH_TTL_SECONDS = 60 * 60 * 12;
+
+/** The JSON the service worker reads to draw a notification. */
+function pushPayload(message: NotificationMessage) {
+  return {
+    title: message.title,
+    body: message.body,
+    url: message.url,
+    tag: message.tag,
+    icon: NOTIFICATION_ICON,
+    badge: NOTIFICATION_BADGE,
+  };
 }
 
 let vapidKey: string | null = null;
@@ -119,16 +143,9 @@ export async function sendAlertPush(
   subscriptions: PushSubscriptionRow[],
   message: NotificationMessage,
 ): Promise<number> {
-  if (!isPushConfigured() || subscriptions.length === 0) return 0;
+  if (!isWebPushConfigured() || subscriptions.length === 0) return 0;
   configureVapid();
-  const payload = JSON.stringify({
-    title: message.title,
-    body: message.body,
-    url: message.url,
-    tag: message.tag,
-    icon: NOTIFICATION_ICON,
-    badge: NOTIFICATION_BADGE,
-  });
+  const payload = JSON.stringify(pushPayload(message));
   const results = await Promise.all(
     subscriptions.map(async (sub) => {
       try {
@@ -138,7 +155,7 @@ export async function sendAlertPush(
             keys: { p256dh: sub.p256dh, auth: sub.auth },
           },
           payload,
-          { TTL: 60 * 60 * 12, urgency: "high" },
+          { TTL: PUSH_TTL_SECONDS, urgency: "high" },
         );
         return 1;
       } catch (error) {
@@ -155,6 +172,33 @@ export async function sendAlertPush(
     }),
   );
   return results.reduce<number>((sum, n) => sum + n, 0);
+}
+
+/**
+ * Sends one message to each FCM device. Tokens FCM reports as unregistered or
+ * invalid are forgotten. Returns how many devices accepted the message.
+ */
+export async function sendFcmPush(
+  tokens: FcmTokenRow[],
+  message: NotificationMessage,
+): Promise<number> {
+  const account = readServiceAccount();
+  if (!account || tokens.length === 0) return 0;
+  const data = pushPayload(message);
+  const results = await Promise.all(
+    tokens.map((row) =>
+      sendFcmMessage(account, row.token, data, PUSH_TTL_SECONDS),
+    ),
+  );
+  const invalid = tokens
+    .filter((_, i) => results[i] === "invalid")
+    .map((row) => row.token);
+  if (invalid.length > 0) {
+    await dbDeleteFcmTokens(invalid).catch((e) => {
+      console.error("[Notify] Failed to drop invalid FCM tokens:", e);
+    });
+  }
+  return results.filter((r) => r === "sent").length;
 }
 
 export type Recipient = {
@@ -180,11 +224,14 @@ export async function deliver(deliveries: Delivery[]): Promise<DeliveryCounts> {
   if (deliveries.length === 0) return counts;
 
   const userIds = [...new Set(deliveries.map((d) => d.recipient.userId))];
-  const [prefRows, subscriptions] = await Promise.all([
+  const [prefRows, subscriptions, fcmTokens] = await Promise.all([
     dbGetNotificationPreferencesFor(userIds),
-    isPushConfigured()
+    isWebPushConfigured()
       ? dbGetPushSubscriptionsFor(userIds)
       : Promise.resolve([] as PushSubscriptionRow[]),
+    isFcmConfigured()
+      ? dbGetFcmTokensFor(userIds)
+      : Promise.resolve([] as FcmTokenRow[]),
   ]);
   const prefsByUser = new Map(prefRows.map((row) => [row.user_id, row]));
 
@@ -206,8 +253,14 @@ export async function deliver(deliveries: Delivery[]): Promise<DeliveryCounts> {
       const devices = subscriptions.filter(
         (sub) => sub.user_id === recipient.userId,
       );
+      const tokens = fcmTokens.filter(
+        (row) => row.user_id === recipient.userId,
+      );
       tasks.push(
         sendAlertPush(devices, message).then((sent) => {
+          counts.push += sent;
+        }),
+        sendFcmPush(tokens, message).then((sent) => {
           counts.push += sent;
         }),
       );

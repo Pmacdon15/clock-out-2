@@ -9,6 +9,8 @@ import type {
   AlertSettingsInput,
   BreakLimits,
   BreakType,
+  FcmTokenInput,
+  FcmTokenRow,
   NotificationPreferencesData,
   NotificationPreferencesInput,
   PushSubscriptionInput,
@@ -19,8 +21,8 @@ import type {
 let alertTablesReady: Promise<void> | null = null;
 
 /**
- * Alert rules, notification preferences, push subscriptions and the sent-alert
- * log. Production databases that predate them in schema.sql don't have the
+ * Alert rules, notification preferences, push subscriptions, FCM tokens, the
+ * sent-alert log and the scheduled alert jobs. Production databases that predate them in schema.sql don't have the
  * tables, so create them on first use, the same way `ensureBreakSettingsTable`
  * does. Runs once per server instance; a failure is not cached, so the next
  * call retries.
@@ -87,6 +89,31 @@ export function ensureAlertTables(): Promise<void> {
 		ALTER TABLE notification_preferences
 			ADD COLUMN IF NOT EXISTS schedule_alerts BOOLEAN NOT NULL DEFAULT TRUE,
 			ADD COLUMN IF NOT EXISTS timezone TEXT
+	`;
+    await sql`
+		CREATE TABLE IF NOT EXISTS fcm_tokens (
+			token TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			endpoint TEXT,
+			user_agent TEXT,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+			last_seen_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+		)
+	`;
+    await sql`
+		CREATE INDEX IF NOT EXISTS idx_fcm_tokens_user ON fcm_tokens (user_id)
+	`;
+    await sql`
+		CREATE INDEX IF NOT EXISTS idx_fcm_tokens_endpoint ON fcm_tokens (endpoint)
+	`;
+    await sql`
+		CREATE TABLE IF NOT EXISTS alert_jobs (
+			job_key TEXT PRIMARY KEY,
+			org_id TEXT NOT NULL,
+			message_id TEXT NOT NULL,
+			run_at TIMESTAMP WITH TIME ZONE NOT NULL,
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+		)
 	`;
   })().catch((error) => {
     alertTablesReady = null;
@@ -265,12 +292,19 @@ export async function dbSavePushSubscription(
   return saved as unknown as PushSubscriptionRow;
 }
 
-/** Removes one of the user's own devices. */
+/**
+ * Removes one of the user's own devices: its legacy Web Push row and any FCM
+ * token registered for the same browser subscription.
+ */
 export async function dbDeletePushSubscription(
   userId: string,
   endpoint: string,
 ) {
   await ensureAlertTables();
+  await sql`
+		DELETE FROM fcm_tokens
+		WHERE user_id = ${userId} AND endpoint = ${endpoint}
+	`;
   const [deleted] = await sql`
 		DELETE FROM push_subscriptions
 		WHERE user_id = ${userId} AND endpoint = ${endpoint}
@@ -292,6 +326,139 @@ export async function dbGetPushSubscriptionsFor(userIds: string[]) {
 		SELECT * FROM push_subscriptions WHERE user_id = ANY(${userIds})
 	`;
   return rows as unknown as PushSubscriptionRow[];
+}
+
+/* ---------------------------------------------------------- FCM tokens -- */
+
+/**
+ * Saves (or refreshes) a device's FCM token. A token is unique per app
+ * install, so a different person signing in on the same device takes it over.
+ * Legacy Web Push rows for the same browser subscription (or one this token
+ * replaced) are dropped, so the device is not notified twice.
+ */
+export async function dbSaveFcmToken(
+  userId: string,
+  input: FcmTokenInput,
+  userAgent: string | null,
+) {
+  await ensureAlertTables();
+  const endpoint = input.endpoint ?? null;
+  const [saved] = await sql`
+		INSERT INTO fcm_tokens (token, user_id, endpoint, user_agent, last_seen_at)
+		VALUES (${input.token}, ${userId}, ${endpoint}, ${userAgent}, NOW())
+		ON CONFLICT (token)
+		DO UPDATE SET
+			user_id = ${userId},
+			endpoint = ${endpoint},
+			user_agent = ${userAgent},
+			last_seen_at = NOW()
+		RETURNING *
+	`;
+  const legacy = [endpoint, input.replacedEndpoint ?? null].filter(
+    (e): e is string => typeof e === "string",
+  );
+  if (legacy.length > 0) {
+    await sql`
+			DELETE FROM push_subscriptions WHERE endpoint = ANY(${legacy})
+		`;
+  }
+  // A browser subscription maps to one live token: forget older ones.
+  if (endpoint) {
+    await sql`
+			DELETE FROM fcm_tokens
+			WHERE endpoint = ${endpoint} AND token <> ${input.token}
+		`;
+  }
+  return saved as unknown as FcmTokenRow;
+}
+
+/** FCM tokens for many people at once, for the alert sender. */
+export async function dbGetFcmTokensFor(userIds: string[]) {
+  if (userIds.length === 0) return [] as FcmTokenRow[];
+  await ensureAlertTables();
+  const rows = await sql`
+		SELECT * FROM fcm_tokens WHERE user_id = ANY(${userIds})
+	`;
+  return rows as unknown as FcmTokenRow[];
+}
+
+/** Drops tokens FCM reported as unregistered or invalid. */
+export async function dbDeleteFcmTokens(tokens: string[]) {
+  if (tokens.length === 0) return;
+  await ensureAlertTables();
+  await sql`DELETE FROM fcm_tokens WHERE token = ANY(${tokens})`;
+}
+
+/**
+ * Forgets tokens no app has refreshed in `days` days. FCM itself expires
+ * tokens after 270 days without a connection, so they would only fail.
+ */
+export async function dbPruneStaleFcmTokens(days: number) {
+  await ensureAlertTables();
+  const rows = await sql`
+		DELETE FROM fcm_tokens
+		WHERE last_seen_at < NOW() - make_interval(days => ${days}::INTEGER)
+		RETURNING token
+	`;
+  return rows.length;
+}
+
+/* ---------------------------------------------------------- alert jobs -- */
+
+/** A delayed QStash message waiting to run an alert check. */
+export type AlertJobRow = {
+  job_key: string;
+  org_id: string;
+  message_id: string;
+  run_at: Date;
+};
+
+export async function dbGetAlertJob(jobKey: string) {
+  await ensureAlertTables();
+  const [row] = await sql`
+		SELECT job_key, org_id, message_id, run_at
+		FROM alert_jobs WHERE job_key = ${jobKey}
+	`;
+  return row as unknown as AlertJobRow | undefined;
+}
+
+export async function dbUpsertAlertJob(
+  jobKey: string,
+  orgId: string,
+  messageId: string,
+  runAt: Date,
+) {
+  await ensureAlertTables();
+  await sql`
+		INSERT INTO alert_jobs (job_key, org_id, message_id, run_at, updated_at)
+		VALUES (${jobKey}, ${orgId}, ${messageId}, ${runAt}, NOW())
+		ON CONFLICT (job_key)
+		DO UPDATE SET
+			org_id = ${orgId},
+			message_id = ${messageId},
+			run_at = ${runAt},
+			updated_at = NOW()
+	`;
+}
+
+/** Forgets a job, returning it (so its message can be cancelled). */
+export async function dbDeleteAlertJob(jobKey: string) {
+  await ensureAlertTables();
+  const [row] = await sql`
+		DELETE FROM alert_jobs WHERE job_key = ${jobKey}
+		RETURNING job_key, org_id, message_id, run_at
+	`;
+  return row as unknown as AlertJobRow | undefined;
+}
+
+/** Which of these alert keys have already been sent. */
+export async function dbGetClaimedAlertKeys(alertKeys: string[]) {
+  if (alertKeys.length === 0) return new Set<string>();
+  await ensureAlertTables();
+  const rows = (await sql`
+		SELECT alert_key FROM sent_alerts WHERE alert_key = ANY(${alertKeys})
+	`) as unknown as { alert_key: string }[];
+  return new Set(rows.map((r) => r.alert_key));
 }
 
 /* ---------------------------------------------------------- cron reads -- */
