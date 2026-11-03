@@ -62,6 +62,8 @@ vi.mock("@/lib/db", () => ({
   dbEndOpenBreak: mocks.dbEndOpenBreak,
   dbGetActiveEntry: mocks.dbGetActiveEntry,
   dbGetBreakSettings: mocks.dbGetBreakSettings,
+  // Punches read the same stored settings, just past the cache.
+  dbGetBreakSettingsUncached: mocks.dbGetBreakSettings,
   dbGetBreaksForEntriesInOrg: mocks.dbGetBreaksForEntriesInOrg,
   dbGetBreakWithEntry: mocks.dbGetBreakWithEntry,
   dbGetEntryBreaks: mocks.dbGetEntryBreaks,
@@ -1136,24 +1138,33 @@ describe("startBreak", () => {
     );
   });
 
-  it("refuses an unpaid lunch while the org's lunch is paid", async () => {
+  it("starts a paid lunch when an unpaid one is asked for while lunch is paid", async () => {
+    // A page loaded before lunch was made paid still asks for 'unpaid_meal'.
     mocks.protect.mockResolvedValue(member);
     mocks.dbGetBreakSettings.mockResolvedValue({ paid_lunch: true });
+    mocks.dbGetActiveEntry.mockResolvedValue({ id: 1, breaks: [] });
+    mocks.dbStartBreak.mockResolvedValue({ id: 9, break_type: "paid_meal" });
     const result = await startBreak("unpaid_meal");
-    expect(result._unsafeUnwrapErr()).toEqual({
-      reason: "Lunch is paid in this organization",
-    });
-    expect(mocks.dbStartBreak).not.toHaveBeenCalled();
+    expect(result.isOk()).toBe(true);
+    expect(mocks.dbStartBreak).toHaveBeenCalledWith(
+      "user_1",
+      "org_1",
+      "paid_meal",
+    );
   });
 
-  it("refuses a paid lunch while the org's lunch is unpaid", async () => {
+  it("starts an unpaid lunch when a paid one is asked for while lunch is unpaid", async () => {
     mocks.protect.mockResolvedValue(member);
     mocks.dbGetBreakSettings.mockResolvedValue({ paid_lunch: false });
+    mocks.dbGetActiveEntry.mockResolvedValue({ id: 1, breaks: [] });
+    mocks.dbStartBreak.mockResolvedValue({ id: 9, break_type: "unpaid_meal" });
     const result = await startBreak("paid_meal");
-    expect(result._unsafeUnwrapErr()).toEqual({
-      reason: "Lunch is unpaid in this organization",
-    });
-    expect(mocks.dbStartBreak).not.toHaveBeenCalled();
+    expect(result.isOk()).toBe(true);
+    expect(mocks.dbStartBreak).toHaveBeenCalledWith(
+      "user_1",
+      "org_1",
+      "unpaid_meal",
+    );
   });
 
   it("allows unpaid rest breaks alongside a paid lunch", async () => {

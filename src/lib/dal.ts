@@ -33,6 +33,7 @@ import {
   dbGetActiveEntry,
   dbGetApprovedTimeOffForPeriod,
   dbGetBreakSettings,
+  dbGetBreakSettingsUncached,
   dbGetBreaksForEntriesInOrg,
   dbGetBreakWithEntry,
   dbGetEntryBreaks,
@@ -802,14 +803,16 @@ export type BreakWithOwner = TimeEntryBreak & {
 };
 
 /**
- * The org's break settings for internal checks. A lookup failure degrades to
- * "no settings" (no paid-break limit) rather than blocking the punch.
+ * The org's break settings for internal checks, read fresh (not from the
+ * cache) so a punch always follows the settings as they are right now. A
+ * lookup failure degrades to "no settings" (no limits) rather than blocking
+ * the punch.
  */
 async function loadBreakSettings(
   orgId: string,
 ): Promise<BreakSettingsData | null> {
   return await Promise.resolve()
-    .then(() => dbGetBreakSettings(orgId))
+    .then(() => dbGetBreakSettingsUncached(orgId))
     .then(
       (settings) => settings ?? null,
       (e) => {
@@ -824,8 +827,9 @@ async function loadBreakSettings(
  * shift, so this fails when the member is not clocked in, and refuses a
  * second break while one is still running.
  *
- * Lunch is either paid or unpaid for the whole org (`paid_lunch`), so only
- * that meal-period kind can be started; with no type given, lunch is started.
+ * Lunch is either paid or unpaid for the whole org (`paid_lunch`), so a meal
+ * period is always started as that kind, whichever meal kind was asked for;
+ * with no type given, lunch is started.
  */
 export async function startBreak(requestedType?: BreakType) {
   const { userId, orgId } = await auth.protect();
@@ -841,15 +845,13 @@ export async function startBreak(requestedType?: BreakType) {
 
   const breakSettings = await loadBreakSettings(orgId);
   const mealType = getMealBreakType(breakSettings);
-  const breakType = requestedType ?? mealType;
-  if (isMealBreakType(breakType) && breakType !== mealType) {
-    return errAsync({
-      reason:
-        mealType === "paid_meal"
-          ? "Lunch is paid in this organization"
-          : "Lunch is unpaid in this organization",
-    } as const);
-  }
+  // A meal request always becomes the org's current meal kind: a page loaded
+  // before lunch pay changed still asks for the old kind, and the member
+  // just wants their lunch, recorded the way the org pays it now.
+  const breakType =
+    requestedType === undefined || isMealBreakType(requestedType)
+      ? mealType
+      : requestedType;
 
   const activeEntry = await dbGetActiveEntry(userId, orgId).catch((e) => {
     console.error("Error checking active clock-in entry: ", e);

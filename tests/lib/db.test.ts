@@ -670,9 +670,21 @@ describe("breaks", () => {
     sql.mockResolvedValue([{ id: 2 }]);
     await expect(db.dbEndOpenBreak("u1", "o1")).resolves.toEqual({ id: 2 });
     // LEAST skips the NULL cap, so an unlimited break ends at NOW().
-    expect(textOf()).toContain("SET break_end = LEAST( NOW(),");
+    expect(textOf()).toContain(
+      "SET break_end = LEAST( COALESCE(?::TIMESTAMPTZ, NOW()),",
+    );
     expect(textOf()).toContain("WHERE break_end IS NULL");
-    expect(valuesOf()).toEqual([null, null, null, null, "u1", "o1"]);
+    expect(valuesOf()).toEqual([null, null, null, null, null, "u1", "o1"]);
+  });
+
+  it("dbEndOpenBreak never ends a break after the given end time", async () => {
+    sql.mockResolvedValue([]);
+    await db.ensureTimeEntryBreaksTable();
+    sql.mockReset();
+    sql.mockResolvedValue([{ id: 2 }]);
+    const clockOut = new Date("2026-11-02T18:00:00.000Z");
+    await db.dbEndOpenBreak("u1", "o1", null, clockOut);
+    expect(valuesOf()).toEqual([clockOut, null, null, null, null, "u1", "o1"]);
   });
 
   it("dbEndOpenBreak caps each break type at its limit", async () => {
@@ -689,7 +701,7 @@ describe("breaks", () => {
     expect(textOf()).toContain("break_start + make_interval(mins => (CASE");
     expect(textOf()).toContain("WHEN 'paid_rest' THEN ?::INTEGER");
     expect(textOf()).toContain("WHEN 'paid_meal' THEN ?::INTEGER");
-    expect(valuesOf()).toEqual([30, 45, null, 15, "u1", "o1"]);
+    expect(valuesOf()).toEqual([null, 30, 45, null, 15, "u1", "o1"]);
   });
 
   it("dbGetBreakWithEntry joins the shift it belongs to", async () => {

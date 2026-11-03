@@ -313,6 +313,16 @@ export async function dbGetBreakSettings(orgId: string) {
   "use cache";
   cacheTag(`break-settings-${orgId}`);
   cacheLife("hours");
+  return await dbGetBreakSettingsUncached(orgId);
+}
+
+/**
+ * The org's break settings read straight from the database, bypassing the
+ * cache. Use it wherever a punch is decided (which meal kind a break is,
+ * when a break is cut off at its limit): a cached copy can lag a settings
+ * change, which once recorded a meal as unpaid after lunch was made paid.
+ */
+export async function dbGetBreakSettingsUncached(orgId: string) {
   await ensureBreakSettingsTable();
   const [settings] = await sql`
 		SELECT * FROM break_settings WHERE org_id = ${orgId}
@@ -746,6 +756,8 @@ export async function dbEndOpenBreak(
   userId: string,
   orgId: string,
   limits?: BreakLimits | null,
+  /** Latest the break may end (e.g. a back-dated clock-out); defaults to now. */
+  endAt?: Date | null,
 ) {
   await ensureTimeEntryBreaksTable();
   const meal = limits?.unpaid_meal ?? null;
@@ -755,7 +767,7 @@ export async function dbEndOpenBreak(
   const [updated] = await sql`
 		UPDATE time_entry_breaks
 		SET break_end = LEAST(
-				NOW(),
+				COALESCE(${endAt ?? null}::TIMESTAMPTZ, NOW()),
 				break_start + make_interval(mins => (CASE break_type
 					WHEN 'unpaid_meal' THEN ${meal}::INTEGER
 					WHEN 'paid_meal' THEN ${paidMeal}::INTEGER

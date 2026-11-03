@@ -15,11 +15,13 @@ import {
   BREAK_TYPE_VALUES,
   breakTypeLabel,
   getBreakDurationMs,
+  getBreakLimits,
   getEffectiveDurationMs,
   getMealBreakType,
   getOpenBreak,
   getPaidBreakMs,
   getUnpaidBreakMs,
+  isBreakOverLimit,
   isBreakType,
   isMealBreakType,
   isPaidBreakType,
@@ -80,6 +82,7 @@ import {
   dbFindOverlappingTimeEntries,
   dbGetActiveEntry,
   dbGetBreakSettings,
+  dbGetBreakSettingsUncached,
   dbGetBreakWithEntry,
   dbGetEntryBreaks,
   dbGetLocationSettings,
@@ -1981,6 +1984,22 @@ export async function clockOutTool(
     ? locationResolution.location
     : null;
 
+  // Close a break still running at clock-out, capped at its type's limit
+  // (and at the clock-out), so the shift never ends with an open break.
+  const breakSettings = await loadFreshBreakSettings(org.orgId);
+  await Promise.resolve()
+    .then(() =>
+      dbEndOpenBreak(
+        target.userId,
+        org.orgId,
+        getBreakLimits(breakSettings),
+        customClockOut,
+      ),
+    )
+    .catch((error) => {
+      console.error("Error closing break at clock-out: ", error);
+    });
+
   const updated = await dbClockOutAt(
     target.userId,
     org.orgId,
@@ -3175,8 +3194,27 @@ export async function toggleBreakTool(
     };
   }
 
-  const openBreak = getOpenBreak(active);
+  // Read fresh, not cached: which meal kind a break is and where it is cut
+  // off must follow the settings as they are right now.
+  const breakSettings = await loadFreshBreakSettings(org.orgId);
+  const limits = getBreakLimits(breakSettings);
+
+  let openBreak = getOpenBreak(active);
   const requestedAction = input.action ?? "toggle";
+
+  // A break past its type's limit is already over in all but the record:
+  // close it at its limit so a new one can start.
+  if (
+    requestedAction === "start" &&
+    openBreak &&
+    isBreakOverLimit(openBreak, breakSettings)
+  ) {
+    const closed = await dbEndOpenBreak(target.userId, org.orgId, limits);
+    if (closed) {
+      invalidateTimeEntryCache(target.userId, org.orgId);
+      openBreak = undefined;
+    }
+  }
 
   if (requestedAction === "start" && openBreak) {
     const formattedOpen = formatBreakForResponse(openBreak, tz);
@@ -3207,7 +3245,9 @@ export async function toggleBreakTool(
     (requestedAction === "toggle" && Boolean(openBreak));
 
   if (shouldEnd) {
-    const ended = await dbEndOpenBreak(target.userId, org.orgId);
+    // Capped at the break type's limit: a break ended late is recorded as
+    // ending at its limit, the same as on the web clock.
+    const ended = await dbEndOpenBreak(target.userId, org.orgId, limits);
     if (!ended) {
       return {
         summary: `${target.name} does not have a break running right now.`,
@@ -3234,7 +3274,7 @@ export async function toggleBreakTool(
     };
   }
 
-  const mealType = getMealBreakType(await dbGetBreakSettings(org.orgId));
+  const mealType = getMealBreakType(breakSettings);
   const breakType: BreakType = input.break_type ?? mealType;
   if (!isBreakType(breakType)) {
     return {
@@ -3277,6 +3317,22 @@ export async function toggleBreakTool(
       break: formattedBreak,
     },
   };
+}
+
+/**
+ * The org's break settings read straight from the database. A lookup failure
+ * degrades to "no settings" rather than blocking the punch.
+ */
+async function loadFreshBreakSettings(orgId: string) {
+  return await Promise.resolve()
+    .then(() => dbGetBreakSettingsUncached(orgId))
+    .then(
+      (settings) => settings ?? null,
+      (error) => {
+        console.error("Error fetching break settings: ", error);
+        return null;
+      },
+    );
 }
 
 async function resolveTargetEntryForBreak(

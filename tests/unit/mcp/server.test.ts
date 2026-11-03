@@ -71,6 +71,9 @@ vi.mock("@/mcp/db", () => ({
     mockDbFindOverlapping(...args),
   dbGetActiveEntry: (...args: unknown[]) => mockDbGetActiveEntry(...args),
   dbGetBreakSettings: (...args: unknown[]) => mockDbGetBreakSettings(...args),
+  // Punches read the same stored settings, just past the cache.
+  dbGetBreakSettingsUncached: (...args: unknown[]) =>
+    mockDbGetBreakSettings(...args),
   dbGetBreakWithEntry: (...args: unknown[]) => mockDbGetBreakWithEntry(...args),
   dbGetEntryBreaks: (...args: unknown[]) => mockDbGetEntryBreaks(...args),
   dbGetLocationSettings: (...args: unknown[]) =>
@@ -1478,10 +1481,111 @@ describe("toggle_break and manage_breaks", () => {
     const res = await toggleBreakTool(adminCaller, {});
     expect(res.isError).toBeUndefined();
     expect(res.data.status).toBe("break_ended");
-    expect(mockDbEndOpenBreak).toHaveBeenCalledWith("user_admin", "org_1");
+    expect(mockDbEndOpenBreak).toHaveBeenCalledWith("user_admin", "org_1", {
+      unpaid_meal: null,
+      paid_meal: null,
+      unpaid_rest: null,
+      paid_rest: null,
+    });
     expect(mockInvalidateTimeEntryCache).toHaveBeenCalledWith(
       "user_admin",
       "org_1",
+    );
+  });
+
+  it("ends a break capped at each break type's own limit", async () => {
+    // Issue #80: meal 30, unpaid rest 15 — a rest break ended late must be
+    // recorded at 15 minutes, not however long it actually ran.
+    mockDbGetBreakSettings.mockResolvedValue({
+      paid_lunch: true,
+      dock_lunch: true,
+      lunch_duration_minutes: 30,
+      max_meal_break_minutes: 30,
+      max_unpaid_rest_break_minutes: 15,
+      max_paid_break_minutes: null,
+    });
+    mockDbGetActiveEntry.mockResolvedValue({
+      id: 42,
+      user_id: "user_admin",
+      org_id: "org_1",
+      clock_in: new Date("2026-10-06T14:00:00.000Z"),
+      clock_out: null,
+      breaks: [
+        {
+          id: 101,
+          time_entry_id: 42,
+          org_id: "org_1",
+          break_start: new Date("2026-10-06T18:00:00.000Z"),
+          break_end: null,
+          break_type: "unpaid_rest",
+        },
+      ],
+    });
+    mockDbEndOpenBreak.mockResolvedValue({
+      id: 101,
+      time_entry_id: 42,
+      org_id: "org_1",
+      break_start: new Date("2026-10-06T18:00:00.000Z"),
+      break_end: new Date("2026-10-06T18:15:00.000Z"),
+      break_type: "unpaid_rest",
+    });
+
+    const res = await toggleBreakTool(adminCaller, { action: "end" });
+    expect(res.data.status).toBe("break_ended");
+    expect(mockDbEndOpenBreak).toHaveBeenCalledWith("user_admin", "org_1", {
+      unpaid_meal: 30,
+      paid_meal: 30,
+      unpaid_rest: 15,
+      paid_rest: null,
+    });
+  });
+
+  it("closes an expired break at its limit before starting a new one", async () => {
+    mockDbGetBreakSettings.mockResolvedValue({
+      max_unpaid_rest_break_minutes: 15,
+    });
+    mockDbGetActiveEntry.mockResolvedValue({
+      id: 42,
+      user_id: "user_admin",
+      org_id: "org_1",
+      clock_in: new Date("2026-10-06T14:00:00.000Z"),
+      clock_out: null,
+      breaks: [
+        {
+          id: 101,
+          time_entry_id: 42,
+          org_id: "org_1",
+          // Long past its 15-minute limit.
+          break_start: new Date("2026-10-06T18:00:00.000Z"),
+          break_end: null,
+          break_type: "unpaid_rest",
+        },
+      ],
+    });
+    mockDbEndOpenBreak.mockResolvedValue({ id: 101 });
+    mockDbStartBreak.mockResolvedValue({
+      id: 102,
+      time_entry_id: 42,
+      org_id: "org_1",
+      break_start: new Date(),
+      break_end: null,
+      break_type: "unpaid_rest",
+    });
+
+    const res = await toggleBreakTool(adminCaller, {
+      action: "start",
+      break_type: "unpaid_rest",
+    });
+    expect(res.data.status).toBe("break_started");
+    expect(mockDbEndOpenBreak).toHaveBeenCalledWith(
+      "user_admin",
+      "org_1",
+      expect.objectContaining({ unpaid_rest: 15 }),
+    );
+    expect(mockDbStartBreak).toHaveBeenCalledWith(
+      "user_admin",
+      "org_1",
+      "unpaid_rest",
     );
   });
 
@@ -2175,6 +2279,13 @@ describe("Clerk pagination in MCP tools", () => {
         }),
       );
       expect(res.summary).toContain("Remote Office (200 Queen St, Ottawa, ON)");
+      // A break still running is closed (capped at its limit) first.
+      expect(mockDbEndOpenBreak).toHaveBeenCalledWith(
+        "user_admin",
+        "org_1",
+        expect.any(Object),
+        undefined,
+      );
     });
 
     it("strictly rejects clock-in without location when capture_mode is required", async () => {
