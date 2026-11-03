@@ -49,6 +49,7 @@ import type {
   TimeEntryBreak,
 } from "@/lib/types";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
+import LocalTime from "./LocalTime";
 import { Button, Card } from "./ui";
 import {
   AlertDialog,
@@ -431,12 +432,12 @@ export default function TimeClock({
           <div className="mb-2 font-black font-mono text-6xl tracking-tighter">
             {elapsedTime || "0m"}
           </div>
-          <p
-            className="mb-4 flex items-center gap-2 text-muted-foreground"
-            suppressHydrationWarning
-          >
+          <p className="mb-4 flex items-center gap-2 text-muted-foreground">
             <Clock className="h-4 w-4" />
-            Started at {new Date(activeEntry.clock_in).toLocaleTimeString()}
+            Started at{" "}
+            <LocalTime>
+              {() => new Date(activeEntry.clock_in).toLocaleTimeString()}
+            </LocalTime>
           </p>
 
           <div className="mb-8 flex w-full max-w-sm flex-col gap-3">
@@ -630,17 +631,21 @@ export default function TimeClock({
                 key={entry.id}
               >
                 <div className="flex flex-col">
-                  <span className="font-semibold" suppressHydrationWarning>
-                    {new Date(entry.clock_in).toLocaleDateString()}
+                  <span className="font-semibold">
+                    <LocalTime>
+                      {() => new Date(entry.clock_in).toLocaleDateString()}
+                    </LocalTime>
                   </span>
-                  <span
-                    className="text-muted-foreground text-xs"
-                    suppressHydrationWarning
-                  >
-                    {new Date(entry.clock_in).toLocaleTimeString()} -{" "}
-                    {entry.clock_out
-                      ? new Date(entry.clock_out).toLocaleTimeString()
-                      : "Current"}
+                  <span className="text-muted-foreground text-xs">
+                    <LocalTime>
+                      {() =>
+                        `${new Date(entry.clock_in).toLocaleTimeString()} - ${
+                          entry.clock_out
+                            ? new Date(entry.clock_out).toLocaleTimeString()
+                            : "Current"
+                        }`
+                      }
+                    </LocalTime>
                   </span>
                 </div>
                 <div className="flex items-center gap-3">

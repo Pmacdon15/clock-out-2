@@ -27,6 +27,7 @@ import type {
   ShiftStatus,
   TimeOffRequest,
 } from "@/lib/types";
+import LocalTime from "./LocalTime";
 import { Button, Card } from "./ui";
 
 type Member = { id: string; name: string };
@@ -261,15 +262,20 @@ function ShiftRow({
 
   const start = new Date(shift.shift_start);
   const end = new Date(shift.shift_end);
+  const actualIn = shift.actual_clock_in;
+  const actualOut = shift.actual_clock_out;
 
   return (
     <li className="flex flex-col gap-1.5 border-zinc-100 border-b py-4 last:border-0 dark:border-zinc-800">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           {memberName && <span className="font-bold">{memberName}</span>}
-          <span className="font-medium text-sm" suppressHydrationWarning>
-            {format(start, "EEE, MMM d")} · {format(start, "h:mm a")} –{" "}
-            {format(end, "h:mm a")}
+          <span className="font-medium text-sm">
+            <LocalTime>
+              {() =>
+                `${format(start, "EEE, MMM d")} · ${format(start, "h:mm a")} – ${format(end, "h:mm a")}`
+              }
+            </LocalTime>
           </span>
         </div>
         <div className="flex items-center gap-2">
@@ -320,13 +326,15 @@ function ShiftRow({
             ))}
         </div>
       </div>
-      {shift.actual_clock_in && (
-        <p className="text-muted-foreground text-xs" suppressHydrationWarning>
-          Clocked in {format(new Date(shift.actual_clock_in), "h:mm a")}
+      {actualIn && (
+        <p className="text-muted-foreground text-xs">
+          Clocked in{" "}
+          <LocalTime>{() => format(new Date(actualIn), "h:mm a")}</LocalTime>
           {shift.minutes_late ? ` (${shift.minutes_late} min late)` : ""}
-          {shift.actual_clock_out
-            ? ` · out ${format(new Date(shift.actual_clock_out), "h:mm a")}`
-            : " · still on the clock"}
+          {actualOut ? " · out " : " · still on the clock"}
+          {actualOut && (
+            <LocalTime>{() => format(new Date(actualOut), "h:mm a")}</LocalTime>
+          )}
         </p>
       )}
       {shift.note && (
