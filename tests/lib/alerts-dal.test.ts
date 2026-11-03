@@ -120,7 +120,7 @@ describe("updateAlertSettingsDal", () => {
     ).toEqual({ reason: "Invalid alert settings" });
     expect(
       (
-        await updateAlertSettingsDal({ ...valid, break_reminder_minutes: 1 })
+        await updateAlertSettingsDal({ ...valid, break_reminder_minutes: 0 })
       )._unsafeUnwrapErr().reason,
     ).toContain("Break reminder minutes");
     expect(mocks.dbUpdateAlertSettings).not.toHaveBeenCalled();
