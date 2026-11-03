@@ -10,6 +10,7 @@ import {
   getMyNotificationSettings,
   getOrgAlertSettings,
 } from "@/lib/alerts-dal";
+import { NOTIFICATIONS_FEATURE } from "@/lib/billing";
 import {
   getOrgBreakSettings,
   getOrgLocationSettings,
@@ -24,6 +25,7 @@ import {
   getTimeOffAllowances,
   getTimeOffRequests,
 } from "@/lib/dal";
+import { getOrgPayroll } from "@/lib/payroll-dal";
 import { SCHEDULING_FEATURE, TIME_OFF_FEATURE } from "@/lib/plan-features";
 import { parseParams } from "@/lib/utils";
 
@@ -58,6 +60,9 @@ export default function Home(props: PageProps<"/">) {
               hasGeofencingPromise={hasPromise.then((has) =>
                 has({ feature: "geofencing" }),
               )}
+              hasNotificationsPromise={hasPromise.then((has) =>
+                has({ feature: NOTIFICATIONS_FEATURE }),
+              )}
               hasReportingPromise={hasPromise.then((has) =>
                 has({ feature: "reporting" }),
               )}
@@ -77,6 +82,7 @@ export default function Home(props: PageProps<"/">) {
               orgSettingsPromise={getOrgReportingSettings()}
               overtimeSettingsPromise={getOrgOvertimeSettings()}
               payRatesPromise={getOrgPayRates()}
+              payrollPromise={getOrgPayroll()}
               orgTimeEntriesPromise={props.searchParams.then((p) =>
                 getOrgTimeEntries({
                   start: parseParams(p.start),

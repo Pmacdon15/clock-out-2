@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   loadOrgMembers: vi.fn(),
   deliver: vi.fn(),
   orgHasPlanFeature: vi.fn(),
+  orgHasFeature: vi.fn(),
 }));
 
 vi.mock("@/lib/alerts-db", () => ({
@@ -26,6 +27,12 @@ vi.mock("@/lib/notify", () => ({ deliver: mocks.deliver }));
 vi.mock("@/lib/plan-features", () => ({
   SCHEDULING_FEATURE: "scheduling",
   orgHasPlanFeature: mocks.orgHasPlanFeature,
+}));
+vi.mock("@/lib/billing", () => ({
+  NOTIFICATIONS_FEATURE: "notifications",
+  orgHasFeature: mocks.orgHasFeature,
+  createFeatureCheck: () => (orgId: string) =>
+    mocks.orgHasFeature(orgId, "notifications"),
 }));
 
 import {
@@ -83,6 +90,7 @@ beforeEach(() => {
   mocks.loadOrgMembers.mockResolvedValue([member]);
   mocks.dbGetOpenShifts.mockResolvedValue([]);
   mocks.dbClaimAlert.mockResolvedValue(true);
+  mocks.orgHasFeature.mockResolvedValue(true);
   mocks.deliver.mockResolvedValue({ email: 1, push: 1 });
   // Every org pays for scheduling except "org_unpaid".
   mocks.orgHasPlanFeature.mockImplementation(
@@ -215,6 +223,15 @@ describe("notifyScheduleChange", () => {
     expect(mocks.deliver).not.toHaveBeenCalled();
   });
 
+  it("sends nothing for an org without the notifications feature", async () => {
+    mocks.orgHasFeature.mockResolvedValue(false);
+    await expect(
+      notifyScheduleChange("added", upcoming, null, now),
+    ).resolves.toBe(false);
+    expect(mocks.orgHasFeature).toHaveBeenCalledWith("org_1", "notifications");
+    expect(mocks.deliver).not.toHaveBeenCalled();
+  });
+
   it("never throws, and defaults to the current time", async () => {
     mocks.loadOrgMembers.mockRejectedValueOnce(new Error("clerk down"));
     const future = shift("2099-01-01T15:00:00Z", "2099-01-01T23:00:00Z");
@@ -342,6 +359,17 @@ describe("runWeeklyScheduleDigests", () => {
     expect(mocks.dbGetAlertSettingsFor).not.toHaveBeenCalled();
   });
 
+  it("sends no digest for an org without the notifications feature", async () => {
+    mocks.dbGetScheduledShiftsBetween.mockResolvedValue([due]);
+    const hasNotifications = vi.fn(async () => false);
+    await expect(
+      runWeeklyScheduleDigests(sundayEvening, hasNotifications),
+    ).resolves.toEqual({ digests: 0, emails: 0, pushes: 0 });
+    expect(hasNotifications).toHaveBeenCalledWith("org_1");
+    expect(mocks.loadOrgMembers).not.toHaveBeenCalled();
+    expect(mocks.deliver).not.toHaveBeenCalled();
+  });
+
   it("sends each due digest once, skipping leavers, opted-out, unpaid and failing orgs", async () => {
     mocks.dbGetScheduledShiftsBetween.mockResolvedValue([
       due,
@@ -448,6 +476,17 @@ describe("upcoming shift reminders", () => {
       describeUpcomingShift(soon, REGINA, new Date("2026-11-02T14:59:10Z"))
         .body,
     ).toContain("starting in 1 minute.");
+  });
+
+  it("sends no reminder for an org without the notifications feature", async () => {
+    mocks.dbGetScheduledShiftsBetween.mockResolvedValue([soon]);
+    const hasNotifications = vi.fn(async () => false);
+    await expect(
+      runUpcomingShiftReminders(now, hasNotifications),
+    ).resolves.toEqual({ reminders: 0, emails: 0, pushes: 0 });
+    expect(hasNotifications).toHaveBeenCalledWith("org_1");
+    expect(mocks.loadOrgMembers).not.toHaveBeenCalled();
+    expect(mocks.deliver).not.toHaveBeenCalled();
   });
 
   it("does nothing without shifts due", async () => {

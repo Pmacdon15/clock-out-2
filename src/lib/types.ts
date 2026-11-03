@@ -1,10 +1,15 @@
 /**
- * Break kinds recorded against a time entry. `paid_rest` is a paid rest
- * break (recorded, never deducted); the two `unpaid_*` kinds are unpaid and
- * are subtracted from worked hours. `unpaid_meal` is the jurisdictional meal
- * period many labour codes require a record of.
+ * Break kinds recorded against a time entry. The `paid_*` kinds are paid
+ * (recorded, never deducted); the `unpaid_*` kinds are unpaid and are
+ * subtracted from worked hours. `unpaid_meal` and `paid_meal` are the meal
+ * period (lunch) many labour codes require a record of; which one the clock
+ * offers depends on the org's `paid_lunch` setting.
  */
-export type BreakType = "unpaid_meal" | "unpaid_rest" | "paid_rest";
+export type BreakType =
+  | "unpaid_meal"
+  | "paid_meal"
+  | "unpaid_rest"
+  | "paid_rest";
 
 export type TimeEntryBreak = {
   id: number;
@@ -49,6 +54,7 @@ export type SerializableResult<T, E> =
   | { error: E; ok: false };
 
 import type { NotificationSettingsView } from "./alerts-dal";
+import type { PayrollView } from "./payroll";
 import type { EntryAction } from "./reducers/time-entries";
 
 export type ReportingSettingsData = {
@@ -65,18 +71,34 @@ export type BreakSettingsData = {
   lunch_duration_minutes: number;
   lunch_min_shift_hours: number;
   /**
+   * Whether lunch (the meal period) is paid. When true the clock offers a
+   * paid meal period instead of an unpaid one, and lunch is never docked.
+   */
+  paid_lunch?: boolean;
+  /**
    * Longest each kind of break may run, in minutes. Null/absent means no
    * limit. A break that reaches its limit is ended automatically (the member
    * is put back on the clock) and recorded as ending exactly at the limit.
+   * `max_meal_break_minutes` covers both the paid and unpaid meal period.
    */
   max_meal_break_minutes?: number | null;
   max_unpaid_rest_break_minutes?: number | null;
   max_paid_break_minutes?: number | null;
+  /**
+   * How many paid / unpaid breaks a member may start in one shift. Null or
+   * absent means no limit. A meal period counts toward whichever kind
+   * lunch is (see `paid_lunch`).
+   */
+  max_paid_breaks_per_shift?: number | null;
+  max_unpaid_breaks_per_shift?: number | null;
   updated_at?: Date;
 };
 
 /** Per-break-type limits in minutes; null = no limit. */
 export type BreakLimits = Record<BreakType, number | null>;
+
+/** How many paid / unpaid breaks fit in one shift; null = no limit. */
+export type BreakCountLimits = { paid: number | null; unpaid: number | null };
 
 /**
  * Overtime thresholds in hours. Null/absent turns that threshold off; with
@@ -163,6 +185,8 @@ export interface DashboardTabsProps {
   payRatesPromise?: Promise<
     SerializableResult<PayRateData[], { reason: string }>
   >;
+  /** Optional CPP/QPP and EI deduction settings plus the CRA rates. */
+  payrollPromise?: Promise<SerializableResult<PayrollView, { reason: string }>>;
   sitesPromise?: Promise<SerializableResult<SiteData[], { reason: string }>>;
   alertSettingsPromise?: Promise<
     SerializableResult<AlertSettingsData, { reason: string }>
@@ -203,6 +227,8 @@ export interface DashboardTabsProps {
   hasGeofencingPromise?: Promise<boolean>;
   hasSchedulingPromise: Promise<boolean>;
   hasTimeOffPromise: Promise<boolean>;
+  /** Whether the org's plan includes the paid `notifications` feature. */
+  hasNotificationsPromise?: Promise<boolean>;
   userIdPromise: Promise<string | undefined>;
   orgIdPromise: Promise<string | undefined>;
 }
@@ -214,6 +240,8 @@ export interface ViewHoursProps {
   overtimeSettings?: OvertimeSettingsData | null;
   /** Rates the viewer may see; gross pay is estimated for these members. */
   payRates?: PayRateData[];
+  /** Deductions are estimated beside gross pay when enabled. */
+  payroll?: PayrollView | null;
   membersPromise?: Promise<
     {
       id: string;

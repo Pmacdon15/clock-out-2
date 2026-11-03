@@ -25,6 +25,7 @@ export default function DashboardTabs({
   locationSettingsPromise,
   overtimeSettingsPromise,
   payRatesPromise,
+  payrollPromise,
   sitesPromise,
   alertSettingsPromise,
   notificationSettingsPromise,
@@ -47,6 +48,7 @@ export default function DashboardTabs({
   hasGeofencingPromise,
   hasSchedulingPromise,
   hasTimeOffPromise,
+  hasNotificationsPromise,
   userIdPromise,
   orgIdPromise,
 }: DashboardTabsProps) {
@@ -57,6 +59,9 @@ export default function DashboardTabs({
     : false;
   const hasScheduling = use(hasSchedulingPromise);
   const hasTimeOff = use(hasTimeOffPromise);
+  const hasNotifications = hasNotificationsPromise
+    ? use(hasNotificationsPromise)
+    : false;
   const isAdmin = use(isAdminPromise);
   const result = use(entriesPromise);
   const recentEntriesResult = use(recentEntriesPromise);
@@ -74,6 +79,8 @@ export default function DashboardTabs({
     : null;
   const payRatesResult = payRatesPromise ? use(payRatesPromise) : null;
   const payRates = payRatesResult?.ok ? payRatesResult.value : [];
+  const payrollResult = payrollPromise ? use(payrollPromise) : null;
+  const payroll = payrollResult?.ok ? payrollResult.value : null;
   const locationSettingsResult = locationSettingsPromise
     ? use(locationSettingsPromise)
     : null;
@@ -144,6 +151,7 @@ export default function DashboardTabs({
             orgTimeEntriesPromise={orgTimeEntriesPromise}
             overtimeSettings={overtimeSettings}
             payRates={payRates}
+            payroll={payroll}
             selectedMonthPromise={selectedMonthPromise}
             selectedUserIdPromise={selectedUserIdPromise}
             selectedWeekPromise={selectedWeekPromise}
@@ -160,6 +168,7 @@ export default function DashboardTabs({
         <TabsContent className="mt-0" value="notifications">
           <Suspense fallback={<SettingsFallback />}>
             <NotificationSettings
+              hasNotifications={hasNotifications}
               isAdmin={isAdmin}
               settingsPromise={notificationSettingsPromise}
             />
@@ -210,12 +219,14 @@ export default function DashboardTabs({
               alertSettingsPromise={alertSettingsPromise}
               breakSettingsPromise={breakSettingsPromise}
               hasGeofencing={hasGeofencing}
+              hasNotifications={hasNotifications}
               hasReporting={hasReporting}
               locationSettingsPromise={locationSettingsPromise}
               membersPromise={membersPromise}
               orgSettingsPromise={orgSettingsPromise}
               overtimeSettingsPromise={overtimeSettingsPromise}
               payRates={payRates}
+              payroll={payroll}
               sitesPromise={sitesPromise}
             />
           </Suspense>
