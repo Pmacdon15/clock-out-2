@@ -17,6 +17,7 @@ import {
   dbUpdateAlertSettings,
   dbUpdateNotificationPreferences,
 } from "./alerts-db";
+import { NOTIFICATIONS_FEATURE } from "./billing";
 import {
   type DeliveryCounts,
   deliver,
@@ -33,6 +34,9 @@ import type {
 } from "./types";
 
 type Failure = { reason: string };
+
+const UPGRADE_REASON =
+  "Notifications are a paid feature. Upgrade your organization's plan to turn them on.";
 
 /** The org's alert rules, with defaults filled in for an org that has none. */
 export async function getOrgAlertSettings(): Promise<
@@ -132,8 +136,11 @@ export async function getMyNotificationSettings(): Promise<
 export async function updateNotificationPreferencesDal(
   input: NotificationPreferencesInput,
 ): Promise<Result<NotificationPreferencesData, Failure>> {
-  const { userId } = await auth.protect();
+  const { userId, has } = await auth.protect();
   if (!userId) return err({ reason: "Unauthorized" });
+  if (!has({ feature: NOTIFICATIONS_FEATURE })) {
+    return err({ reason: UPGRADE_REASON });
+  }
   if (!isValidNotificationPreferences(input)) {
     return err({ reason: "Invalid notification preferences" });
   }
@@ -171,8 +178,11 @@ export async function savePushSubscriptionDal(
   subscription: PushSubscriptionInput,
   userAgent?: string | null,
 ): Promise<Result<true, Failure>> {
-  const { userId } = await auth.protect();
+  const { userId, has } = await auth.protect();
   if (!userId) return err({ reason: "Unauthorized" });
+  if (!has({ feature: NOTIFICATIONS_FEATURE })) {
+    return err({ reason: UPGRADE_REASON });
+  }
   if (!isValidPushSubscription(subscription)) {
     return err({ reason: "Invalid push subscription" });
   }
@@ -208,8 +218,11 @@ export async function deletePushSubscriptionDal(
 export async function sendTestNotificationDal(): Promise<
   Result<DeliveryCounts, Failure>
 > {
-  const { userId } = await auth.protect();
+  const { userId, has } = await auth.protect();
   if (!userId) return err({ reason: "Unauthorized" });
+  if (!has({ feature: NOTIFICATIONS_FEATURE })) {
+    return err({ reason: UPGRADE_REASON });
+  }
   try {
     const user = await currentUser();
     const email = user?.primaryEmailAddress?.emailAddress ?? null;

@@ -225,6 +225,8 @@ export interface DashboardTabsProps {
   isAdminPromise: Promise<boolean>;
   hasReportingPromise: Promise<boolean>;
   hasGeofencingPromise?: Promise<boolean>;
+  /** Whether the org's plan includes the paid `notifications` feature. */
+  hasNotificationsPromise?: Promise<boolean>;
   userIdPromise: Promise<string | undefined>;
   orgIdPromise: Promise<string | undefined>;
 }

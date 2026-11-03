@@ -10,6 +10,7 @@ import {
   getMyNotificationSettings,
   getOrgAlertSettings,
 } from "@/lib/alerts-dal";
+import { NOTIFICATIONS_FEATURE } from "@/lib/billing";
 import {
   getOrgBreakSettings,
   getOrgLocationSettings,
@@ -57,6 +58,9 @@ export default function Home(props: PageProps<"/">) {
               )}
               hasGeofencingPromise={hasPromise.then((has) =>
                 has({ feature: "geofencing" }),
+              )}
+              hasNotificationsPromise={hasPromise.then((has) =>
+                has({ feature: NOTIFICATIONS_FEATURE }),
               )}
               hasReportingPromise={hasPromise.then((has) =>
                 has({ feature: "reporting" }),
