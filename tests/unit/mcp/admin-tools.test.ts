@@ -170,6 +170,20 @@ describe("resolveShiftTimes", () => {
 });
 
 describe("manage_schedule", () => {
+  beforeEach(() => {
+    m.getBillingSubscription.mockResolvedValue({
+      subscriptionItems: [{ plan: { features: [{ slug: "scheduling" }] } }],
+    });
+  });
+
+  it("needs the scheduling plan feature", async () => {
+    m.getBillingSubscription.mockResolvedValue({ subscriptionItems: [] });
+    const res = await manageScheduleTool(admin, { action: "list" });
+    expect(res.isError).toBe(true);
+    expect(res.data.status).toBe("scheduling_not_enabled");
+    expect(m.getBillingSubscription).toHaveBeenCalledWith("org_1");
+  });
+
   it("lets an admin schedule a shift for a member and notifies them", async () => {
     m.dbCreateScheduledShift.mockResolvedValue(shift);
     const res = await manageScheduleTool(admin, {
@@ -337,6 +351,20 @@ describe("manage_schedule", () => {
 });
 
 describe("manage_time_off", () => {
+  beforeEach(() => {
+    m.getBillingSubscription.mockResolvedValue({
+      subscriptionItems: [{ plan: { features: [{ slug: "time_off" }] } }],
+    });
+  });
+
+  it("needs the time_off plan feature", async () => {
+    m.getBillingSubscription.mockResolvedValue({ subscriptionItems: [] });
+    const res = await manageTimeOffTool(admin, { action: "list" });
+    expect(res.isError).toBe(true);
+    expect(res.data.status).toBe("time_off_not_enabled");
+    expect(m.getBillingSubscription).toHaveBeenCalledWith("org_1");
+  });
+
   it("lets an admin add approved time off for a member", async () => {
     m.dbCreateTimeOffRequest.mockResolvedValue(timeOff);
     const res = await manageTimeOffTool(admin, {

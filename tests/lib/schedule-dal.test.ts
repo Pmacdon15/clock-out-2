@@ -46,10 +46,30 @@ import {
   updateScheduledShiftDal,
 } from "@/lib/dal";
 
-const member = { userId: "user_1", orgId: "org_1", orgRole: "org:member" };
-const admin = { userId: "admin_1", orgId: "org_1", orgRole: "org:admin" };
-const noUser = { userId: null, orgId: "org_1", orgRole: "org:admin" };
-const noOrg = { userId: "admin_1", orgId: null, orgRole: "org:admin" };
+const member = {
+  userId: "user_1",
+  orgId: "org_1",
+  orgRole: "org:member",
+  has: () => true,
+};
+const admin = {
+  userId: "admin_1",
+  orgId: "org_1",
+  orgRole: "org:admin",
+  has: () => true,
+};
+const noUser = {
+  userId: null,
+  orgId: "org_1",
+  orgRole: "org:admin",
+  has: () => true,
+};
+const noOrg = {
+  userId: "admin_1",
+  orgId: null,
+  orgRole: "org:admin",
+  has: () => true,
+};
 
 const shiftStart = new Date("2026-01-05T09:00:00Z");
 const shiftEnd = new Date("2026-01-05T17:00:00Z");
@@ -437,5 +457,34 @@ describe("updateScheduledShiftDal", () => {
     expect(
       (await updateScheduledShiftDal(1, later, laterEnd))._unsafeUnwrapErr(),
     ).toEqual({ reason: "Failed to update shift" });
+  });
+});
+
+describe("without the scheduling plan feature", () => {
+  const lacking = (session: object) => ({
+    ...session,
+    has: vi.fn(({ feature }: { feature: string }) => feature !== "scheduling"),
+  });
+
+  it("shows an empty schedule without reading it", async () => {
+    const session = lacking(admin);
+    mocks.protect.mockResolvedValue(session);
+    await expect(getSchedule()).resolves.toEqual({ value: [], ok: true });
+    expect(session.has).toHaveBeenCalledWith({ feature: "scheduling" });
+    expect(mocks.dbGetScheduledShifts).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["create", () => createScheduledShiftDal("user_1", shiftStart, shiftEnd)],
+    ["update", () => updateScheduledShiftDal(1, shiftStart, shiftEnd)],
+    ["delete", () => deleteScheduledShiftDal(1)],
+  ])("refuses to %s a shift", async (_label, call) => {
+    mocks.protect.mockResolvedValue(lacking(admin));
+    const result = await call();
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr().reason).toMatch(/paid plans/);
+    expect(mocks.dbCreateScheduledShift).not.toHaveBeenCalled();
+    expect(mocks.dbUpdateScheduledShift).not.toHaveBeenCalled();
+    expect(mocks.dbDeleteScheduledShift).not.toHaveBeenCalled();
   });
 });

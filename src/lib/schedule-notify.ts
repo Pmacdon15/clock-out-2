@@ -18,6 +18,7 @@ import {
   orgHasFeature,
 } from "./billing";
 import { deliver } from "./notify";
+import { orgHasPlanFeature, SCHEDULING_FEATURE } from "./plan-features";
 import type { ScheduledShift } from "./types";
 
 const DAY_MS = 86_400_000;
@@ -285,6 +286,8 @@ export async function runWeeklyScheduleDigests(
     ) {
       continue;
     }
+    // No digests or reminders once the org's plan drops Scheduling.
+    if (!(await orgHasPlanFeature(orgId, SCHEDULING_FEATURE))) continue;
     try {
       if (!(await hasNotifications(orgId))) continue;
       const members: OrgMember[] = await loadOrgMembers(orgId);
@@ -400,6 +403,8 @@ export async function runUpcomingShiftReminders(
     ) {
       continue;
     }
+    // No digests or reminders once the org's plan drops Scheduling.
+    if (!(await orgHasPlanFeature(orgId, SCHEDULING_FEATURE))) continue;
     try {
       if (!(await hasNotifications(orgId))) continue;
       const [members, open] = await Promise.all([

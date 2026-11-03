@@ -26,6 +26,7 @@ import {
   getTimeOffRequests,
 } from "@/lib/dal";
 import { getOrgPayroll } from "@/lib/payroll-dal";
+import { SCHEDULING_FEATURE, TIME_OFF_FEATURE } from "@/lib/plan-features";
 import { parseParams } from "@/lib/utils";
 
 export default function Home(props: PageProps<"/">) {
@@ -64,6 +65,12 @@ export default function Home(props: PageProps<"/">) {
               )}
               hasReportingPromise={hasPromise.then((has) =>
                 has({ feature: "reporting" }),
+              )}
+              hasSchedulingPromise={hasPromise.then((has) =>
+                has({ feature: SCHEDULING_FEATURE }),
+              )}
+              hasTimeOffPromise={hasPromise.then((has) =>
+                has({ feature: TIME_OFF_FEATURE }),
               )}
               isAdminPromise={hasPromise.then((has) =>
                 has({ role: "org:admin" }),

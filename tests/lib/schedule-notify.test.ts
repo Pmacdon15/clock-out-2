@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   dbGetOpenShifts: vi.fn(),
   loadOrgMembers: vi.fn(),
   deliver: vi.fn(),
+  orgHasPlanFeature: vi.fn(),
   orgHasFeature: vi.fn(),
 }));
 
@@ -23,6 +24,10 @@ vi.mock("@/lib/alerts-runner", () => ({
   loadOrgMembers: mocks.loadOrgMembers,
 }));
 vi.mock("@/lib/notify", () => ({ deliver: mocks.deliver }));
+vi.mock("@/lib/plan-features", () => ({
+  SCHEDULING_FEATURE: "scheduling",
+  orgHasPlanFeature: mocks.orgHasPlanFeature,
+}));
 vi.mock("@/lib/billing", () => ({
   NOTIFICATIONS_FEATURE: "notifications",
   orgHasFeature: mocks.orgHasFeature,
@@ -87,6 +92,11 @@ beforeEach(() => {
   mocks.dbClaimAlert.mockResolvedValue(true);
   mocks.orgHasFeature.mockResolvedValue(true);
   mocks.deliver.mockResolvedValue({ email: 1, push: 1 });
+  // Every org pays for scheduling except "org_unpaid".
+  mocks.orgHasPlanFeature.mockImplementation(
+    async (orgId: string, slug: string) =>
+      slug === "scheduling" && orgId !== "org_unpaid",
+  );
 });
 
 describe("formatting", () => {
@@ -360,7 +370,7 @@ describe("runWeeklyScheduleDigests", () => {
     expect(mocks.deliver).not.toHaveBeenCalled();
   });
 
-  it("sends each due digest once, skipping leavers, opted-out orgs and failing orgs", async () => {
+  it("sends each due digest once, skipping leavers, opted-out, unpaid and failing orgs", async () => {
     mocks.dbGetScheduledShiftsBetween.mockResolvedValue([
       due,
       // Already sent this week.
@@ -369,6 +379,8 @@ describe("runWeeklyScheduleDigests", () => {
       { ...due, id: 102, user_id: "gone" },
       // Org turned schedule notices off.
       { ...due, id: 103, org_id: "org_off" },
+      // Org whose plan doesn't include scheduling.
+      { ...due, id: 105, org_id: "org_unpaid" },
       // Org whose member lookup fails.
       { ...due, id: 104, org_id: "org_err" },
     ]);
@@ -408,6 +420,11 @@ describe("runWeeklyScheduleDigests", () => {
       message: { title: "Your schedule for Nov 2 – Nov 8" },
     });
     expect(mocks.loadOrgMembers).not.toHaveBeenCalledWith("org_off");
+    expect(mocks.orgHasPlanFeature).toHaveBeenCalledWith(
+      "org_unpaid",
+      "scheduling",
+    );
+    expect(mocks.loadOrgMembers).not.toHaveBeenCalledWith("org_unpaid");
   });
 
   it("defaults to the current time", async () => {
@@ -482,7 +499,7 @@ describe("upcoming shift reminders", () => {
     expect(mocks.dbGetAlertSettingsFor).not.toHaveBeenCalled();
   });
 
-  it("reminds each member once, skipping clocked-in members, leavers, opted-out and failing orgs", async () => {
+  it("reminds each member once, skipping clocked-in members, leavers, opted-out, unpaid and failing orgs", async () => {
     mocks.dbGetScheduledShiftsBetween.mockResolvedValue([
       soon,
       // Already reminded.
@@ -493,6 +510,8 @@ describe("upcoming shift reminders", () => {
       { ...soon, id: 203, user_id: "gone" },
       // Org turned schedule notices off.
       { ...soon, id: 204, org_id: "org_off" },
+      // Org whose plan doesn't include scheduling.
+      { ...soon, id: 206, org_id: "org_unpaid" },
       // Org whose member lookup fails.
       { ...soon, id: 205, org_id: "org_err" },
     ]);
@@ -532,6 +551,11 @@ describe("upcoming shift reminders", () => {
       message: { title: "Your shift starts at 9:00 AM" },
     });
     expect(mocks.loadOrgMembers).not.toHaveBeenCalledWith("org_off");
+    expect(mocks.orgHasPlanFeature).toHaveBeenCalledWith(
+      "org_unpaid",
+      "scheduling",
+    );
+    expect(mocks.loadOrgMembers).not.toHaveBeenCalledWith("org_unpaid");
   });
 
   it("defaults to the current time", async () => {

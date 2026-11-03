@@ -50,10 +50,30 @@ import {
   setTimeOffAllowanceDal,
 } from "@/lib/dal";
 
-const member = { userId: "user_1", orgId: "org_1", orgRole: "org:member" };
-const admin = { userId: "admin_1", orgId: "org_1", orgRole: "org:admin" };
-const noUser = { userId: null, orgId: "org_1", orgRole: "org:admin" };
-const noOrg = { userId: "admin_1", orgId: null, orgRole: "org:admin" };
+const member = {
+  userId: "user_1",
+  orgId: "org_1",
+  orgRole: "org:member",
+  has: () => true,
+};
+const admin = {
+  userId: "admin_1",
+  orgId: "org_1",
+  orgRole: "org:admin",
+  has: () => true,
+};
+const noUser = {
+  userId: null,
+  orgId: "org_1",
+  orgRole: "org:admin",
+  has: () => true,
+};
+const noOrg = {
+  userId: "admin_1",
+  orgId: null,
+  orgRole: "org:admin",
+  has: () => true,
+};
 
 const request = { id: 3, org_id: "org_1", user_id: "user_1" };
 
@@ -567,5 +587,48 @@ describe("setTimeOffAllowanceDal", () => {
     expect(
       (await setTimeOffAllowanceDal("user_1", 10))._unsafeUnwrapErr(),
     ).toEqual({ reason: "Failed to save PTO allowance" });
+  });
+});
+
+describe("without the time off plan feature", () => {
+  const lacking = (session: object) => ({
+    ...session,
+    has: vi.fn(({ feature }: { feature: string }) => feature !== "time_off"),
+  });
+
+  it("shows no requests or allowances without reading them", async () => {
+    const session = lacking(admin);
+    mocks.protect.mockResolvedValue(session);
+    await expect(getTimeOffRequests()).resolves.toEqual({
+      value: [],
+      ok: true,
+    });
+    await expect(getTimeOffAllowances()).resolves.toEqual({
+      value: [],
+      ok: true,
+    });
+    expect(session.has).toHaveBeenCalledWith({ feature: "time_off" });
+    expect(mocks.dbGetTimeOffRequests).not.toHaveBeenCalled();
+    expect(mocks.dbGetTimeOffAllowances).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "request",
+      member,
+      () => createTimeOffRequestDal("vacation", "2026-02-02", "2026-02-03", 8),
+    ],
+    ["cancel", member, () => cancelTimeOffRequestDal(3)],
+    ["review", admin, () => reviewTimeOffRequestDal(3, "approved")],
+    ["set an allowance for", admin, () => setTimeOffAllowanceDal("user_1", 10)],
+  ])("refuses to %s time off", async (_label, session, call) => {
+    mocks.protect.mockResolvedValue(lacking(session));
+    const result = await call();
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr().reason).toMatch(/paid plans/);
+    expect(mocks.dbCreateTimeOffRequest).not.toHaveBeenCalled();
+    expect(mocks.dbCancelTimeOffRequest).not.toHaveBeenCalled();
+    expect(mocks.dbReviewTimeOffRequest).not.toHaveBeenCalled();
+    expect(mocks.dbSetTimeOffAllowance).not.toHaveBeenCalled();
   });
 });

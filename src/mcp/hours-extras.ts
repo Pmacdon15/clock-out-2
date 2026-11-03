@@ -1,4 +1,5 @@
 import { computeEntryOvertime, isOvertimeEnabled } from "@/lib/overtime";
+import { orgHasPlanFeature, TIME_OFF_FEATURE } from "@/lib/plan-features";
 import {
   formatTimeOffDates,
   TIME_OFF_TYPE_LABELS,
@@ -49,7 +50,11 @@ export async function loadHoursExtras(
       .then(() => dbGetBreakSettings(orgId))
       .catch(() => undefined),
     Promise.resolve()
-      .then(() => dbGetTimeOffRequests(orgId, null, startDay))
+      .then(() => orgHasPlanFeature(orgId, TIME_OFF_FEATURE))
+      // Time off only counts on a plan that includes it, as in the app.
+      .then((hasTimeOff) =>
+        hasTimeOff ? dbGetTimeOffRequests(orgId, null, startDay) : [],
+      )
       .catch(() => [] as TimeOffRequest[]),
   ]);
 
