@@ -81,6 +81,8 @@ function props(
     startDatePromise: resolved(undefined),
     isAdminPromise: resolved(false),
     hasReportingPromise: resolved(false),
+    hasSchedulingPromise: resolved(true),
+    hasTimeOffPromise: resolved(true),
     userIdPromise: resolved("user_1"),
     orgIdPromise: resolved("org_1"),
     ...overrides,
@@ -109,6 +111,7 @@ describe("DashboardTabs", () => {
         {...props({
           alertSettingsPromise,
           defaultTabPromise: resolved("notifications"),
+          hasNotificationsPromise: resolved(true),
           isAdminPromise: resolved(true),
           notificationSettingsPromise,
         })}
@@ -118,6 +121,7 @@ describe("DashboardTabs", () => {
     expect(screen.getByTestId("timezone-sync")).toBeInTheDocument();
     expect(screen.getByTestId("push-token-sync")).toBeInTheDocument();
     expect(latest(captured.notifications)).toEqual({
+      hasNotifications: true,
       isAdmin: true,
       settingsPromise: notificationSettingsPromise,
     });
@@ -125,6 +129,31 @@ describe("DashboardTabs", () => {
     expect(latest(captured.orgSettings).alertSettingsPromise).toBe(
       alertSettingsPromise,
     );
+  });
+
+  it("tells components when the org lacks the notifications feature", () => {
+    render(
+      <DashboardTabs
+        {...props({
+          defaultTabPromise: resolved("notifications"),
+          notificationSettingsPromise: ok({
+            preferences: {
+              email_enabled: true,
+              push_enabled: true,
+              shift_alerts: true,
+              break_alerts: true,
+              admin_alerts: true,
+            },
+            emailAvailable: true,
+            pushAvailable: false,
+            vapidPublicKey: null,
+          }),
+        })}
+      />,
+    );
+    expect(latest(captured.notifications)).toMatchObject({
+      hasNotifications: false,
+    });
   });
 
   it("hides the notifications tab without preferences", () => {
@@ -203,6 +232,23 @@ describe("DashboardTabs", () => {
     });
   });
 
+  it.each([
+    ["Schedule", "schedule", { hasSchedulingPromise: resolved(false) }],
+    ["Time Off", "time-off", { hasTimeOffPromise: resolved(false) }],
+  ])(
+    "offers an upgrade in place of %s when the plan lacks it",
+    (tab, testId, overrides) => {
+      render(<DashboardTabs {...props(overrides)} />);
+      fireEvent.click(screen.getByRole("button", { name: tab }));
+      expect(screen.queryByTestId(testId)).not.toBeInTheDocument();
+      expect(screen.getByText("Premium Feature")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "View Plans" })).toHaveAttribute(
+        "href",
+        "/plans",
+      );
+    },
+  );
+
   it("shows settings to admins with reporting and honours the default tab", () => {
     const p = props({
       defaultTabPromise: resolved("settings"),
@@ -214,6 +260,7 @@ describe("DashboardTabs", () => {
     expect(latest(captured.orgSettings)).toEqual({
       breakSettingsPromise: undefined,
       hasGeofencing: false,
+      hasNotifications: false,
       hasReporting: true,
       locationSettingsPromise: undefined,
       membersPromise: p.membersPromise,

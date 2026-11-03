@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   dbGetScheduledShiftsBetween: vi.fn(),
   dbUpsertAlertJob: vi.fn(),
   processOrgAlerts: vi.fn(),
+  orgHasFeature: vi.fn(),
   dbGetBreakSettings: vi.fn(),
   dbGetScheduledShiftById: vi.fn(),
   runWeeklyScheduleDigests: vi.fn(),
@@ -55,6 +56,10 @@ vi.mock("@/lib/alerts-db", () => ({
 }));
 vi.mock("@/lib/alerts-runner", () => ({
   processOrgAlerts: mocks.processOrgAlerts,
+}));
+vi.mock("@/lib/billing", () => ({
+  NOTIFICATIONS_FEATURE: "notifications",
+  orgHasFeature: mocks.orgHasFeature,
 }));
 vi.mock("@/lib/db", () => ({
   dbGetBreakSettings: mocks.dbGetBreakSettings,
@@ -139,6 +144,7 @@ beforeEach(() => {
   mocks.dbGetScheduledShiftsBetween.mockResolvedValue([]);
   mocks.dbGetNotificationPreferencesFor.mockResolvedValue([]);
   mocks.processOrgAlerts.mockResolvedValue({ status: "ok", alerts: 2 });
+  mocks.orgHasFeature.mockResolvedValue(true);
   mocks.runWeeklyScheduleDigests.mockResolvedValue({ digests: 3 });
   mocks.sendUpcomingShiftReminders.mockResolvedValue({ reminders: 1 });
 });
@@ -636,7 +642,11 @@ describe("runAlertJob", () => {
         type: "shift-alerts",
         sent: 2,
       });
-      expect(mocks.processOrgAlerts).toHaveBeenCalledWith(rules, now);
+      expect(mocks.orgHasFeature).toHaveBeenCalledWith(
+        "org_1",
+        "notifications",
+      );
+      expect(mocks.processOrgAlerts).toHaveBeenCalledWith(rules, now, true);
       // The delivered message is forgotten, not cancelled.
       expect(mocks.dbDeleteAlertJob).toHaveBeenCalledWith("shift-alerts:org_1");
       expect(mocks.cancel).not.toHaveBeenCalled();
@@ -657,6 +667,16 @@ describe("runAlertJob", () => {
         sent: 0,
       });
       expect(mocks.dbDeleteAlertJob).toHaveBeenCalledTimes(1); // by the sync
+    });
+
+    it("closes shifts but sends nothing for an org without notifications", async () => {
+      mocks.orgHasFeature.mockResolvedValue(false);
+      mocks.processOrgAlerts.mockResolvedValue({ status: "ok", alerts: 0 });
+      await expect(runAlertJob(job, now)).resolves.toEqual({
+        type: "shift-alerts",
+        sent: 0,
+      });
+      expect(mocks.processOrgAlerts).toHaveBeenCalledWith(rules, now, false);
     });
 
     it("skips processing for an org with no settings row", async () => {

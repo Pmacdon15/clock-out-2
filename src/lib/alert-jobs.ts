@@ -19,6 +19,7 @@ import {
   dbUpsertAlertJob,
 } from "./alerts-db";
 import { processOrgAlerts } from "./alerts-runner";
+import { NOTIFICATIONS_FEATURE, orgHasFeature } from "./billing";
 import { dbGetBreakSettings, dbGetScheduledShiftById } from "./db";
 import { appUrl } from "./notify";
 import {
@@ -396,7 +397,10 @@ export async function runAlertJob(
   const [row] = await dbGetAlertSettingsFor([job.orgId]);
   let sent = 0;
   if (row) {
-    const result = await processOrgAlerts(row, now);
+    // Without the paid `notifications` feature shifts still auto clock out,
+    // but nobody is emailed or pushed (same as the daily sweep).
+    const notify = await orgHasFeature(job.orgId, NOTIFICATIONS_FEATURE);
+    const result = await processOrgAlerts(row, now, notify);
     if (result.status === "ok") sent = result.alerts;
   }
   await syncOrgShiftAlerts(job.orgId, now, now.getTime() + RETRY_FLOOR_MS);

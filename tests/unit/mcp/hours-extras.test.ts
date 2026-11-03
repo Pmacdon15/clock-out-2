@@ -4,12 +4,18 @@ const m = vi.hoisted(() => ({
   dbGetOvertimeSettings: vi.fn(),
   dbGetBreakSettings: vi.fn(),
   dbGetTimeOffRequests: vi.fn(),
+  orgHasPlanFeature: vi.fn(),
 }));
 
 vi.mock("@/mcp/db", () => ({
   dbGetOvertimeSettings: m.dbGetOvertimeSettings,
   dbGetBreakSettings: m.dbGetBreakSettings,
   dbGetTimeOffRequests: m.dbGetTimeOffRequests,
+}));
+
+vi.mock("@/lib/plan-features", () => ({
+  TIME_OFF_FEATURE: "time_off",
+  orgHasPlanFeature: m.orgHasPlanFeature,
 }));
 
 import type { TimeEntry } from "@/lib/types";
@@ -29,6 +35,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   m.dbGetBreakSettings.mockResolvedValue(undefined);
   m.dbGetTimeOffRequests.mockResolvedValue([]);
+  m.orgHasPlanFeature.mockResolvedValue(true);
 });
 
 describe("loadHoursExtras", () => {
@@ -99,5 +106,20 @@ describe("loadHoursExtras", () => {
       time_off: [],
     });
     expect(describeExtras(extrasFor("sam"))).toBe("");
+  });
+
+  it("counts no time off when the plan lacks the time off feature", async () => {
+    m.orgHasPlanFeature.mockResolvedValue(false);
+    m.dbGetOvertimeSettings.mockResolvedValue(undefined);
+    const extrasFor = await loadHoursExtras(
+      "org_1",
+      [],
+      "2026-11-02",
+      "2026-11-08",
+      "UTC",
+    );
+    expect(m.orgHasPlanFeature).toHaveBeenCalledWith("org_1", "time_off");
+    expect(m.dbGetTimeOffRequests).not.toHaveBeenCalled();
+    expect(extrasFor("sam").time_off).toEqual([]);
   });
 });

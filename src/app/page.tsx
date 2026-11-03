@@ -10,6 +10,7 @@ import {
   getMyNotificationSettings,
   getOrgAlertSettings,
 } from "@/lib/alerts-dal";
+import { NOTIFICATIONS_FEATURE } from "@/lib/billing";
 import {
   getOrgBreakSettings,
   getOrgLocationSettings,
@@ -25,6 +26,7 @@ import {
   getTimeOffRequests,
 } from "@/lib/dal";
 import { getOrgPayroll } from "@/lib/payroll-dal";
+import { SCHEDULING_FEATURE, TIME_OFF_FEATURE } from "@/lib/plan-features";
 import { parseParams } from "@/lib/utils";
 
 export default function Home(props: PageProps<"/">) {
@@ -58,8 +60,17 @@ export default function Home(props: PageProps<"/">) {
               hasGeofencingPromise={hasPromise.then((has) =>
                 has({ feature: "geofencing" }),
               )}
+              hasNotificationsPromise={hasPromise.then((has) =>
+                has({ feature: NOTIFICATIONS_FEATURE }),
+              )}
               hasReportingPromise={hasPromise.then((has) =>
                 has({ feature: "reporting" }),
+              )}
+              hasSchedulingPromise={hasPromise.then((has) =>
+                has({ feature: SCHEDULING_FEATURE }),
+              )}
+              hasTimeOffPromise={hasPromise.then((has) =>
+                has({ feature: TIME_OFF_FEATURE }),
               )}
               isAdminPromise={hasPromise.then((has) =>
                 has({ role: "org:admin" }),

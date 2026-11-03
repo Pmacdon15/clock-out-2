@@ -72,6 +72,7 @@ function renderSettings(
 ) {
   return render(
     <NotificationSettings
+      hasNotifications
       isAdmin={isAdmin}
       settingsPromise={resolved({ ok: true as const, value: view(overrides) })}
     />,
@@ -97,9 +98,23 @@ beforeEach(() => {
 });
 
 describe("NotificationSettings", () => {
+  it("asks orgs without the notifications feature to upgrade", async () => {
+    render(
+      <NotificationSettings
+        hasNotifications={false}
+        isAdmin={false}
+        settingsPromise={resolved({ ok: true as const, value: view() })}
+      />,
+    );
+    expect(await screen.findByText("Premium Feature")).toBeInTheDocument();
+    expect(screen.getByRole("link")).toHaveAttribute("href", "/plans");
+    expect(screen.queryByText("Save Preferences")).not.toBeInTheDocument();
+  });
+
   it("shows the load error", () => {
     render(
       <NotificationSettings
+        hasNotifications
         isAdmin={false}
         settingsPromise={resolved({
           ok: false as const,

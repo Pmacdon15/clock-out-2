@@ -39,6 +39,13 @@ import {
   MAX_DAILY_OVERTIME_HOURS,
   MAX_WEEKLY_OVERTIME_HOURS,
 } from "@/lib/overtime";
+import {
+  orgHasPlanFeature,
+  SCHEDULING_FEATURE,
+  SCHEDULING_UPGRADE_REASON,
+  TIME_OFF_FEATURE,
+  TIME_OFF_UPGRADE_REASON,
+} from "@/lib/plan-features";
 import { notifyScheduleChange } from "@/lib/schedule-notify";
 import {
   evaluateShifts,
@@ -403,21 +410,6 @@ function orgInfo(org: OrgContext) {
   return { org_id: org.orgId, name: org.orgName };
 }
 
-/** Whether the org's plan includes a Clerk billing feature (e.g. geofencing). */
-async function orgHasPlanFeature(orgId: string, slug: string) {
-  try {
-    const client = await clerkClient();
-    const subscription =
-      await client.billing.getOrganizationBillingSubscription(orgId);
-    return subscription.subscriptionItems.some(
-      (item: { plan?: { features?: { slug: string }[] } | null }) =>
-        item.plan?.features?.some((f) => f.slug === slug),
-    );
-  } catch {
-    return false;
-  }
-}
-
 /**
  * The member a tool should act on: yourself when `requested` is empty, or
  * anyone in the org for an admin.
@@ -525,6 +517,13 @@ export async function manageScheduleTool(
   const orgRes = await resolveOrg(caller.userId, input.org_id);
   if (!orgRes.ok) return orgRes.result;
   const { org } = orgRes;
+  if (!(await orgHasPlanFeature(org.orgId, SCHEDULING_FEATURE))) {
+    return {
+      summary: SCHEDULING_UPGRADE_REASON,
+      data: { status: "scheduling_not_enabled" },
+      isError: true,
+    };
+  }
   const tz = validTimezone(input.timezone);
   const action = input.action ?? "list";
 
@@ -812,6 +811,13 @@ export async function manageTimeOffTool(
   const orgRes = await resolveOrg(caller.userId, input.org_id);
   if (!orgRes.ok) return orgRes.result;
   const { org } = orgRes;
+  if (!(await orgHasPlanFeature(org.orgId, TIME_OFF_FEATURE))) {
+    return {
+      summary: TIME_OFF_UPGRADE_REASON,
+      data: { status: "time_off_not_enabled" },
+      isError: true,
+    };
+  }
   const action = input.action ?? "list";
   const members = await fetchOrgMembers(org.orgId);
   const names = new Map(members.map((m) => [m.userId, m.name]));
