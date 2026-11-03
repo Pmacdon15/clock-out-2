@@ -12,7 +12,7 @@ Live app: https://clockout.patmac.ca
 - **Geolocation & geofenced clock-in** — each organization can set location capture to off, optional, or required, define named job **sites** (latitude/longitude with a radius, 150 m by default), and optionally restrict clock-in to punches inside a site. Every punch stores its coordinates, accuracy, and the matched site's name, and the allow/deny decision is made server-side.
 - **Weekly timecards** — per-member totals, days worked, and day-by-day breakdowns, with charts.
 - **Timesheet export** — server-generated PDF and Excel (.xlsx) timesheets for any period, grouped by week or month.
-- **Shift alerts & auto clock-out** — "forgot to clock out" reminders after N hours, an optional automatic clock-out at an org-set limit (the shift is closed at exactly clock-in + limit), and "forgot to end break" reminders. Each member picks email, push or both (and which alerts) under **Notifications**; admins can get a copy of every alert. Push works on Android, desktop, and iPhone/iPad once the app is added to the Home Screen. See [Shift alerts & notifications](#shift-alerts--notifications).
+- **Shift alerts & auto clock-out** — "forgot to clock out" reminders after N hours, an optional automatic clock-out at an org-set limit (the shift is closed at exactly clock-in + limit), and "forgot to end break" reminders. Each member picks email, push or both (and which alerts) under **Notifications**; admins can get a copy of every alert. Push goes through Firebase Cloud Messaging and arrives within seconds of the alert falling due; it works on Android, desktop, and iPhone/iPad once the app is added to the Home Screen. See [Shift alerts & notifications](#shift-alerts--notifications).
 - **Canadian payroll deductions (optional)** — admins can turn on estimated CPP/QPP, CPP2/QPP2 and EI deductions and net pay beside gross pay, for their province or territory (Quebec uses QPP and Quebec EI rates). Rates are stored as data and kept current from the CRA automatically. See [Payroll deductions](#payroll-deductions-canada).
 - **Emailed hours reports** — organizations on a plan with the Reporting feature can schedule automatic report emails (weekly, bi-weekly, twice-monthly/pay-period, or a custom weekday every 1–2 weeks) and run ad-hoc reports for any date range.
 - **MCP server** — 18 tools over Streamable HTTP with Clerk OAuth sign-in (see below).
@@ -24,7 +24,8 @@ Live app: https://clockout.patmac.ca
 - [Neon](https://neon.tech) serverless Postgres (`@neondatabase/serverless`)
 - [Model Context Protocol](https://modelcontextprotocol.io) — `@modelcontextprotocol/server` + `mcp-handler`
 - Tailwind CSS 4, Recharts, React Email + Amazon SES for report email
-- Deployed on Vercel (with a Vercel Cron job for scheduled reports); Biome for lint/format; Vitest for tests
+- Firebase Cloud Messaging for push, Upstash QStash for exactly-timed alerts
+- Deployed on Vercel (with daily Vercel Cron jobs for reports, payroll rates and an alert safety net); Biome for lint/format; Vitest for tests
 
 ## Getting started
 
@@ -50,22 +51,26 @@ bun run format           # biome format --write
 
 ### Environment variables
 
-| Variable                                                   | Purpose                                                                                                                                    |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`                        | Clerk publishable key. The MCP OAuth issuer is derived from it, so it also decides which Clerk instance issues MCP tokens.                 |
-| `CLERK_SECRET_KEY`                                         | Clerk secret key (used by `@clerk/nextjs`).                                                                                                |
-| `CLERK_WEBHOOK_SIGNING_SECRET`                             | Verifies Clerk webhooks at `/api/webhooks/clerk`.                                                                                          |
-| `DATABASE_URL`                                             | Neon Postgres connection string.                                                                                                           |
-| `NEXT_PUBLIC_APP_URL`                                      | Public origin of the deployment (e.g. `https://clockout.patmac.ca`); used as the MCP server's website/icon origin.                         |
-| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` | Amazon SES credentials for report email.                                                                                                   |
-| `SES_FROM_EMAIL`                                           | From address for report email.                                                                                                             |
-| `CRON_SECRET`                                              | Bearer secret guarding `/api/cron/weekly-report` and `/api/cron/payroll-rates` (called daily by Vercel Cron) and `/api/cron/shift-alerts`. |
-| `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`        | Web Push (VAPID) key pair for push notifications. Push is off until both are set.                                                          |
-| `VAPID_SUBJECT`                                            | Optional contact for push services, e.g. `mailto:you@example.com`. Defaults to `NEXT_PUBLIC_APP_URL`.                                      |
+| Variable                                                                                                                                     | Purpose                                                                                                                                     |
+| -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`                                                                                                          | Clerk publishable key. The MCP OAuth issuer is derived from it, so it also decides which Clerk instance issues MCP tokens.                  |
+| `CLERK_SECRET_KEY`                                                                                                                           | Clerk secret key (used by `@clerk/nextjs`).                                                                                                 |
+| `CLERK_WEBHOOK_SIGNING_SECRET`                                                                                                               | Verifies Clerk webhooks at `/api/webhooks/clerk`.                                                                                           |
+| `DATABASE_URL`                                                                                                                               | Neon Postgres connection string.                                                                                                            |
+| `NEXT_PUBLIC_APP_URL`                                                                                                                        | Public origin of the deployment (e.g. `https://clockout.patmac.ca`); used as the MCP server's website/icon origin.                          |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`                                                                                   | Amazon SES credentials for report email.                                                                                                    |
+| `SES_FROM_EMAIL`                                                                                                                             | From address for report email.                                                                                                              |
+| `CRON_SECRET`                                                                                                                                | Bearer secret guarding `/api/cron/weekly-report`, `/api/cron/payroll-rates` and `/api/cron/shift-alerts` (all called daily by Vercel Cron). |
+| `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`                                                                                          | Legacy Web Push (VAPID) key pair; also the default Web Push certificate for FCM (import it into Firebase).                                  |
+| `FIREBASE_SERVICE_ACCOUNT`                                                                                                                   | Firebase service account key file (JSON, or base64 of it) the server sends FCM push with.                                                   |
+| `NEXT_PUBLIC_FIREBASE_API_KEY`, `NEXT_PUBLIC_FIREBASE_PROJECT_ID`, `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID`, `NEXT_PUBLIC_FIREBASE_APP_ID` | The Firebase web app's config, for registering devices with FCM. FCM push is off until these and the service account are set.               |
+| `NEXT_PUBLIC_FIREBASE_VAPID_KEY`                                                                                                             | Optional: the Firebase project's Web Push certificate, when it isn't the imported `NEXT_PUBLIC_VAPID_PUBLIC_KEY`.                           |
+| `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`, `QSTASH_NEXT_SIGNING_KEY`                                                                      | Upstash QStash credentials for exactly-timed alert jobs (Production only). Optional `QSTASH_URL` for a regional QStash URL.                 |
+| `VAPID_SUBJECT`                                                                                                                              | Optional contact for push services, e.g. `mailto:you@example.com`. Defaults to `NEXT_PUBLIC_APP_URL`.                                       |
 
 ### Database
 
-The schema lives in `schema.sql` and is applied to Neon Postgres. Tables: `time_entries` (including clock-in/out location columns), `time_entry_breaks`, `settings`, `reporting_settings`, `break_settings`, `location_settings`, `sites`, `alert_settings`, `notification_preferences`, `push_subscriptions`, `sent_alerts`. Users, organizations, memberships, and subscriptions live in Clerk, not in this database.
+The schema lives in `schema.sql` and is applied to Neon Postgres. Tables: `time_entries` (including clock-in/out location columns), `time_entry_breaks`, `settings`, `reporting_settings`, `break_settings`, `location_settings`, `sites`, `alert_settings`, `notification_preferences`, `push_subscriptions`, `fcm_tokens`, `sent_alerts`, `alert_jobs`. Users, organizations, memberships, and subscriptions live in Clerk, not in this database.
 
 ## MCP server
 
@@ -158,7 +163,7 @@ App-side, Clerk is wired in through `src/proxy.ts` (`clerkMiddleware`, protectin
 
 ## Deployment
 
-Deployed on Vercel. `vercel.json` registers a daily cron (`0 6 * * *`) hitting `/api/cron/weekly-report`, which sends any scheduled report emails that are due; the route requires the `CRON_SECRET` bearer token. A second daily cron (`0 19 * * *`, 12:00 p.m. MST) hits `/api/cron/payroll-rates` to pick up new CRA payroll rates. Email goes out through Amazon SES using React Email templates.
+Deployed on Vercel. `vercel.json` registers a daily cron (`0 6 * * *`) hitting `/api/cron/weekly-report`, which sends any scheduled report emails that are due; the route requires the `CRON_SECRET` bearer token. A second daily cron (`0 19 * * *`, 12:00 p.m. MST) hits `/api/cron/payroll-rates` to pick up new CRA payroll rates. A third (`0 12 * * *`) hits `/api/cron/shift-alerts`, the safety net behind the exactly-timed alert jobs (see [How it runs](#how-it-runs-exactly-timed-no-polling)). Email goes out through Amazon SES using React Email templates.
 
 ## Payroll deductions (Canada)
 
@@ -178,49 +183,66 @@ Long-running entries used to inflate totals silently. Admins now set rules under
 | Forgot to end break | When a break has run _N_ minutes (default 45) — or reaches its type's time limit, if that's sooner — the member is reminded they're still on break / back on the clock.                                                      |
 | Notify admins too   | Every alert is also sent to the org's admins (an admin's own shift isn't sent to them twice).                                                                                                                                |
 
-Every person picks **email, push or both** — and which alerts they want — on the **Notifications** tab, where they can also turn push on/off per device and send themselves a test. Each alert is sent once (tracked in `sent_alerts`), however often the cron runs.
+Every person picks **email, push or both** — and which alerts they want — on the **Notifications** tab, where they can also turn push on/off per device and send themselves a test. Each alert is sent once (tracked in `sent_alerts`), and at the moment it falls due (see [How it runs](#how-it-runs-exactly-timed-no-polling)).
 
 ### Schedule notifications
 
 Members also hear about their published schedule (admins can switch this off under **Settings → Shift Alerts → Schedule notifications**; members can opt out with the **My schedule** topic, using the same email/push choice):
 
 - **Weekly schedule:** on Sunday from 5 PM in the member's own time zone, they get the coming Monday–Sunday — one line per shift, plus the total hours. Sent once per week, and only if they have shifts.
-- **Upcoming shift:** an hour before each scheduled shift, the member gets a reminder with its start time (sent by the cron, so it lands 45–60 minutes ahead with a 10-minute schedule). Sent once per shift, and skipped if they've already clocked in.
+- **Upcoming shift:** an hour before each scheduled shift, the member gets a reminder with its start time (scheduled to the second when the shift is published, or right away if it starts within the hour). Sent once per shift, and skipped if they've already clocked in.
 - **Changes:** when an admin adds or removes one of their upcoming shifts, the member is told straight away (sent with `after()` once the admin's save is answered — not on the cron). Shifts in the past, and admins scheduling themselves, don't notify.
 
 Times are written in each person's own time zone, which the app remembers from their browser when they open the dashboard. Until it knows, the admin's zone is used for change notices and UTC (labelled) for the weekly schedule.
 
-### How it runs
+### How it runs (exactly timed, no polling)
 
-`GET /api/cron/shift-alerts` (bearer `CRON_SECRET`) checks every org with a rule on, closes over-limit shifts, sends what's due, and sends any weekly schedules that are due (the two jobs run independently). It needs to run every 5–15 minutes:
+Nothing polls. Every alert is scheduled for the second it falls due, the moment something decides that time:
 
-- **Vercel Hobby** only allows daily crons, so `.github/workflows/shift-alerts.yml` calls it every 10 minutes. Add repository secrets **`APP_URL`** (e.g. `https://clockout.patmac.ca`) and **`CRON_SECRET`** (same value as the app's). Run it once by hand from the Actions tab to check. GitHub may delay scheduled runs by a few minutes at busy times.
-- **Vercel Pro**: you can instead add `{ "path": "/api/cron/shift-alerts", "schedule": "*/10 * * * *" }` to `vercel.json` and delete the workflow.
+- **Clock-in, clock-out, break start/end, entry or break edits and deletes** (web app and MCP), **Shift Alerts rule changes** and **break limit changes** reschedule the org's next shift alert. Each org has at most **one** pending [Upstash QStash](https://upstash.com/docs/qstash) message, set (`notBefore`) for its earliest pending alert — forgot to clock out, automatic clock-out, still on break or "your break is over". Clocking out early, or turning a rule off, moves or cancels it.
+- **Adding, moving or cancelling a scheduled shift** schedules (or cancels) its "starts in an hour" reminder.
+- **Weekly schedules** are scheduled for Sunday 5 PM in each member's time zone.
+
+QStash delivers each job to **`POST /api/alerts/dispatch`**, which accepts only requests signed by QStash (for that exact URL and body), re-checks the database (still clocked in? still on break? shift unchanged?), sends what is due over email/push, and schedules the next one. A duplicate, early, late or retried delivery is harmless: every alert is still claimed once in `sent_alerts`. Pending jobs live in `alert_jobs` so they can be moved or cancelled. A job fails with a 5xx only when it should be retried (QStash retries 3 times).
+
+Notices caused by an action itself (an admin adding, moving or removing a member's shift) are sent straight from that request with `after()`, not queued.
+
+**Daily safety net:** Vercel Cron calls `GET /api/cron/shift-alerts` (bearer `CRON_SECRET`) once a day. It catches up on anything due that slipped through (a failed publish, QStash not configured yet), schedules reminders for shifts that have come within six days (QStash's free plan caps delays at 7 days), re-arms each org's next alert, and forgets FCM tokens no device has refreshed in 240 days. It works on Vercel Hobby, and replaces the old every-10-minutes GitHub Actions workflow.
+
+#### QStash setup
+
+1. Create a QStash project at [console.upstash.com](https://console.upstash.com/qstash) (the free plan is plenty), or add the Upstash integration in Vercel.
+2. In Vercel → Settings → Environment Variables, **Production only** (preview deployments share the database and would otherwise schedule duplicate jobs) add `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY` and `QSTASH_NEXT_SIGNING_KEY`. Add `QSTASH_URL` too if the console shows a regional URL (e.g. `https://qstash-eu-central-1.upstash.io`).
+3. Jobs are delivered to `NEXT_PUBLIC_APP_URL` (default `https://clockout.patmac.ca`) + `/api/alerts/dispatch`, so that origin must be publicly reachable (no Vercel Deployment Protection on it).
+
+Without these, nothing is scheduled and alerts only go out on the daily run.
 
 ### Email (Amazon SES)
 
 Uses the SES setup the reports already use (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `SES_FROM_EMAIL`). Alerts go to the address on the member's Clerk account. If SES is still in sandbox mode, recipients must be verified, so request production access in the SES console before rolling out.
 
-### Push notifications (Web Push — no Firebase needed)
+### Push notifications (Firebase Cloud Messaging)
 
-Push uses the standard Web Push protocol with VAPID keys, sent straight from the server with the [`web-push`](https://github.com/web-push-libs/web-push) package. This is what Firebase Cloud Messaging uses under the hood for web apps anyway, so there's no Firebase project, SDK or account to manage, and it is the only way to reach iPhones from a web app.
+Push goes through [Firebase Cloud Messaging](https://firebase.google.com/docs/cloud-messaging) (FCM) with `Urgency: high`, so it arrives within seconds — on Android even when the phone is asleep. The installed app on Android, desktop browsers and iPhone/iPad Home Screen apps (iOS 16.4+) all register with FCM. The server calls the FCM HTTP v1 API directly with a service account (no Admin SDK); the browser loads only `@firebase/app` + `@firebase/messaging`, and only while registering. Notifications are still drawn by the app's own service worker (`public/sw.js`), so they look the same everywhere.
 
-1. Generate a key pair once:
+Devices are stored per user in `fcm_tokens`. Each visit to the dashboard refreshes the device's token (Firebase rotates them) and marks it as seen; tokens FCM reports as `UNREGISTERED`, invalid or from another project are deleted on send.
 
-   ```bash
-   bunx web-push generate-vapid-keys
-   ```
-2. In Vercel → Project → Settings → Environment Variables (Production and Preview) add:
-   - `NEXT_PUBLIC_VAPID_PUBLIC_KEY` = the **Public Key**
-   - `VAPID_PRIVATE_KEY` = the **Private Key** (keep secret)
-   - `VAPID_SUBJECT` = `mailto:you@yourdomain.com` (optional)
-3. Redeploy. The Notifications tab then shows **Turn on for this device**.
+**Setup**
 
-Keep the same keys forever: changing them invalidates every device's subscription (people would have to turn push on again).
+1. Create (or reuse) a Firebase project, add a **Web app**, and note its config (`apiKey`, `projectId`, `messagingSenderId`, `appId`).
+2. Project settings → **Cloud Messaging** → **Web Push certificates** → **Import an existing key pair**, and paste the current `NEXT_PUBLIC_VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY`. Devices already on Web Push then move to FCM on their next visit without being asked again. (You can generate a new pair instead and set `NEXT_PUBLIC_FIREBASE_VAPID_KEY`; existing devices are then re-subscribed silently, as long as notification permission is still granted.)
+3. Project settings → **Service accounts** → **Generate new private key**. Put the whole JSON file in `FIREBASE_SERVICE_ACCOUNT` (raw JSON or base64 of it).
+4. In Vercel add (Production and Preview):
+   - `FIREBASE_SERVICE_ACCOUNT` (secret)
+   - `NEXT_PUBLIC_FIREBASE_API_KEY`, `NEXT_PUBLIC_FIREBASE_PROJECT_ID`, `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID`, `NEXT_PUBLIC_FIREBASE_APP_ID`
+   - `NEXT_PUBLIC_FIREBASE_VAPID_KEY` (only if you didn't import the existing key pair)
+5. Redeploy. The Notifications tab's **Turn on for this device** now registers with FCM.
+
+**Legacy Web Push.** Keep `NEXT_PUBLIC_VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` set: devices that subscribed before FCM keep receiving alerts over plain Web Push (`push_subscriptions`) until they next open the app and move over, and browsers where Firebase messaging isn't supported still use it. A device is only ever notified on one channel.
 
 **iPhone / iPad (iOS 16.4+):** Apple only allows push for web apps installed to the Home Screen. In Safari tap **Share → Add to Home Screen**, open Clock Out from the new icon, go to **Notifications → Turn on for this device**, and allow notifications. The Notifications tab walks people through this.
 
-**Android / desktop:** Chrome, Edge, Firefox and desktop Safari work straight from the browser.
+**No on-device scheduled backup.** A web app can't schedule a local notification for later (the Notification Triggers API never shipped), so every alert is sent from the server at its exact time.
 
 ### Icons
 
