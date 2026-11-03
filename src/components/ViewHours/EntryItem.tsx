@@ -27,6 +27,7 @@ import type { OvertimeSplit } from "@/lib/overtime";
 import type { EntryAction } from "@/lib/reducers/time-entries";
 import type { BreakSettingsData, TimeEntry, TimeEntryBreak } from "@/lib/types";
 import { DeleteConfirmDialog } from "../DeleteConfirmDialog";
+import LocalTime from "../LocalTime";
 
 interface EntryItemProps {
   entry: TimeEntry;
@@ -233,8 +234,10 @@ export function EntryItem({
   return (
     <div className="group flex flex-col gap-2 border-zinc-100 border-b pb-5 transition-all last:border-0 dark:border-zinc-800">
       <div className="flex items-center justify-between font-bold text-sm">
-        <span suppressHydrationWarning>
-          {format(new Date(entry.clock_in), "eeee, MMM d")}
+        <span>
+          <LocalTime>
+            {() => format(new Date(entry.clock_in), "eeee, MMM d")}
+          </LocalTime>
         </span>
         <div className="flex items-center gap-3">
           <span
@@ -276,11 +279,16 @@ export function EntryItem({
       </div>
       <div className="flex flex-wrap items-center gap-1.5 font-medium text-muted-foreground text-xs">
         <Calendar className="h-3 w-3" />
-        <span suppressHydrationWarning>
-          {format(new Date(entry.clock_in), "hh:mm a")} -{" "}
-          {entry.clock_out
-            ? format(new Date(entry.clock_out), "hh:mm a")
-            : "..."}
+        <span>
+          <LocalTime>
+            {() =>
+              `${format(new Date(entry.clock_in), "hh:mm a")} - ${
+                entry.clock_out
+                  ? format(new Date(entry.clock_out), "hh:mm a")
+                  : "..."
+              }`
+            }
+          </LocalTime>
         </span>
         {unpaidBreakMinutes > 0 && (
           <span className="ml-1.5 rounded-full bg-amber-100 px-2 py-0.5 font-bold text-[10px] text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
@@ -326,11 +334,16 @@ export function EntryItem({
               <span className="font-medium">
                 {breakTypeLabel(brk.break_type)}
               </span>
-              <span suppressHydrationWarning>
-                {format(new Date(brk.break_start), "hh:mm a")} -{" "}
-                {brk.break_end
-                  ? format(new Date(brk.break_end), "hh:mm a")
-                  : "..."}
+              <span>
+                <LocalTime>
+                  {() =>
+                    `${format(new Date(brk.break_start), "hh:mm a")} - ${
+                      brk.break_end
+                        ? format(new Date(brk.break_end), "hh:mm a")
+                        : "..."
+                    }`
+                  }
+                </LocalTime>
               </span>
               <span className="tabular-nums">
                 {Math.round(getBreakDurationMs(brk) / 60_000)}m
