@@ -101,7 +101,21 @@ export default function DashboardTabs({
     hasGeofencing && locationSettingsResult?.ok
       ? locationSettingsResult.value
       : null;
-  const defaultTab = use(defaultTabPromise) || "time-clock";
+  // Only honour ?defaultTab= for a tab this user can actually see, otherwise
+  // a stale or hand-edited link would open onto an empty page.
+  const requestedTab = use(defaultTabPromise);
+  const visibleTabs = [
+    "time-clock",
+    "view",
+    ...(notificationSettingsPromise ? ["notifications"] : []),
+    "schedule",
+    "time-off",
+    ...(isAdmin ? ["settings"] : []),
+  ];
+  const defaultTab =
+    requestedTab && visibleTabs.includes(requestedTab)
+      ? requestedTab
+      : "time-clock";
 
   const [optimisticEntries, setOptimisticEntries] = useOptimistic(
     result.ok ? (result.value ?? []) : [],
