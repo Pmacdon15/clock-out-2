@@ -54,6 +54,7 @@ import { Button, Card } from "./ui";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -110,6 +111,7 @@ export default function TimeClock({
   const [breakElapsed, setBreakElapsed] = useState<string>("");
   const [breakRemaining, setBreakRemaining] = useState<string>("");
   const [expiredBreak, setExpiredBreak] = useState<ExpiredBreak | null>(null);
+  const [confirmingClockOut, setConfirmingClockOut] = useState(false);
   // The break already being auto-ended, so the ticker fires it only once.
   const autoEndedBreakId = useRef<number | null>(null);
   // The kinds the org offers, lunch (paid or unpaid, per the org) first.
@@ -398,7 +400,8 @@ export default function TimeClock({
   };
 
   const handleClockOut = () => {
-    // The Clock Out button only renders while there is an active entry.
+    setConfirmingClockOut(false);
+    // The confirm dialog only opens while there is an active entry.
     /* v8 ignore next -- @preserve */
     if (!activeEntry) return;
 
@@ -551,7 +554,7 @@ export default function TimeClock({
           <Button
             className="h-16 w-full max-w-sm gap-3 rounded-2xl font-bold text-lg transition-transform active:scale-[0.98] touch-manipulation"
             disabled={clockOutMutation.isPending || isLocating}
-            onClick={handleClockOut}
+            onClick={() => setConfirmingClockOut(true)}
             variant="destructive"
           >
             {clockOutMutation.isPending || isLocating ? (
@@ -592,6 +595,29 @@ export default function TimeClock({
           )}
         </>
       )}
+
+      <AlertDialog
+        onOpenChange={setConfirmingClockOut}
+        open={confirmingClockOut && activeEntry !== undefined}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Clock out now?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {`This ends your current shift${elapsedTime ? ` after ${elapsedTime}` : ""}.`}
+              {openBreak
+                ? ` Your ${breakTypeLabel(openBreak.break_type).toLowerCase()} will end too.`
+                : ""}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleClockOut}>
+              Yes, clock out
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog
         // There is no trigger, so the only change is the member closing it.

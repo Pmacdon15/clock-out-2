@@ -66,6 +66,12 @@ function renderClock(
   return setOptimisticEntries;
 }
 
+/** Presses Clock Out and confirms it in the dialog. */
+function clockOut() {
+  fireEvent.click(screen.getByRole("button", { name: "Clock Out" }));
+  fireEvent.click(screen.getByRole("button", { name: "Yes, clock out" }));
+}
+
 beforeEach(() => {
   // Only fake the clock; waitFor needs real timers to poll.
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -170,7 +176,7 @@ describe("TimeClock when clocked in", () => {
   it("closes the active entry optimistically and clocks out", async () => {
     mocks.clockOutAction.mockResolvedValue({ success: true });
     const setOptimisticEntries = renderClock([active]);
-    fireEvent.click(screen.getByRole("button", { name: "Clock Out" }));
+    clockOut();
 
     expect(setOptimisticEntries).toHaveBeenCalledWith({
       type: "UPDATE",
@@ -187,14 +193,55 @@ describe("TimeClock when clocked in", () => {
   ])("shows %s when clocking out fails", async (_l, error, shown) => {
     mocks.clockOutAction.mockResolvedValue({ success: false, error });
     renderClock([active]);
-    fireEvent.click(screen.getByRole("button", { name: "Clock Out" }));
+    clockOut();
     await waitFor(() => expect(mocks.toast.error).toHaveBeenCalledWith(shown));
+  });
+
+  it("asks for confirmation before clocking out", () => {
+    const setOptimisticEntries = renderClock([active]);
+    fireEvent.click(screen.getByRole("button", { name: "Clock Out" }));
+
+    expect(screen.getByText("Clock out now?")).toBeInTheDocument();
+    expect(
+      screen.getByText("This ends your current shift after 1h 5m."),
+    ).toBeInTheDocument();
+    expect(mocks.clockOutAction).not.toHaveBeenCalled();
+    expect(setOptimisticEntries).not.toHaveBeenCalled();
+  });
+
+  it("stays clocked in when the clock-out is cancelled", () => {
+    const setOptimisticEntries = renderClock([active]);
+    fireEvent.click(screen.getByRole("button", { name: "Clock Out" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByText("Clock out now?")).not.toBeInTheDocument();
+    expect(mocks.clockOutAction).not.toHaveBeenCalled();
+    expect(setOptimisticEntries).not.toHaveBeenCalled();
+  });
+
+  it("warns that a running break ends with the shift", () => {
+    renderClock([
+      makeEntry({
+        id: 2,
+        clock_in: new Date("2026-01-05T11:00:00Z"),
+        clock_out: null,
+        breaks: [
+          makeBreak({
+            break_type: "unpaid_meal",
+            break_start: new Date("2026-01-05T11:50:00Z"),
+            break_end: null,
+          }),
+        ],
+      }),
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: "Clock Out" }));
+    expect(screen.getByText(/will end too\./)).toBeInTheDocument();
   });
 
   it("stays quiet for a failed clock-out without an error field", async () => {
     mocks.clockOutAction.mockResolvedValue({ success: false });
     renderClock([active]);
-    fireEvent.click(screen.getByRole("button", { name: "Clock Out" }));
+    clockOut();
     await waitFor(() => expect(mocks.clockOutAction).toHaveBeenCalled());
     expect(mocks.toast.error).not.toHaveBeenCalled();
   });
@@ -203,7 +250,7 @@ describe("TimeClock when clocked in", () => {
     mocks.clockOutAction.mockReturnValue(new Promise(() => {}));
     renderClock([active]);
     const button = screen.getByRole("button", { name: "Clock Out" });
-    fireEvent.click(button);
+    clockOut();
     await waitFor(() => expect(button).toBeDisabled());
   });
 
@@ -785,7 +832,7 @@ describe("TimeClock with location capture", () => {
     mocks.clockOutAction.mockResolvedValue({ success: true });
     renderWithLocation(locationSettings("optional"), [active]);
 
-    fireEvent.click(screen.getByRole("button", { name: "Clock Out" }));
+    clockOut();
 
     await waitFor(() =>
       expect(mocks.clockOutAction).toHaveBeenCalledWith(coordinates),
@@ -803,7 +850,7 @@ describe("TimeClock with location capture", () => {
       [active],
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Clock Out" }));
+    clockOut();
 
     await waitFor(() =>
       expect(mocks.clockOutAction).toHaveBeenCalledWith(undefined),
@@ -818,7 +865,7 @@ describe("TimeClock with location capture", () => {
     mocks.clockOutAction.mockResolvedValue({ success: true });
     renderWithLocation(locationSettings("off"), [active]);
 
-    fireEvent.click(screen.getByRole("button", { name: "Clock Out" }));
+    clockOut();
     await waitFor(() => expect(mocks.clockOutAction).toHaveBeenCalled());
     expect(mocks.captureCurrentPosition).not.toHaveBeenCalled();
   });
