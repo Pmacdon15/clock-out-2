@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   dbGetLocationSettings: vi.fn(),
   dbGetOrgTimeEntries: vi.fn(),
   dbGetOvertimeSettings: vi.fn(),
+  dbGetPayPeriodSettings: vi.fn(),
   dbGetReportingSettings: vi.fn(),
   dbGetSites: vi.fn(),
   dbGetSitesForEnforcement: vi.fn(),
@@ -31,6 +32,7 @@ const mocks = vi.hoisted(() => ({
   dbUpdateBreakSettings: vi.fn(),
   dbUpdateLocationSettings: vi.fn(),
   dbUpdateOvertimeSettings: vi.fn(),
+  dbUpdatePayPeriodSettings: vi.fn(),
   dbUpdateReportingSettings: vi.fn(),
   dbUpdateSite: vi.fn(),
   dbUpdateTimeEntry: vi.fn(),
@@ -68,6 +70,7 @@ vi.mock("@/lib/db", () => ({
   dbGetLocationSettings: mocks.dbGetLocationSettings,
   dbGetOrgTimeEntries: mocks.dbGetOrgTimeEntries,
   dbGetOvertimeSettings: mocks.dbGetOvertimeSettings,
+  dbGetPayPeriodSettings: mocks.dbGetPayPeriodSettings,
   dbGetReportingSettings: mocks.dbGetReportingSettings,
   dbGetSites: mocks.dbGetSites,
   dbGetSitesForEnforcement: mocks.dbGetSitesForEnforcement,
@@ -77,6 +80,7 @@ vi.mock("@/lib/db", () => ({
   dbUpdateBreakSettings: mocks.dbUpdateBreakSettings,
   dbUpdateLocationSettings: mocks.dbUpdateLocationSettings,
   dbUpdateOvertimeSettings: mocks.dbUpdateOvertimeSettings,
+  dbUpdatePayPeriodSettings: mocks.dbUpdatePayPeriodSettings,
   dbUpdateReportingSettings: mocks.dbUpdateReportingSettings,
   dbUpdateSite: mocks.dbUpdateSite,
   dbUpdateTimeEntry: mocks.dbUpdateTimeEntry,
@@ -105,6 +109,7 @@ import {
   getOrgLocationSettings,
   getOrgMembers,
   getOrgOvertimeSettings,
+  getOrgPayPeriodSettings,
   getOrgPayRates,
   getOrgReportingSettings,
   getOrgSites,
@@ -116,6 +121,7 @@ import {
   updateLocationSettingsDal,
   updateMemberPayRateDal,
   updateOvertimeSettingsDal,
+  updatePayPeriodSettingsDal,
   updateReportingSettingsDal,
   updateSiteDal,
   updateTimeEntry,
@@ -2148,6 +2154,87 @@ describe("getOrgOvertimeSettings", () => {
     expect(await getOrgOvertimeSettings()).toEqual({
       ok: false,
       error: { reason: "Error fetching overtime settings." },
+    });
+  });
+});
+
+describe("updatePayPeriodSettingsDal", () => {
+  it.each([
+    ["no user", noUser],
+    ["no org", noOrg],
+    ["a non-admin", member],
+  ])("rejects %s", async (_label, session) => {
+    mocks.protect.mockResolvedValue(session);
+    expect(
+      (
+        await updatePayPeriodSettingsDal(true, "weekly", "2026-11-13", 7)
+      )._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Unauthorized" });
+    expect(mocks.dbUpdatePayPeriodSettings).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid settings", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    expect(
+      (
+        await updatePayPeriodSettingsDal(true, "weekly", "someday", 7)
+      )._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Invalid pay period settings" });
+    expect(mocks.dbUpdatePayPeriodSettings).not.toHaveBeenCalled();
+  });
+
+  it("saves the pay period for the admin's org", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbUpdatePayPeriodSettings.mockResolvedValue({ org_id: "org_1" });
+    expect(
+      (
+        await updatePayPeriodSettingsDal(true, "bi-weekly", "2026-11-13", 7)
+      )._unsafeUnwrap(),
+    ).toEqual({ org_id: "org_1" });
+    expect(mocks.dbUpdatePayPeriodSettings).toHaveBeenCalledWith(
+      "org_1",
+      true,
+      "bi-weekly",
+      "2026-11-13",
+      7,
+    );
+  });
+
+  it("returns an error when the save fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbUpdatePayPeriodSettings.mockRejectedValue(new Error("db"));
+    expect(
+      (
+        await updatePayPeriodSettingsDal(false, "weekly", "2026-11-13", 0)
+      )._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Failed to update pay period settings" });
+  });
+});
+
+describe("getOrgPayPeriodSettings", () => {
+  it("rejects requests without a user or org", async () => {
+    mocks.protect.mockResolvedValue(noOrg);
+    expect((await getOrgPayPeriodSettings()).ok).toBe(false);
+    expect(mocks.dbGetPayPeriodSettings).not.toHaveBeenCalled();
+  });
+
+  it("returns the saved settings, or null when there are none", async () => {
+    mocks.protect.mockResolvedValue(member);
+    const saved = { org_id: "org_1", enabled: true };
+    mocks.dbGetPayPeriodSettings.mockResolvedValueOnce(saved);
+    expect(await getOrgPayPeriodSettings()).toEqual({ ok: true, value: saved });
+    mocks.dbGetPayPeriodSettings.mockResolvedValueOnce(undefined);
+    expect(await getOrgPayPeriodSettings()).toEqual({ ok: true, value: null });
+  });
+
+  it("returns an error when the read fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetPayPeriodSettings.mockRejectedValue(new Error("db"));
+    expect(await getOrgPayPeriodSettings()).toEqual({
+      ok: false,
+      error: { reason: "Error fetching pay period settings." },
     });
   });
 });

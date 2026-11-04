@@ -1,9 +1,17 @@
 import { clerkClient } from "@clerk/nextjs/server";
-import { format, getWeek, startOfDay, subDays, subMonths } from "date-fns";
+import {
+  format,
+  getWeek,
+  isSameDay,
+  startOfDay,
+  subDays,
+  subMonths,
+} from "date-fns";
 import { NextResponse } from "next/server";
 import { fetchAllPages } from "@/lib/clerk-pagination";
 import { isAuthorizedCronRequest } from "@/lib/cron-auth";
-import { dbGetReportingSettings } from "@/lib/db";
+import { dbGetPayPeriodSettings, dbGetReportingSettings } from "@/lib/db";
+import { getPayPeriod, isPayPeriodEnabled } from "@/lib/pay-period";
 import { sendWeeklyReports } from "@/lib/reports";
 
 export async function GET(request: Request) {
@@ -71,7 +79,19 @@ export async function GET(request: Request) {
     let startDate: Date | null = null;
     const endDate: Date = startOfDay(today);
 
-    if (frequency === "weekly") {
+    if (frequency === "pay-period") {
+      // The day after a pay period's last worked day, covering that period
+      // (not its payday, which may be held back). Nothing is sent while pay
+      // periods are turned off.
+      const payPeriods = await dbGetPayPeriodSettings(orgId);
+      if (isPayPeriodEnabled(payPeriods)) {
+        const period = getPayPeriod(payPeriods, subDays(endDate, 1));
+        if (isSameDay(subDays(endDate, 1), period.end)) {
+          shouldSend = true;
+          startDate = period.start;
+        }
+      }
+    } else if (frequency === "weekly") {
       // Fixed dates: 1st, 8th, 16th, 24th
       if (dayOfMonth === 1) {
         shouldSend = true;
@@ -128,6 +148,7 @@ export async function GET(request: Request) {
       );
       try {
         const emailTimeframe =
+          frequency === "pay-period" ||
           frequency === "twice-monthly" ||
           frequency === "bi-weekly" ||
           frequency === "biweekly" ||

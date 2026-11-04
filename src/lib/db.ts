@@ -8,6 +8,7 @@ import type {
   BreakType,
   LocationSettingsData,
   OvertimeSettingsData,
+  PayPeriodSettingsData,
   PayRateData,
   ReportingSettingsData,
   ScheduledShift,
@@ -471,6 +472,88 @@ export async function dbUpdateOvertimeSettings(
 		RETURNING *
 	`;
   return updated as OvertimeSettingsData;
+}
+
+/* -------------------------------------------------------- pay periods -- */
+
+let payPeriodSettingsTableReady: Promise<void> | null = null;
+
+/**
+ * Pay period settings (paydays and hold-back) are free for every admin.
+ * Create the table on first use, like `ensureOvertimeSettingsTable`, for
+ * databases that predate it. A failure is not cached, so the next call
+ * retries.
+ */
+export function ensurePayPeriodSettingsTable(): Promise<void> {
+  payPeriodSettingsTableReady ??= (async () => {
+    await sql`
+		CREATE TABLE IF NOT EXISTS settings (
+			org_id TEXT PRIMARY KEY,
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+		)
+	`;
+    await sql`
+		CREATE TABLE IF NOT EXISTS pay_period_settings (
+			org_id TEXT PRIMARY KEY REFERENCES settings(org_id) ON DELETE CASCADE,
+			enabled BOOLEAN NOT NULL DEFAULT FALSE,
+			frequency TEXT NOT NULL DEFAULT 'bi-weekly',
+			anchor_payday TEXT NOT NULL,
+			holdback_days INTEGER NOT NULL DEFAULT 0,
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+		)
+	`;
+  })().catch((error) => {
+    payPeriodSettingsTableReady = null;
+    throw error;
+  });
+  return payPeriodSettingsTableReady;
+}
+
+/** Test-only: forget that the table check ran. */
+export function resetPayPeriodSettingsTableCheck() {
+  payPeriodSettingsTableReady = null;
+}
+
+export async function dbGetPayPeriodSettings(orgId: string) {
+  "use cache";
+  cacheTag(`pay-period-settings-${orgId}`);
+  cacheLife("hours");
+  await ensurePayPeriodSettingsTable();
+  const [settings] = await sql`
+		SELECT * FROM pay_period_settings WHERE org_id = ${orgId}
+	`;
+  return settings as PayPeriodSettingsData | undefined;
+}
+
+export async function dbUpdatePayPeriodSettings(
+  orgId: string,
+  enabled: boolean,
+  frequency: PayPeriodSettingsData["frequency"],
+  anchorPayday: string,
+  holdbackDays: number,
+) {
+  await ensurePayPeriodSettingsTable();
+  await sql`
+		INSERT INTO settings (org_id, updated_at)
+		VALUES (${orgId}, NOW())
+		ON CONFLICT (org_id) DO UPDATE SET updated_at = NOW()
+	`;
+
+  const [updated] = await sql`
+		INSERT INTO pay_period_settings (
+			org_id, enabled, frequency, anchor_payday, holdback_days, updated_at
+		)
+		VALUES (${orgId}, ${enabled}, ${frequency}, ${anchorPayday}, ${holdbackDays}, NOW())
+		ON CONFLICT (org_id)
+		DO UPDATE SET
+            enabled = ${enabled},
+            frequency = ${frequency},
+            anchor_payday = ${anchorPayday},
+            holdback_days = ${holdbackDays},
+            updated_at = NOW()
+		RETURNING *
+	`;
+  return updated as PayPeriodSettingsData;
 }
 
 /* -------------------------------------------------------- pay rates -- */

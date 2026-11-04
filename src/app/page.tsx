@@ -16,6 +16,7 @@ import {
   getOrgLocationSettings,
   getOrgMembers,
   getOrgOvertimeSettings,
+  getOrgPayPeriodSettings,
   getOrgPayRates,
   getOrgReportingSettings,
   getOrgSites,
@@ -81,6 +82,7 @@ export default function Home(props: PageProps<"/">) {
               orgIdPromise={authPromise.then((auth) => auth.orgId)}
               orgSettingsPromise={getOrgReportingSettings()}
               overtimeSettingsPromise={getOrgOvertimeSettings()}
+              payPeriodSettingsPromise={getOrgPayPeriodSettings()}
               payRatesPromise={getOrgPayRates()}
               payrollPromise={getOrgPayroll()}
               orgTimeEntriesPromise={props.searchParams.then((p) =>

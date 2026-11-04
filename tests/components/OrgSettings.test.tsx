@@ -5,6 +5,7 @@ import type {
   BreakSettingsData,
   LocationSettingsData,
   OvertimeSettingsData,
+  PayPeriodSettingsData,
   ReportingSettingsData,
   SiteData,
 } from "@/lib/types";
@@ -12,6 +13,7 @@ import { resolved } from "../utils";
 
 type CapturedProps = {
   hasReporting: boolean;
+  payPeriodSettings?: PayPeriodSettingsData | null;
   initialData: ReportingSettingsData | null;
   onUpdateOptimistic: (next: Partial<ReportingSettingsData>) => void;
 };
@@ -38,6 +40,10 @@ const captured = vi.hoisted(() => ({
   locationProps: [] as CapturedLocationProps[],
   alertProps: [] as { initialData: unknown }[],
   overtimeProps: [] as CapturedOvertimeProps[],
+  payPeriodProps: [] as {
+    initialData: PayPeriodSettingsData | null;
+    onUpdateOptimistic: (next: Partial<PayPeriodSettingsData>) => void;
+  }[],
   payRateProps: [] as {
     members: { id: string; name: string }[];
     initialRates: unknown[];
@@ -108,6 +114,15 @@ vi.mock("@/components/OvertimeSettings", () => ({
   },
 }));
 
+vi.mock("@/components/PayPeriodSettings", () => ({
+  default: (props: (typeof captured.payPeriodProps)[number]) => {
+    captured.payPeriodProps.push(props);
+    return (
+      <div data-testid="pay-period">{JSON.stringify(props.initialData)}</div>
+    );
+  },
+}));
+
 import OrgSettings from "@/components/OrgSettings";
 
 const latest = () => captured.props[captured.props.length - 1];
@@ -116,6 +131,18 @@ const latestLocation = () =>
   captured.locationProps[captured.locationProps.length - 1];
 const latestOvertime = () =>
   captured.overtimeProps[captured.overtimeProps.length - 1];
+
+const latestPayPeriod = () =>
+  captured.payPeriodProps[captured.payPeriodProps.length - 1];
+
+function updatePayPeriodOptimistically(next: Partial<PayPeriodSettingsData>) {
+  act(() => {
+    startTransition(async () => {
+      latestPayPeriod().onUpdateOptimistic(next);
+      await new Promise(() => {});
+    });
+  });
+}
 
 function updateOvertimeOptimistically(next: Partial<OvertimeSettingsData>) {
   act(() => {
@@ -412,5 +439,54 @@ describe("OrgSettings", () => {
     // Nothing to merge into, so an optimistic update is a no-op.
     updateOvertimeOptimistically({ daily_threshold_hours: 8 });
     expect(latestOvertime().initialData).toBeNull();
+  });
+
+  it("passes the pay period settings down and merges optimistic updates", () => {
+    const payPeriodValue: PayPeriodSettingsData = {
+      org_id: "org_1",
+      enabled: true,
+      frequency: "weekly",
+      anchor_payday: "2026-11-13",
+      holdback_days: 7,
+    };
+    render(
+      <OrgSettings
+        hasReporting={false}
+        orgSettingsPromise={resolved({ ok: true, value: null })}
+        payPeriodSettingsPromise={resolved({ ok: true, value: payPeriodValue })}
+      />,
+    );
+    expect(latestPayPeriod().initialData).toEqual(payPeriodValue);
+    // Reporting follows the pay periods for end-of-period reports.
+    expect(latest().payPeriodSettings).toEqual(payPeriodValue);
+
+    updatePayPeriodOptimistically({ holdback_days: 14 });
+    expect(latestPayPeriod().initialData).toEqual({
+      ...payPeriodValue,
+      holdback_days: 14,
+    });
+  });
+
+  it("passes no pay period settings when they are missing or failed to load", () => {
+    const { unmount } = render(
+      <OrgSettings
+        hasReporting={false}
+        orgSettingsPromise={resolved({ ok: true, value: null })}
+      />,
+    );
+    expect(screen.getByTestId("pay-period")).toHaveTextContent("null");
+    unmount();
+    render(
+      <OrgSettings
+        hasReporting={false}
+        orgSettingsPromise={resolved({ ok: true, value: null })}
+        payPeriodSettingsPromise={resolved({
+          ok: false,
+          error: { reason: "x" },
+        })}
+      />,
+    );
+    updatePayPeriodOptimistically({ enabled: true });
+    expect(latestPayPeriod().initialData).toBeNull();
   });
 });

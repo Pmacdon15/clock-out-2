@@ -7,6 +7,7 @@ import type {
   BreakSettingsData,
   LocationSettingsData,
   OvertimeSettingsData,
+  PayPeriodSettingsData,
   PayRateData,
   ReportingSettingsData,
   SerializableResult,
@@ -16,6 +17,7 @@ import AlertSettings from "./AlertSettings";
 import BreakSettings from "./BreakSettings";
 import LocationSettings from "./LocationSettings";
 import OvertimeSettings from "./OvertimeSettings";
+import PayPeriodSettings from "./PayPeriodSettings";
 import PayRateSettings from "./PayRateSettings";
 import PayrollSettings from "./PayrollSettings";
 import ReportingSettings from "./ReportingSettings";
@@ -48,6 +50,9 @@ interface OrgSettingsProps {
   overtimeSettingsPromise?: Promise<
     SerializableResult<OvertimeSettingsData | null, { reason: string }>
   >;
+  payPeriodSettingsPromise?: Promise<
+    SerializableResult<PayPeriodSettingsData | null, { reason: string }>
+  >;
   /** Every member's pay rate (this view is admin-only). */
   payRates?: PayRateData[];
   /** CPP/QPP and EI deduction settings, or null when they couldn't load. */
@@ -71,6 +76,7 @@ export default function OrgSettings({
   breakSettingsPromise,
   locationSettingsPromise,
   overtimeSettingsPromise,
+  payPeriodSettingsPromise,
   payRates = [],
   payroll = null,
   membersPromise,
@@ -87,6 +93,9 @@ export default function OrgSettings({
     : null;
   const overtimeSettingsResult = overtimeSettingsPromise
     ? use(overtimeSettingsPromise)
+    : null;
+  const payPeriodSettingsResult = payPeriodSettingsPromise
+    ? use(payPeriodSettingsPromise)
     : null;
   const sitesResult = sitesPromise ? use(sitesPromise) : null;
   const sites = sitesResult?.ok ? sitesResult.value : [];
@@ -138,6 +147,18 @@ export default function OrgSettings({
       },
     );
 
+  const [optimisticPayPeriodSettings, setOptimisticPayPeriodSettings] =
+    useOptimistic(
+      payPeriodSettingsResult?.ok ? payPeriodSettingsResult.value : null,
+      (
+        state: PayPeriodSettingsData | null,
+        next: Partial<PayPeriodSettingsData>,
+      ) => {
+        if (!state) return state;
+        return { ...state, ...next };
+      },
+    );
+
   return (
     <div className="space-y-8">
       <BreakSettings
@@ -158,6 +179,10 @@ export default function OrgSettings({
       />
       <PayRateSettings initialRates={payRates} members={members} />
       <PayrollSettings initialData={payroll} />
+      <PayPeriodSettings
+        initialData={optimisticPayPeriodSettings}
+        onUpdateOptimistic={(next) => setOptimisticPayPeriodSettings(next)}
+      />
       <LocationSettings
         hasGeofencing={hasGeofencing}
         initialData={optimisticLocationSettings}
@@ -168,6 +193,7 @@ export default function OrgSettings({
         hasReporting={hasReporting}
         initialData={optimisticReportingSettings}
         onUpdateOptimistic={(next) => setOptimisticReportingSettings(next)}
+        payPeriodSettings={optimisticPayPeriodSettings}
       />
     </div>
   );

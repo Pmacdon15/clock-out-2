@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   getOrgLocationSettings: vi.fn(),
   getOrgMembers: vi.fn(),
   getOrgOvertimeSettings: vi.fn(),
+  getOrgPayPeriodSettings: vi.fn(),
   getOrgPayRates: vi.fn(),
   getOrgPayroll: vi.fn(),
   getOrgReportingSettings: vi.fn(),
@@ -43,6 +44,7 @@ vi.mock("@/lib/dal", () => ({
   getOrgLocationSettings: mocks.getOrgLocationSettings,
   getOrgMembers: mocks.getOrgMembers,
   getOrgOvertimeSettings: mocks.getOrgOvertimeSettings,
+  getOrgPayPeriodSettings: mocks.getOrgPayPeriodSettings,
   getOrgPayRates: mocks.getOrgPayRates,
   getOrgReportingSettings: mocks.getOrgReportingSettings,
   getOrgSites: mocks.getOrgSites,
@@ -101,6 +103,9 @@ function renderHome() {
   );
   mocks.getOrgOvertimeSettings.mockReturnValue(
     Promise.resolve("overtime_settings"),
+  );
+  mocks.getOrgPayPeriodSettings.mockReturnValue(
+    Promise.resolve("pay_period_settings"),
   );
   mocks.getOrgPayRates.mockReturnValue(Promise.resolve("pay_rates"));
   mocks.getOrgPayroll.mockReturnValue(Promise.resolve("payroll"));
@@ -203,6 +208,9 @@ describe("Home page", () => {
     );
     await expect(props.overtimeSettingsPromise).resolves.toBe(
       "overtime_settings",
+    );
+    await expect(props.payPeriodSettingsPromise).resolves.toBe(
+      "pay_period_settings",
     );
     await expect(props.payRatesPromise).resolves.toBe("pay_rates");
     await expect(props.payrollPromise).resolves.toBe("payroll");

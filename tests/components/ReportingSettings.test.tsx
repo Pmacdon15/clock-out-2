@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
-import type { ReportingSettingsData } from "@/lib/types";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { PayPeriodSettingsData, ReportingSettingsData } from "@/lib/types";
 import { renderWithClient } from "../utils";
 
 const mocks = vi.hoisted(() => ({
@@ -233,5 +233,84 @@ describe("ReportingSettings", () => {
     renderSettings(biweeklySaved);
     expect(option(/Bi-weekly/)).toHaveTextContent("Current");
     expect(screen.getByLabelText("Reporting Day")).toHaveValue("Friday");
+  });
+});
+
+describe("ReportingSettings pay-period reports", () => {
+  const payPeriods: PayPeriodSettingsData = {
+    org_id: "org_1",
+    enabled: true,
+    frequency: "weekly",
+    anchor_payday: "2026-11-13",
+    holdback_days: 7,
+  };
+
+  function renderWithPayPeriods(
+    payPeriodSettings: PayPeriodSettingsData | null,
+    initialData: ReportingSettingsData | null = null,
+  ) {
+    renderWithClient(
+      <ReportingSettings
+        hasReporting
+        initialData={initialData}
+        onUpdateOptimistic={vi.fn()}
+        payPeriodSettings={payPeriodSettings}
+      />,
+    );
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-03T12:00:00"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("can't be picked until pay periods are turned on", () => {
+    renderWithPayPeriods(null);
+    const payPeriod = option(/End of Pay Period/);
+    expect(payPeriod).toBeDisabled();
+    expect(payPeriod).toHaveTextContent(/Turn on Pay Periods above/);
+  });
+
+  it("reports at the end of the pay period, not on payday", async () => {
+    mocks.updateOrgSettingAction.mockResolvedValue({ success: true });
+    renderWithPayPeriods(payPeriods);
+    const payPeriod = option(/End of Pay Period/);
+    expect(payPeriod).toBeEnabled();
+    expect(payPeriod).toHaveTextContent(/not on payday/);
+    fireEvent.click(payPeriod);
+    // Oct 31 – Nov 6 ends Friday, so its report goes out Saturday, a week
+    // before its Nov 13 payday.
+    expect(
+      screen.getByText("Next report: Sat, Nov 7, covering Oct 31 – Nov 6."),
+    ).toBeInTheDocument();
+    fireEvent.click(save());
+    await waitFor(() =>
+      expect(mocks.updateOrgSettingAction).toHaveBeenCalledWith(
+        "pay-period",
+        null,
+        1,
+      ),
+    );
+  });
+
+  it("warns that nothing is sent once pay periods are turned off", () => {
+    renderWithPayPeriods(
+      { ...payPeriods, enabled: false },
+      {
+        org_id: "org_1",
+        report_frequency: "pay-period",
+        report_day: null,
+        report_interval: 1,
+      },
+    );
+    expect(
+      screen.getByText(
+        "Pay periods are off, so no reports will be sent until they're turned back on.",
+      ),
+    ).toBeInTheDocument();
   });
 });

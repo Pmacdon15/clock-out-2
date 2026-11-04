@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   getOrganizationList: vi.fn(),
   getOrganizationBillingSubscription: vi.fn(),
   dbGetReportingSettings: vi.fn(),
+  dbGetPayPeriodSettings: vi.fn(),
   sendWeeklyReports: vi.fn(),
 }));
 
@@ -19,6 +20,7 @@ vi.mock("@clerk/nextjs/server", () => ({
 }));
 vi.mock("@/lib/db", () => ({
   dbGetReportingSettings: mocks.dbGetReportingSettings,
+  dbGetPayPeriodSettings: mocks.dbGetPayPeriodSettings,
 }));
 vi.mock("@/lib/reports", () => ({
   sendWeeklyReports: mocks.sendWeeklyReports,
@@ -140,6 +142,65 @@ describe("GET /api/cron/weekly-report", () => {
       });
       expect(mocks.sendWeeklyReports).not.toHaveBeenCalled();
       expect(body.processedCount).toBe(0);
+    });
+  });
+
+  describe("pay-period frequency", () => {
+    const settings = { report_frequency: "pay-period" };
+    // Weekly, paid Fridays, held back a week: Oct 31 – Nov 6 is paid Nov 13.
+    const payPeriods = {
+      org_id: "org_1",
+      enabled: true,
+      frequency: "weekly",
+      anchor_payday: "2026-11-13",
+      holdback_days: 7,
+    };
+
+    it("sends the day after a pay period ends, covering that period", async () => {
+      mocks.dbGetPayPeriodSettings.mockResolvedValue(payPeriods);
+      const body = await runOn("2026-11-07T06:00:00Z", settings);
+      expect(mocks.dbGetPayPeriodSettings).toHaveBeenCalledWith("org_1");
+      expect(sentWith()).toEqual([
+        "2026-10-31T00:00:00.000Z",
+        "2026-11-07T00:00:00.000Z",
+        "org_1",
+        "custom",
+      ]);
+      expect(body.processed[0]).toMatchObject({
+        status: "sent",
+        frequency: "pay-period",
+      });
+    });
+
+    it.each([
+      ["mid-period", "2026-11-05T06:00:00Z"],
+      ["on payday", "2026-11-13T06:00:00Z"],
+    ])("sends nothing %s", async (_label, date) => {
+      mocks.dbGetPayPeriodSettings.mockResolvedValue(payPeriods);
+      await runOn(date, settings);
+      expect(mocks.sendWeeklyReports).not.toHaveBeenCalled();
+    });
+
+    it("follows bi-weekly periods with no hold-back", async () => {
+      mocks.dbGetPayPeriodSettings.mockResolvedValue({
+        ...payPeriods,
+        frequency: "bi-weekly",
+        holdback_days: 0,
+      });
+      await runOn("2026-11-14T06:00:00Z", settings);
+      expect(sentWith().slice(0, 2)).toEqual([
+        "2026-10-31T00:00:00.000Z",
+        "2026-11-14T00:00:00.000Z",
+      ]);
+    });
+
+    it.each([
+      ["turned off", { ...payPeriods, enabled: false }],
+      ["never set up", undefined],
+    ])("sends nothing while pay periods are %s", async (_label, saved) => {
+      mocks.dbGetPayPeriodSettings.mockResolvedValue(saved);
+      await runOn("2026-11-07T06:00:00Z", settings);
+      expect(mocks.sendWeeklyReports).not.toHaveBeenCalled();
     });
   });
 

@@ -1,18 +1,33 @@
 "use client";
 
 import { useMutation } from "@tanstack/react-query";
-import { Calendar, Check, Loader2, Settings, XCircle } from "lucide-react";
+import { addDays, format } from "date-fns";
+import {
+  Calendar,
+  CalendarClock,
+  Check,
+  Loader2,
+  Settings,
+  XCircle,
+} from "lucide-react";
 import Link from "next/link";
 import { startTransition, useState } from "react";
 import { toast } from "sonner";
 import { updateOrgSettingAction } from "@/lib/actions";
-import type { ReportingSettingsData } from "@/lib/types";
+import {
+  formatPayPeriodRange,
+  getPayPeriod,
+  isPayPeriodEnabled,
+} from "@/lib/pay-period";
+import type { PayPeriodSettingsData, ReportingSettingsData } from "@/lib/types";
 import { Button, Card } from "./ui";
 
 interface ReportingSettingsProps {
   initialData: ReportingSettingsData | null;
   hasReporting: boolean;
   onUpdateOptimistic: (next: Partial<ReportingSettingsData>) => void;
+  /** Pay-period reports follow these; the option needs them turned on. */
+  payPeriodSettings?: PayPeriodSettingsData | null;
 }
 
 const DAYS = [
@@ -33,6 +48,13 @@ const options = [
     icon: XCircle,
   },
   {
+    id: "pay-period",
+    label: "End of Pay Period",
+    description:
+      "Sent the day after each pay period ends, covering that period (not on payday)",
+    icon: CalendarClock,
+  },
+  {
     id: "weekly",
     label: "Weekly (Fixed Dates)",
     description: "Sent on the 1st, 8th, 16th, and 24th",
@@ -46,7 +68,7 @@ const options = [
   },
   {
     id: "twice-monthly",
-    label: "Twice Monthly (Pay Period)",
+    label: "Twice Monthly",
     description: "Sent on the 1st and 16th",
     icon: Calendar,
   },
@@ -62,7 +84,11 @@ export default function ReportingSettings({
   initialData,
   hasReporting,
   onUpdateOptimistic,
+  payPeriodSettings,
 }: ReportingSettingsProps) {
+  const payPeriods = isPayPeriodEnabled(payPeriodSettings)
+    ? payPeriodSettings
+    : null;
   const normalizedInitialFreq =
     initialData?.report_frequency === "biweekly"
       ? "bi-weekly"
@@ -116,6 +142,10 @@ export default function ReportingSettings({
     );
   }
 
+  const currentPeriod = payPeriods
+    ? getPayPeriod(payPeriods, new Date())
+    : null;
+
   const hasChanged =
     frequency !== normalizedInitialFreq ||
     (frequency === "custom" &&
@@ -135,7 +165,8 @@ export default function ReportingSettings({
         {options.map((option) => (
           <div className="space-y-4" key={option.id}>
             <button
-              className={`flex w-full items-center justify-between rounded-2xl border-2 p-6 text-left transition-all ${
+              disabled={option.id === "pay-period" && !payPeriods}
+              className={`flex w-full items-center justify-between rounded-2xl border-2 p-6 text-left transition-all disabled:cursor-not-allowed disabled:opacity-50 ${
                 frequency === option.id
                   ? "border-zinc-900 bg-zinc-50 dark:border-zinc-100 dark:bg-zinc-900"
                   : "border-transparent bg-zinc-100/50 hover:bg-zinc-100 dark:bg-zinc-800/50 dark:hover:bg-zinc-800"
@@ -152,7 +183,9 @@ export default function ReportingSettings({
                 <div>
                   <div className="font-bold text-lg">{option.label}</div>
                   <div className="text-muted-foreground text-sm">
-                    {option.description}
+                    {option.id === "pay-period" && !payPeriods
+                      ? "Turn on Pay Periods above to send reports at the end of each pay period"
+                      : option.description}
                   </div>
                 </div>
               </div>
@@ -169,6 +202,14 @@ export default function ReportingSettings({
                 )}
               </div>
             </button>
+
+            {frequency === "pay-period" && option.id === "pay-period" && (
+              <p className="px-6 text-muted-foreground text-sm">
+                {currentPeriod
+                  ? `Next report: ${format(addDays(currentPeriod.end, 1), "EEE, MMM d")}, covering ${formatPayPeriodRange(currentPeriod)}.`
+                  : "Pay periods are off, so no reports will be sent until they're turned back on."}
+              </p>
+            )}
 
             {frequency === "bi-weekly" && option.id === "bi-weekly" && (
               <div className="fade-in slide-in-from-top-2 grid animate-in grid-cols-1 gap-4 p-6 pt-0 md:grid-cols-2">

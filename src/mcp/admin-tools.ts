@@ -21,6 +21,7 @@ import {
   dbGetLocationSettings,
   dbGetOrgTimeEntries,
   dbGetOvertimeSettings,
+  dbGetPayPeriodSettings,
   dbGetScheduledShiftById,
   dbGetScheduledShifts,
   dbGetSites,
@@ -29,6 +30,7 @@ import {
   dbReviewTimeOffRequest,
   dbUpdateLocationSettings,
   dbUpdateOvertimeSettings,
+  dbUpdatePayPeriodSettings,
   dbUpdateScheduledShift,
   dbUpdateSite,
 } from "@/lib/db";
@@ -39,6 +41,18 @@ import {
   MAX_DAILY_OVERTIME_HOURS,
   MAX_WEEKLY_OVERTIME_HOURS,
 } from "@/lib/overtime";
+import {
+  describeHoldback,
+  formatPayday,
+  formatPayPeriodRange,
+  getPayPeriod,
+  isPayPeriodEnabled,
+  isValidPayPeriodInput,
+  MAX_HOLDBACK_DAYS,
+  PAY_PERIOD_FREQUENCIES,
+  type PayPeriod,
+  parseDateOnly,
+} from "@/lib/pay-period";
 import {
   orgHasPlanFeature,
   SCHEDULING_FEATURE,
@@ -66,6 +80,7 @@ import {
 } from "@/lib/time-off-utils";
 import type {
   AlertSettingsInput,
+  PayPeriodSettingsData,
   ScheduledShift,
   SiteData,
   TimeOffRequest,
@@ -86,7 +101,7 @@ import {
 
 /*
  * Admin control over the newer features from MCP: the schedule, time off,
- * overtime, alert rules and location/geofence settings. Each tool applies
+ * overtime, pay periods, alert rules and location/geofence settings. Each tool applies
  * the same rules as the web app: anyone can read what they are allowed to
  * see, and only organization admins ('org:admin') can change things.
  */
@@ -242,6 +257,44 @@ export const manageOvertimeSettingsInputSchema = z.object({
     .optional()
     .describe(
       "Hours in a week after which time counts as overtime (e.g. 40 or 44). null turns weekly overtime off; omit to keep the current value.",
+    ),
+});
+
+export const managePayPeriodSettingsInputSchema = z.object({
+  org_id: orgIdField,
+  action: z
+    .enum(["get", "update"])
+    .optional()
+    .describe(
+      "'get' (default) shows the pay period setup, the pay period that includes `date` (with its payday and report date) and the next ones; 'update' changes the setup (admin-only).",
+    ),
+  date: dateField(
+    "For 'get': show the pay period that includes this day (YYYY-MM-DD). Defaults to today. Use it to answer 'which payday covers March 3?' or to find a past period's dates.",
+  ),
+  timezone: timezoneField,
+  enabled: z
+    .boolean()
+    .optional()
+    .describe(
+      "For 'update': turn pay periods on or off. Omit to keep the current value (turning pay periods on is assumed when setting them up for the first time).",
+    ),
+  frequency: z
+    .enum(PAY_PERIOD_FREQUENCIES)
+    .optional()
+    .describe(
+      "For 'update': 'weekly' (paid every week, 7-day periods) or 'bi-weekly' (every 2 weeks, 14-day periods). Defaults to 'bi-weekly' when setting up.",
+    ),
+  payday: dateField(
+    "For 'update': any one payday (YYYY-MM-DD), past or upcoming; the rest repeat from it. Required the first time pay periods are set up.",
+  ),
+  holdback_days: z
+    .number()
+    .int()
+    .min(0)
+    .max(MAX_HOLDBACK_DAYS)
+    .optional()
+    .describe(
+      "For 'update': how long pay is held back after a period ends, in days: 0 = the period ends on payday, 7 = one week (e.g. paid Friday for the week ending the Friday before), 14 = two weeks. Defaults to 0 when setting up.",
     ),
 });
 
@@ -972,6 +1025,132 @@ export async function manageTimeOffTool(
       organization: orgInfo(org),
       request: formatTimeOff(cancelled, names),
     },
+  };
+}
+
+/* ------------------------------------------------------- pay periods -- */
+
+const ymd = (date: Date) => format(date, "yyyy-MM-dd");
+
+function periodInfo(period: PayPeriod) {
+  return {
+    start_date: ymd(period.start),
+    end_date: ymd(period.end),
+    payday: ymd(period.payday),
+    // Pay-period reports go out the day after the period's last day.
+    report_date: ymd(addDays(startOfDay(period.end), 1)),
+    label: `${formatPayPeriodRange(period)}, paid ${formatPayday(period)}`,
+  };
+}
+
+function describePayPeriods(settings: PayPeriodSettingsData) {
+  const often =
+    settings.frequency === "weekly" ? "every week" : "every 2 weeks";
+  const holdback =
+    settings.holdback_days === 0
+      ? "no hold-back (each period ends on payday)"
+      : `a ${describeHoldback(settings.holdback_days)} hold-back`;
+  return `paid ${often} from ${settings.anchor_payday}, with ${holdback}`;
+}
+
+export async function managePayPeriodSettingsTool(
+  caller: McpCaller,
+  input: z.infer<typeof managePayPeriodSettingsInputSchema>,
+): Promise<ToolResult> {
+  const orgRes = await resolveOrg(caller.userId, input.org_id);
+  if (!orgRes.ok) return orgRes.result;
+  const { org } = orgRes;
+
+  const current = await dbGetPayPeriodSettings(org.orgId);
+  const settings = current
+    ? {
+        enabled: Boolean(current.enabled),
+        frequency: current.frequency,
+        payday: current.anchor_payday,
+        holdback_days: Number(current.holdback_days),
+      }
+    : null;
+
+  if ((input.action ?? "get") === "get") {
+    if (!isPayPeriodEnabled(current)) {
+      return {
+        summary: `Pay periods are ${current ? "turned off" : "not set up"} for ${org.orgName}.${org.isAdmin ? " Use action 'update' with a payday to set them up." : " An admin can set them up."}`,
+        data: { organization: orgInfo(org), enabled: false, settings },
+      };
+    }
+    const tz = validTimezone(input.timezone);
+    const day =
+      parseDateOnly(input.date) ??
+      (parseDateOnly(formatInTimeZone(new Date(), tz, "yyyy-MM-dd")) as Date);
+    const period = getPayPeriod(current, day);
+    const upcoming = [1, 2].map((offset) =>
+      periodInfo(getPayPeriod(current, day, offset)),
+    );
+    return {
+      summary: `${org.orgName} is ${describePayPeriods(current)}. The pay period for ${ymd(day)} is ${formatPayPeriodRange(period)}, paid ${formatPayday(period)}.`,
+      data: {
+        organization: orgInfo(org),
+        enabled: true,
+        settings,
+        date: ymd(day),
+        pay_period: periodInfo(period),
+        previous_pay_period: periodInfo(getPayPeriod(current, day, -1)),
+        next_pay_periods: upcoming,
+      },
+    };
+  }
+
+  if (!org.isAdmin) return forbidden("change pay period settings");
+  if (
+    input.enabled === undefined &&
+    input.frequency === undefined &&
+    input.payday === undefined &&
+    input.holdback_days === undefined
+  ) {
+    return invalid(
+      "Nothing to update. Pass enabled, frequency, payday and/or holdback_days.",
+    );
+  }
+  const next = {
+    enabled: input.enabled ?? settings?.enabled ?? true,
+    frequency: input.frequency ?? settings?.frequency ?? "bi-weekly",
+    payday: input.payday ?? settings?.payday,
+    holdback_days: input.holdback_days ?? settings?.holdback_days ?? 0,
+  };
+  if (next.payday === undefined) {
+    return invalid(
+      "Pass a payday (YYYY-MM-DD) to set up pay periods; the rest repeat from it.",
+    );
+  }
+  if (
+    !isValidPayPeriodInput({
+      enabled: next.enabled,
+      frequency: next.frequency,
+      anchorPayday: next.payday,
+      holdbackDays: next.holdback_days,
+    })
+  ) {
+    return invalid("Invalid pay period settings.");
+  }
+  const updated = await dbUpdatePayPeriodSettings(
+    org.orgId,
+    next.enabled,
+    next.frequency,
+    next.payday,
+    next.holdback_days,
+  );
+  revalidate(`pay-period-settings-${org.orgId}`);
+  const saved = {
+    enabled: Boolean(updated.enabled),
+    frequency: updated.frequency,
+    payday: updated.anchor_payday,
+    holdback_days: Number(updated.holdback_days),
+  };
+  return {
+    summary: saved.enabled
+      ? `Updated pay periods for ${org.orgName}: ${describePayPeriods(updated)}.`
+      : `Turned pay periods off for ${org.orgName}.`,
+    data: { status: "updated", organization: orgInfo(org), settings: saved },
   };
 }
 

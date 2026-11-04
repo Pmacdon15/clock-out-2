@@ -39,6 +39,7 @@ import {
   dbGetLocationSettings,
   dbGetOrgTimeEntries,
   dbGetOvertimeSettings,
+  dbGetPayPeriodSettings,
   dbGetPayRates,
   dbGetPtoRequestsForPeriod,
   dbGetReportingSettings,
@@ -58,6 +59,7 @@ import {
   dbUpdateBreakSettings,
   dbUpdateLocationSettings,
   dbUpdateOvertimeSettings,
+  dbUpdatePayPeriodSettings,
   dbUpdateReportingSettings,
   dbUpdateScheduledShift,
   dbUpdateSite,
@@ -77,6 +79,7 @@ import {
   MAX_WEEKLY_OVERTIME_HOURS,
 } from "./overtime";
 import { isValidHourlyRate, isValidOvertimeMultiplier } from "./pay";
+import { isValidPayPeriodInput } from "./pay-period";
 import {
   SCHEDULING_FEATURE,
   SCHEDULING_UPGRADE_REASON,
@@ -104,6 +107,7 @@ import type {
   BreakType,
   LocationSettingsData,
   OvertimeSettingsData,
+  PayPeriodSettingsData,
   PayRateData,
   ReportingSettingsData,
   ScheduledShift,
@@ -714,6 +718,68 @@ export async function getOrgOvertimeSettings(): Promise<
       console.error("Error fetching overtime settings.: ", e);
       return {
         error: { reason: "Error fetching overtime settings." },
+        ok: false,
+      };
+    });
+}
+
+/* --------------------------------------------------------- pay periods -- */
+
+export async function updatePayPeriodSettingsDal(
+  enabled: boolean,
+  frequency: PayPeriodSettingsData["frequency"],
+  anchorPayday: string,
+  holdbackDays: number,
+) {
+  const authUser = await auth.protect();
+  if (!authUser.userId || !authUser.orgId || authUser.orgRole !== "org:admin") {
+    return errAsync({ reason: "Unauthorized" } as const);
+  }
+  if (
+    !isValidPayPeriodInput({ enabled, frequency, anchorPayday, holdbackDays })
+  ) {
+    return errAsync({ reason: "Invalid pay period settings" } as const);
+  }
+  return await dbUpdatePayPeriodSettings(
+    authUser.orgId,
+    enabled,
+    frequency,
+    anchorPayday,
+    holdbackDays,
+  )
+    .then((updated) => {
+      return okAsync(updated);
+    })
+    .catch((e) => {
+      console.error("Update pay period settings error: ", e);
+      return errAsync({
+        reason: "Failed to update pay period settings",
+      } as const);
+    });
+}
+
+export async function getOrgPayPeriodSettings(): Promise<
+  SerializableResult<PayPeriodSettingsData | null, { reason: string }>
+> {
+  const { userId, orgId } = await auth.protect();
+  if (!userId || !orgId) {
+    return {
+      error: { reason: "Unauthorized or no organization selected" },
+      ok: false,
+    };
+  }
+
+  return await dbGetPayPeriodSettings(orgId)
+    .then((settings) => {
+      return {
+        value: settings || null,
+        ok: true as const,
+      };
+    })
+    .catch((e) => {
+      console.error("Error fetching pay period settings.: ", e);
+      return {
+        error: { reason: "Error fetching pay period settings." },
         ok: false,
       };
     });

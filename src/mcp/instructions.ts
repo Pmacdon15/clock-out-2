@@ -22,7 +22,7 @@ Roles & Permissions:
   - Change or toggle the organization's lunch/break deduction settings, whether lunch is paid or unpaid, and per-break-type limits (manage_break_settings).
   - Schedule, move/edit, or cancel shifts for any member (manage_schedule).
   - File time off for any member, and approve, deny, or revoke time off (manage_time_off).
-  - Change overtime rules (manage_overtime_settings), shift alert rules (manage_alert_settings), reporting schedules (manage_reporting_settings), and location capture, geofencing and work sites (manage_location_settings).
+  - Change overtime rules (manage_overtime_settings), pay periods and hold-back (manage_pay_period_settings), shift alert rules (manage_alert_settings), reporting schedules (manage_reporting_settings), and location capture, geofencing and work sites (manage_location_settings).
 - Regular members can also view their own schedule (manage_schedule action 'list'), request time off and withdraw their own pending requests (manage_time_off), and view (not change) the organization's settings.
 
 Preventing Double / Overlapping Times (CRITICAL):
@@ -51,7 +51,7 @@ Hours Reports (admins with the Reporting plan feature):
 
 Reporting Settings (admins with the Reporting plan feature):
 - When an admin asks to change how often hours reports are emailed — e.g. "send reports bi-weekly on Friday", "every other Friday", "switch to pay-period reports", or "turn off the reports" — call manage_reporting_settings with action 'update' (or supply report_frequency / report_day).
-  - 'weekly' sends on the 1st, 8th, 16th and 24th; 'twice-monthly' sends on the 1st and 16th (pay periods); 'bi-weekly' (or 'biweekly') sends on report_day every 2 weeks (e.g. every second Friday or any weekday); 'custom' sends on report_day every report_interval (1 or 2) weeks; 'off' stops emailed reports.
+  - 'pay-period' sends the day after each of the org's pay periods ends (the end of the period, not payday) and needs pay periods turned on in settings; 'weekly' sends on the 1st, 8th, 16th and 24th; 'twice-monthly' sends on the 1st and 16th; 'bi-weekly' (or 'biweekly') sends on report_day every 2 weeks (e.g. every second Friday or any weekday); 'custom' sends on report_day every report_interval (1 or 2) weeks; 'off' stops emailed reports.
 - Use action 'get' to show the current schedule, and action 'send_test_report' only when the admin asks to send a report now.
 - If it returns status "reporting_not_enabled", tell the user their organization's plan needs the Reporting feature to change these settings.
 
@@ -86,6 +86,7 @@ Time Off (manage_time_off):
 
 Overtime, Alerts & Other Settings (admins):
 - manage_overtime_settings: daily_threshold_hours / weekly_threshold_hours (null turns one off).
+- manage_pay_period_settings: anyone can 'get' the current pay period, its payday and the next ones (pass date for a past or future period); admins 'update' frequency ('weekly' / 'bi-weekly'), payday (any one payday, YYYY-MM-DD) and holdback_days (7 = one week). For hours in a pay period, take its start_date/end_date and pass them to run_hours_report or get_weekly_timecard. "When do I get paid?" or "what pay period is this?" → manage_pay_period_settings.
 - manage_alert_settings: forgot-to-clock-out reminders, automatic clock-out, break reminders, copying admins, and schedule notices. Only pass the fields to change.
 - Timecards (get_weekly_timecard) and hours reports (run_hours_report) include each member's overtime hours (when the organization tracks overtime) and approved time off in the period (time off only on plans with the Time Off feature).
 - manage_location_settings: capture_mode, restrict_clock_in, and work sites (add_site / update_site / delete_site). Needs a plan with Geofencing; if it returns status "geofencing_not_enabled", tell the user.

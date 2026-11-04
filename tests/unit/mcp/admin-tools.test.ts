@@ -22,6 +22,8 @@ const m = vi.hoisted(() => ({
   dbCancelTimeOffRequest: vi.fn(),
   dbGetOvertimeSettings: vi.fn(),
   dbUpdateOvertimeSettings: vi.fn(),
+  dbGetPayPeriodSettings: vi.fn(),
+  dbUpdatePayPeriodSettings: vi.fn(),
   dbGetLocationSettings: vi.fn(),
   dbUpdateLocationSettings: vi.fn(),
   dbGetSites: vi.fn(async () => [] as unknown[]),
@@ -74,6 +76,8 @@ vi.mock("@/lib/db", () => ({
   dbCancelTimeOffRequest: m.dbCancelTimeOffRequest,
   dbGetOvertimeSettings: m.dbGetOvertimeSettings,
   dbUpdateOvertimeSettings: m.dbUpdateOvertimeSettings,
+  dbGetPayPeriodSettings: m.dbGetPayPeriodSettings,
+  dbUpdatePayPeriodSettings: m.dbUpdatePayPeriodSettings,
   dbGetLocationSettings: m.dbGetLocationSettings,
   dbUpdateLocationSettings: m.dbUpdateLocationSettings,
   dbGetSites: m.dbGetSites,
@@ -87,6 +91,7 @@ import {
   manageLocationSettingsTool,
   manageMemberTool,
   manageOvertimeSettingsTool,
+  managePayPeriodSettingsTool,
   manageScheduleTool,
   manageTimeOffTool,
   resolveShiftTimes,
@@ -498,6 +503,163 @@ describe("manage_overtime_settings", () => {
       daily_threshold_hours: 8,
     });
     expect(res.data.status).toBe("forbidden");
+  });
+});
+
+describe("manage_pay_period_settings", () => {
+  // Weekly, paid Fridays, held back a week: Oct 31 – Nov 6 is paid Nov 13.
+  const saved = {
+    org_id: "org_1",
+    enabled: true,
+    frequency: "weekly" as const,
+    anchor_payday: "2026-11-13",
+    holdback_days: 7,
+  };
+
+  it("shows members the pay period for a date with its payday and report date", async () => {
+    asRole("org:member");
+    m.dbGetPayPeriodSettings.mockResolvedValue(saved);
+    const res = await managePayPeriodSettingsTool(member, {
+      date: "2026-11-03",
+    });
+    expect(res.isError).toBeUndefined();
+    expect(res.summary).toBe(
+      "Acme is paid every week from 2026-11-13, with a 1 week hold-back. The pay period for 2026-11-03 is Oct 31 – Nov 6, paid Fri, Nov 13.",
+    );
+    expect(res.data).toMatchObject({
+      date: "2026-11-03",
+      pay_period: {
+        start_date: "2026-10-31",
+        end_date: "2026-11-06",
+        payday: "2026-11-13",
+        report_date: "2026-11-07",
+        label: "Oct 31 – Nov 6, paid Fri, Nov 13",
+      },
+      previous_pay_period: { start_date: "2026-10-24", payday: "2026-11-06" },
+      next_pay_periods: [
+        { start_date: "2026-11-07", payday: "2026-11-20" },
+        { start_date: "2026-11-14", payday: "2026-11-27" },
+      ],
+    });
+  });
+
+  it("defaults to today in the given timezone and describes no hold-back", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    // Still Nov 6 in Regina.
+    vi.setSystemTime(new Date("2026-11-07T03:00:00Z"));
+    m.dbGetPayPeriodSettings.mockResolvedValue({
+      ...saved,
+      frequency: "bi-weekly",
+      holdback_days: 0,
+    });
+    const res = await managePayPeriodSettingsTool(admin, { timezone: TZ });
+    vi.useRealTimers();
+    expect(res.data.date).toBe("2026-11-06");
+    expect(res.summary).toContain(
+      "paid every 2 weeks from 2026-11-13, with no hold-back",
+    );
+  });
+
+  it.each([
+    ["not set up", undefined, "not set up"],
+    ["turned off", { ...saved, enabled: false }, "turned off"],
+  ])("says when pay periods are %s", async (_label, value, words) => {
+    m.dbGetPayPeriodSettings.mockResolvedValue(value);
+    const res = await managePayPeriodSettingsTool(admin, {});
+    expect(res.summary).toContain(`Pay periods are ${words} for Acme.`);
+    expect(res.summary).toContain("Use action 'update'");
+    expect(res.data.enabled).toBe(false);
+  });
+
+  it("tells members an admin can set pay periods up", async () => {
+    asRole("org:member");
+    m.dbGetPayPeriodSettings.mockResolvedValue(undefined);
+    const res = await managePayPeriodSettingsTool(member, {});
+    expect(res.summary).toContain("An admin can set them up.");
+  });
+
+  it("sets pay periods up from a payday with sensible defaults", async () => {
+    m.dbGetPayPeriodSettings.mockResolvedValue(undefined);
+    m.dbUpdatePayPeriodSettings.mockResolvedValue({
+      ...saved,
+      frequency: "bi-weekly",
+      holdback_days: 0,
+    });
+    const res = await managePayPeriodSettingsTool(admin, {
+      action: "update",
+      payday: "2026-11-13",
+    });
+    expect(m.dbUpdatePayPeriodSettings).toHaveBeenCalledWith(
+      "org_1",
+      true,
+      "bi-weekly",
+      "2026-11-13",
+      0,
+    );
+    expect(m.revalidateTag).toHaveBeenCalledWith("pay-period-settings-org_1", {
+      expire: 0,
+    });
+    expect(res.data.status).toBe("updated");
+  });
+
+  it("changes only the fields passed", async () => {
+    m.dbGetPayPeriodSettings.mockResolvedValue({ ...saved, holdback_days: 0 });
+    m.dbUpdatePayPeriodSettings.mockResolvedValue(saved);
+    const res = await managePayPeriodSettingsTool(admin, {
+      action: "update",
+      holdback_days: 7,
+    });
+    expect(m.dbUpdatePayPeriodSettings).toHaveBeenCalledWith(
+      "org_1",
+      true,
+      "weekly",
+      "2026-11-13",
+      7,
+    );
+    expect(res.summary).toBe(
+      "Updated pay periods for Acme: paid every week from 2026-11-13, with a 1 week hold-back.",
+    );
+  });
+
+  it("turns pay periods off", async () => {
+    m.dbGetPayPeriodSettings.mockResolvedValue(saved);
+    m.dbUpdatePayPeriodSettings.mockResolvedValue({ ...saved, enabled: false });
+    const res = await managePayPeriodSettingsTool(admin, {
+      action: "update",
+      enabled: false,
+    });
+    expect(res.summary).toBe("Turned pay periods off for Acme.");
+    expect(res.data.settings).toMatchObject({ enabled: false });
+  });
+
+  it("forbids members from changing it", async () => {
+    asRole("org:member");
+    m.dbGetPayPeriodSettings.mockResolvedValue(saved);
+    const res = await managePayPeriodSettingsTool(member, {
+      action: "update",
+      holdback_days: 14,
+    });
+    expect(res.data.status).toBe("forbidden");
+    expect(m.dbUpdatePayPeriodSettings).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["nothing to change", {}, "Nothing to update"],
+    ["no payday on first setup", { enabled: true }, "Pass a payday"],
+    [
+      "an impossible payday",
+      { payday: "2026-02-30" },
+      "Invalid pay period settings.",
+    ],
+  ])("rejects %s", async (_label, patch, message) => {
+    m.dbGetPayPeriodSettings.mockResolvedValue(undefined);
+    const res = await managePayPeriodSettingsTool(admin, {
+      action: "update",
+      ...patch,
+    });
+    expect(res.isError).toBe(true);
+    expect(res.summary).toContain(message);
+    expect(m.dbUpdatePayPeriodSettings).not.toHaveBeenCalled();
   });
 });
 

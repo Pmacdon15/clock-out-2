@@ -579,10 +579,18 @@ export const manageReportingSettingsInputSchema = z.object({
       "Action to perform: 'get' (view current settings), 'update' (change reporting schedule), or 'send_test_report' (email the last 7 days report to org admins now). Defaults to 'get', or 'update' if schedule settings are provided.",
     ),
   report_frequency: z
-    .enum(["off", "weekly", "twice-monthly", "custom", "bi-weekly", "biweekly"])
+    .enum([
+      "off",
+      "pay-period",
+      "weekly",
+      "twice-monthly",
+      "custom",
+      "bi-weekly",
+      "biweekly",
+    ])
     .optional()
     .describe(
-      "Report frequency when action is 'update': 'off' (no emailed reports), 'weekly' (sent on the 1st, 8th, 16th and 24th), 'twice-monthly' (pay periods, sent on the 1st and 16th), 'bi-weekly' (sent every 2 weeks on report_day, e.g. Friday), or 'custom' (a chosen weekday, every 1 or 2 weeks). If omitted, it becomes 'custom' (or 'bi-weekly' if interval is 2) when report_day or report_interval is given, otherwise the current frequency is kept.",
+      "Report frequency when action is 'update': 'off' (no emailed reports), 'pay-period' (sent the day after each of the org's pay periods ends, covering that period; needs pay periods turned on in settings), 'weekly' (sent on the 1st, 8th, 16th and 24th), 'twice-monthly' (sent on the 1st and 16th), 'bi-weekly' (sent every 2 weeks on report_day, e.g. Friday), or 'custom' (a chosen weekday, every 1 or 2 weeks). If omitted, it becomes 'custom' (or 'bi-weekly' if interval is 2) when report_day or report_interval is given, otherwise the current frequency is kept.",
     ),
   report_day: z
     .enum([
