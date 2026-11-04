@@ -194,7 +194,7 @@ export default function AlertSettings({
 
         <Rule
           checked={form.break_reminder_enabled}
-          description="Remind members who forgot to clock back in from a break. A break with a time limit is reminded when its limit runs out, if that comes first."
+          description="Remind members who forgot to clock back in from a break. A break with a time limit always gets a “your break is over” notification when its limit runs out; with this on, admins get it too."
           icon={Coffee}
           id="alert-break-reminder"
           onToggle={(v) => set("break_reminder_enabled", v)}

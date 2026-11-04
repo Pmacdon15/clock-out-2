@@ -31,8 +31,9 @@ vi.mock("@/lib/alerts-db", () => ({
 vi.mock("@/lib/db", () => ({ dbGetBreakSettings: mocks.dbGetBreakSettings }));
 vi.mock("@/lib/notify", () => ({ deliver: mocks.deliver }));
 
-import type { PlannedAlert } from "@/lib/alerts";
+import { normalizeAlertSettings, type PlannedAlert } from "@/lib/alerts";
 import {
+  alertNotifiesAdmins,
   buildDeliveries,
   loadOrgMembers,
   processOrgAlerts,
@@ -207,7 +208,7 @@ describe("processOrgAlerts", () => {
       .mockResolvedValueOnce(undefined);
     // The break alert already went out on an earlier run.
     mocks.dbClaimAlert.mockImplementation(
-      async (key: string) => key !== "break:9",
+      async (key: string) => key !== "break-over:9",
     );
 
     await expect(processOrgAlerts(settings, now)).resolves.toEqual({
@@ -233,7 +234,7 @@ describe("processOrgAlerts", () => {
     expect(mocks.dbClaimAlert.mock.calls.map((c) => c[0])).toEqual([
       "auto:1",
       "forgot:3",
-      "break:9",
+      "break-over:9",
     ]);
     expect(mocks.deliver).toHaveBeenCalledTimes(2);
   });
@@ -259,7 +260,7 @@ describe("processOrgAlerts", () => {
     expect(mocks.deliver).not.toHaveBeenCalled();
   });
 
-  it("skips break lookups when break reminders are off and survives missing break settings", async () => {
+  it("survives missing break settings", async () => {
     mocks.dbGetBreakSettings.mockRejectedValue(new Error("db"));
     mocks.dbGetOpenShifts.mockResolvedValue([
       { id: 3, user_id: "u1", org_id: "org_1", clock_in: ago(11 * HOUR) },
@@ -269,7 +270,80 @@ describe("processOrgAlerts", () => {
       now,
     );
     expect(result.alerts).toBe(1);
-    expect(mocks.dbGetOpenShiftBreaks).not.toHaveBeenCalled();
+  });
+
+  it("says a break is over at its limit with no alert rules saved", async () => {
+    mocks.dbGetOpenShifts.mockResolvedValue([
+      { id: 3, user_id: "u1", org_id: "org_1", clock_in: ago(HOUR) },
+    ]);
+    mocks.dbGetOpenShiftBreaks.mockResolvedValue([
+      {
+        id: 9,
+        time_entry_id: 3,
+        break_type: "paid_rest",
+        break_start: ago(15 * MIN),
+        user_id: "u1",
+        org_id: "org_1",
+      },
+    ]);
+    mocks.dbGetBreakSettings.mockResolvedValue({
+      org_id: "org_1",
+      dock_lunch: false,
+      lunch_duration_minutes: 30,
+      lunch_min_shift_hours: 5,
+      max_paid_break_minutes: 15,
+    });
+    const result = await processOrgAlerts({ org_id: "org_1" }, now);
+    expect(result.alerts).toBe(1);
+    expect(mocks.dbClaimAlert).toHaveBeenCalledWith("break-over:9", "org_1");
+    const [deliveries] = mocks.deliver.mock.calls[0];
+    // Only the member: admins didn't turn on break reminders.
+    expect(deliveries).toEqual([
+      expect.objectContaining({
+        recipient: { userId: "u1", email: "u1@x.test" },
+        category: "break_alerts",
+        message: expect.objectContaining({ title: "Your break is over" }),
+      }),
+    ]);
+  });
+});
+
+describe("alertNotifiesAdmins", () => {
+  const over: PlannedAlert = {
+    kind: "break_over",
+    key: "break-over:1",
+    brk: {
+      id: 1,
+      time_entry_id: 1,
+      break_type: "paid_rest",
+      break_start: ago(15 * MIN),
+      user_id: "u1",
+      org_id: "org_1",
+    },
+    limitMinutes: 15,
+  };
+  const forgotAlert: PlannedAlert = {
+    kind: "forgot_clock_out",
+    key: "forgot:1",
+    shift: { id: 1, user_id: "u1", org_id: "org_1", clock_in: ago(11 * HOUR) },
+    openMs: 11 * HOUR,
+  };
+  const rules = normalizeAlertSettings(settings);
+
+  it("tells admins about a break being over only with break reminders on", () => {
+    expect(alertNotifiesAdmins(over, rules)).toBe(true);
+    expect(
+      alertNotifiesAdmins(over, { ...rules, break_reminder_enabled: false }),
+    ).toBe(false);
+    expect(
+      alertNotifiesAdmins(forgotAlert, {
+        ...rules,
+        break_reminder_enabled: false,
+      }),
+    ).toBe(true);
+    expect(alertNotifiesAdmins(over, { ...rules, notify_admins: false })).toBe(
+      false,
+    );
   });
 });
 

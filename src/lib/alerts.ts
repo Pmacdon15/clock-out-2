@@ -228,9 +228,29 @@ export type PlannedAlert =
       key: string;
       brk: OpenShiftBreak;
       elapsedMs: number;
-      /** The break type's limit, when it is the limit that was reached. */
-      limitMinutes: number | null;
+    }
+  | {
+      kind: "break_over";
+      key: string;
+      brk: OpenShiftBreak;
+      /** The break type's limit, which the break has now reached. */
+      limitMinutes: number;
     };
+
+/**
+ * Whether a break gets its "still on break" reminder: the rule is on, and the
+ * reminder comes before the break type's limit (at the limit, the "break is
+ * over" alert says it instead).
+ */
+function remindsBeforeLimit(
+  settings: AlertSettingsInput,
+  limit: number | null,
+): boolean {
+  return (
+    settings.break_reminder_enabled &&
+    (limit === null || settings.break_reminder_minutes < limit)
+  );
+}
 
 /**
  * Decides which alerts one org is due, given its open shifts and breaks.
@@ -238,9 +258,11 @@ export type PlannedAlert =
  *
  * - A shift past the auto clock-out limit is closed (and not also reminded).
  * - A shift past the reminder threshold gets one "forgot to clock out" alert.
- * - A break running longer than the reminder threshold — or its type's limit,
- *   when that comes first — gets one "still on break" alert, unless its shift
- *   is being closed anyway.
+ * - A break running longer than the reminder threshold gets one "still on
+ *   break" alert, when that comes before its type's limit.
+ * - A break that reaches its type's limit gets one "your break is over"
+ *   alert. This needs no alert rule: setting the limit is enough.
+ * - Neither is sent for a break whose shift is being closed anyway.
  */
 export function planShiftAlerts({
   settings,
@@ -285,23 +307,27 @@ export function planShiftAlerts({
     }
   }
 
-  if (settings.break_reminder_enabled) {
-    for (const brk of breaks) {
-      if (closing.has(brk.time_entry_id)) continue;
-      const elapsedMs = nowMs - new Date(brk.break_start).getTime();
-      const limit = getBreakLimitMinutes(brk.break_type, breakSettings);
-      const reminder = settings.break_reminder_minutes;
-      const limitFirst = limit !== null && limit <= reminder;
-      const thresholdMinutes = limitFirst ? limit : reminder;
-      if (elapsedMs >= thresholdMinutes * MINUTE_MS) {
-        planned.push({
-          kind: "break_reminder",
-          key: `break:${brk.id}`,
-          brk,
-          elapsedMs,
-          limitMinutes: limitFirst ? limit : null,
-        });
-      }
+  for (const brk of breaks) {
+    if (closing.has(brk.time_entry_id)) continue;
+    const elapsedMs = nowMs - new Date(brk.break_start).getTime();
+    const limit = getBreakLimitMinutes(brk.break_type, breakSettings);
+    if (limit !== null && elapsedMs >= limit * MINUTE_MS) {
+      planned.push({
+        kind: "break_over",
+        key: `break-over:${brk.id}`,
+        brk,
+        limitMinutes: limit,
+      });
+    } else if (
+      remindsBeforeLimit(settings, limit) &&
+      elapsedMs >= settings.break_reminder_minutes * MINUTE_MS
+    ) {
+      planned.push({
+        kind: "break_reminder",
+        key: `break:${brk.id}`,
+        brk,
+        elapsedMs,
+      });
     }
   }
 
@@ -353,17 +379,23 @@ export function nextShiftAlertDueAt({
     }
   }
 
-  if (settings.break_reminder_enabled) {
-    for (const brk of breaks) {
-      if (claimed.has(`break:${brk.id}`)) continue;
-      const limit = getBreakLimitMinutes(brk.break_type, breakSettings);
-      const reminder = settings.break_reminder_minutes;
-      const threshold = limit !== null && limit <= reminder ? limit : reminder;
-      const due = new Date(brk.break_start).getTime() + threshold * MINUTE_MS;
-      // Its shift closes first: the auto clock-out ends the break anyway.
-      const auto = autoAt.get(brk.time_entry_id);
-      if (auto !== undefined && auto <= due) continue;
-      consider(due);
+  for (const brk of breaks) {
+    const start = new Date(brk.break_start).getTime();
+    const limit = getBreakLimitMinutes(brk.break_type, breakSettings);
+    // Its shift closes first: the auto clock-out ends the break anyway.
+    const auto = autoAt.get(brk.time_entry_id) ?? Number.POSITIVE_INFINITY;
+    const dues: number[] = [];
+    if (
+      remindsBeforeLimit(settings, limit) &&
+      !claimed.has(`break:${brk.id}`)
+    ) {
+      dues.push(start + settings.break_reminder_minutes * MINUTE_MS);
+    }
+    if (limit !== null && !claimed.has(`break-over:${brk.id}`)) {
+      dues.push(start + limit * MINUTE_MS);
+    }
+    for (const due of dues) {
+      if (due < auto) consider(due);
     }
   }
 
@@ -377,7 +409,7 @@ export function pendingAlertKeys(
 ): string[] {
   return [
     ...shifts.map((s) => `forgot:${s.id}`),
-    ...breaks.map((b) => `break:${b.id}`),
+    ...breaks.flatMap((b) => [`break:${b.id}`, `break-over:${b.id}`]),
   ];
 }
 
@@ -413,13 +445,15 @@ const formatHours = (hours: number) =>
 
 /** The user the alert is about. */
 export function alertUserId(alert: PlannedAlert): string {
-  return alert.kind === "break_reminder"
+  return alert.kind === "break_reminder" || alert.kind === "break_over"
     ? alert.brk.user_id
     : alert.shift.user_id;
 }
 
 export function alertCategory(alert: PlannedAlert): AlertCategory {
-  return alert.kind === "break_reminder" ? "break_alerts" : "shift_alerts";
+  return alert.kind === "break_reminder" || alert.kind === "break_over"
+    ? "break_alerts"
+    : "shift_alerts";
 }
 
 /**
@@ -470,24 +504,25 @@ export function describeAlert(
             tag,
           };
     }
+    case "break_over": {
+      const label = breakTypeLabel(alert.brk.break_type).toLowerCase();
+      return forAdmin
+        ? {
+            title: `${memberName}'s break is over`,
+            body: `${memberName}'s ${label} reached its ${alert.limitMinutes}-minute limit.`,
+            url,
+            tag,
+          }
+        : {
+            title: "Your break is over",
+            body: `Your ${label} reached its ${alert.limitMinutes}-minute limit, so you're back on the clock.`,
+            url,
+            tag,
+          };
+    }
     case "break_reminder": {
       const label = breakTypeLabel(alert.brk.break_type).toLowerCase();
       const elapsed = formatElapsed(alert.elapsedMs);
-      if (alert.limitMinutes !== null) {
-        return forAdmin
-          ? {
-              title: `${memberName}'s break is over`,
-              body: `${memberName}'s ${label} reached its ${alert.limitMinutes}-minute limit.`,
-              url,
-              tag,
-            }
-          : {
-              title: "Your break is over",
-              body: `Your ${label} reached its ${alert.limitMinutes}-minute limit, so you're back on the clock.`,
-              url,
-              tag,
-            };
-      }
       return forAdmin
         ? {
             title: `${memberName} is still on break`,

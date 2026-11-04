@@ -20,6 +20,7 @@ import {
 } from "./alerts-db";
 import { processOrgAlerts } from "./alerts-runner";
 import { NOTIFICATIONS_FEATURE, orgHasFeature } from "./billing";
+import { getBreakLimits } from "./break-utils";
 import { dbGetBreakSettings, dbGetScheduledShiftById } from "./db";
 import { appUrl } from "./notify";
 import {
@@ -217,23 +218,30 @@ export async function syncOrgShiftAlerts(
 ): Promise<Date | null> {
   if (!isQStashConfigured()) return null;
   const key = shiftAlertsJobKey(orgId);
-  const [row] = await dbGetAlertSettingsFor([orgId]);
+  const [[row], breakSettings] = await Promise.all([
+    dbGetAlertSettingsFor([orgId]),
+    dbGetBreakSettings(orgId).catch(() => undefined),
+  ]);
   const settings = normalizeAlertSettings(row);
+  // A break time limit sends "your break is over" even with every rule off.
+  const anyBreakLimit = Object.values(getBreakLimits(breakSettings)).some(
+    (limit) => limit !== null,
+  );
   const anyRule =
     settings.forgot_clock_out_enabled ||
     settings.auto_clock_out_enabled ||
-    settings.break_reminder_enabled;
+    settings.break_reminder_enabled ||
+    anyBreakLimit;
   if (!anyRule) {
     await cancelJob(key);
     return null;
   }
 
-  const [shifts, breaks, breakSettings] = await Promise.all([
+  const [shifts, breaks] = await Promise.all([
     dbGetOpenShifts(orgId),
-    settings.break_reminder_enabled
+    settings.break_reminder_enabled || anyBreakLimit
       ? dbGetOpenShiftBreaks(orgId)
       : Promise.resolve([]),
-    dbGetBreakSettings(orgId).catch(() => undefined),
   ]);
   const claimed = await dbGetClaimedAlertKeys(pendingAlertKeys(shifts, breaks));
   const due = nextShiftAlertDueAt({
@@ -396,13 +404,16 @@ export async function runAlertJob(
   }
   const [row] = await dbGetAlertSettingsFor([job.orgId]);
   let sent = 0;
-  if (row) {
-    // Without the paid `notifications` feature shifts still auto clock out,
-    // but nobody is emailed or pushed (same as the daily sweep).
-    const notify = await orgHasFeature(job.orgId, NOTIFICATIONS_FEATURE);
-    const result = await processOrgAlerts(row, now, notify);
-    if (result.status === "ok") sent = result.alerts;
-  }
+  // Without the paid `notifications` feature shifts still auto clock out,
+  // but nobody is emailed or pushed (same as the daily sweep). An org with
+  // no rules saved can still be due a "your break is over" from its limits.
+  const notify = await orgHasFeature(job.orgId, NOTIFICATIONS_FEATURE);
+  const result = await processOrgAlerts(
+    row ?? { org_id: job.orgId },
+    now,
+    notify,
+  );
+  if (result.status === "ok") sent = result.alerts;
   await syncOrgShiftAlerts(job.orgId, now, now.getTime() + RETRY_FLOOR_MS);
   return { type: job.type, sent };
 }

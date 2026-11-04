@@ -251,11 +251,10 @@ describe("planShiftAlerts", () => {
     expect(planned[2]).toMatchObject({
       kind: "break_reminder",
       elapsedMs: 50 * MIN,
-      limitMinutes: null,
     });
   });
 
-  it("reminds at a break's limit when it comes before the reminder", () => {
+  it("says the break is over at its limit, instead of reminding, when the limit comes first", () => {
     const planned = planShiftAlerts({
       settings: { ...allOn, break_reminder_minutes: 60 },
       breakSettings: {
@@ -276,9 +275,71 @@ describe("planShiftAlerts", () => {
       now: new Date(now),
     });
     expect(planned).toEqual([
-      expect.objectContaining({ key: "break:1", limitMinutes: 15 }),
-      expect.objectContaining({ key: "break:3", limitMinutes: null }),
+      expect.objectContaining({
+        kind: "break_over",
+        key: "break-over:1",
+        limitMinutes: 15,
+      }),
+      expect.objectContaining({ kind: "break_reminder", key: "break:3" }),
     ]);
+  });
+
+  const limits = {
+    org_id: "org_1",
+    dock_lunch: false,
+    lunch_duration_minutes: 30,
+    lunch_min_shift_hours: 5,
+    max_paid_break_minutes: 15,
+    max_meal_break_minutes: 90,
+  };
+
+  it("says the break is over at its limit even with every rule off", () => {
+    const planned = planShiftAlerts({
+      settings: DEFAULT_ALERT_SETTINGS,
+      breakSettings: limits,
+      shifts: [],
+      breaks: [
+        brk(1, 1, 15 * MIN, "paid_rest"),
+        brk(2, 2, 14 * MIN, "paid_rest"),
+        // No limit for unpaid rest breaks: nothing to say.
+        brk(3, 3, 5 * HOUR, "unpaid_rest"),
+      ],
+      now,
+    });
+    expect(planned).toEqual([
+      {
+        kind: "break_over",
+        key: "break-over:1",
+        brk: brk(1, 1, 15 * MIN, "paid_rest"),
+        limitMinutes: 15,
+      },
+    ]);
+  });
+
+  it("reminds before the limit, then says the break is over at the limit", () => {
+    const settings = { ...allOn, break_reminder_minutes: 60 };
+    const plan = (elapsed: number) =>
+      planShiftAlerts({
+        settings,
+        breakSettings: limits,
+        shifts: [],
+        breaks: [brk(1, 1, elapsed, "unpaid_meal")],
+        now,
+      }).map((p) => p.key);
+    expect(plan(59 * MIN)).toEqual([]);
+    expect(plan(60 * MIN)).toEqual(["break:1"]);
+    expect(plan(90 * MIN)).toEqual(["break-over:1"]);
+  });
+
+  it("leaves a break on a shift being closed to the auto clock-out", () => {
+    const planned = planShiftAlerts({
+      settings: { ...DEFAULT_ALERT_SETTINGS, auto_clock_out_enabled: true },
+      breakSettings: limits,
+      shifts: [shift(1, 17 * HOUR)],
+      breaks: [brk(1, 1, HOUR, "paid_rest")],
+      now,
+    });
+    expect(planned.map((p) => p.key)).toEqual(["auto:1"]);
   });
 
   it("only reminds about shifts when auto clock-out is off", () => {
@@ -312,9 +373,13 @@ describe("wording", () => {
     key: "break:5",
     brk: brk(5, 1, 47 * MIN),
     elapsedMs: 47 * MIN,
-    limitMinutes: null,
   };
-  const breakLimit: PlannedAlert = { ...breakLong, limitMinutes: 30 };
+  const breakLimit: PlannedAlert = {
+    kind: "break_over",
+    key: "break-over:5",
+    brk: brk(5, 1, 30 * MIN),
+    limitMinutes: 30,
+  };
 
   it("formats elapsed time", () => {
     expect(formatElapsed(47 * MIN)).toBe("47m");
@@ -327,6 +392,8 @@ describe("wording", () => {
     expect(alertUserId(breakLong)).toBe("u1");
     expect(alertCategory(auto)).toBe("shift_alerts");
     expect(alertCategory(breakLong)).toBe("break_alerts");
+    expect(alertUserId(breakLimit)).toBe("u1");
+    expect(alertCategory(breakLimit)).toBe("break_alerts");
   });
 
   it("words member alerts and links them to the time clock", () => {
@@ -343,9 +410,11 @@ describe("wording", () => {
       title: "Still on break?",
       body: expect.stringContaining("meal period has been running for 47m"),
     });
-    expect(describeAlert(breakLimit, member)).toMatchObject({
+    expect(describeAlert(breakLimit, member)).toEqual({
       title: "Your break is over",
-      body: expect.stringContaining("30-minute limit"),
+      body: "Your meal period reached its 30-minute limit, so you're back on the clock.",
+      url: "/?defaultTab=time-clock&orgId=org%201",
+      tag: "break-over:5",
     });
   });
 
@@ -528,9 +597,37 @@ describe("nextShiftAlertDueAt", () => {
           brk(1, 1, 10 * MIN, "unpaid_meal"),
           brk(2, 2, 5 * MIN, "paid_rest"),
         ],
-        claimed: new Set(["break:2"]),
+        claimed: new Set(["break-over:2"]),
       }),
     ).toEqual(at(50 * MIN));
+    // After the meal reminder, its limit (90) is next.
+    expect(
+      nextShiftAlertDueAt({
+        settings,
+        breakSettings,
+        shifts,
+        breaks: [brk(1, 1, 10 * MIN, "unpaid_meal")],
+        claimed: new Set(["break:1"]),
+      }),
+    ).toEqual(at(80 * MIN));
+  });
+
+  it("counts a break's limit even with every rule off", () => {
+    expect(
+      nextShiftAlertDueAt({
+        settings: DEFAULT_ALERT_SETTINGS,
+        breakSettings: {
+          org_id: "org_1",
+          dock_lunch: false,
+          lunch_duration_minutes: 30,
+          lunch_min_shift_hours: 5,
+          max_paid_break_minutes: 15,
+        },
+        shifts: [shift(1, HOUR)],
+        breaks: [brk(1, 1, 5 * MIN, "paid_rest")],
+        claimed: none,
+      }),
+    ).toEqual(at(10 * MIN));
   });
 
   it("leaves a break to its shift's automatic clock-out when that is sooner", () => {
@@ -564,6 +661,7 @@ describe("pendingAlertKeys", () => {
     expect(pendingAlertKeys([shift(1, 0)], [brk(7, 1, 0)])).toEqual([
       "forgot:1",
       "break:7",
+      "break-over:7",
     ]);
   });
 });
