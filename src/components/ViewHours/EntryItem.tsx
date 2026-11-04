@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { startTransition, useState } from "react";
 import { toast } from "sonner";
-import { deleteBreakAction, updateTimeEntryAction } from "@/lib/actions";
+import { updateTimeEntryAction } from "@/lib/actions";
 import {
   breakTypeLabel,
   getBreakDurationMs,
@@ -26,6 +26,7 @@ import { formatCoordinates } from "@/lib/geo";
 import type { OvertimeSplit } from "@/lib/overtime";
 import type { EntryAction } from "@/lib/reducers/time-entries";
 import type { BreakSettingsData, TimeEntry, TimeEntryBreak } from "@/lib/types";
+import { DeleteBreakConfirmDialog } from "../DeleteBreakConfirmDialog";
 import { DeleteConfirmDialog } from "../DeleteConfirmDialog";
 import LocalTime from "../LocalTime";
 
@@ -57,32 +58,6 @@ export function EntryItem({
       : "",
   );
   const [editSkipLunch, setEditSkipLunch] = useState(Boolean(entry.skip_lunch));
-
-  const deleteBreakMutation = useMutation({
-    mutationFn: (breakId: number) => deleteBreakAction(breakId),
-    onSuccess: (res) => {
-      if (res.success) toast.success("Break removed");
-      else if ("error" in res)
-        toast.error(res.error || "Failed to remove break");
-    },
-  });
-
-  const handleDeleteBreak = (breakId: number) => {
-    // The remove button only renders for a break of this entry's own list.
-    const recorded = entry.breaks as TimeEntryBreak[];
-    startTransition(() => {
-      setOptimisticEntries({
-        type: "UPDATE",
-        payload: {
-          id: entry.id,
-          breaks: recorded.filter((brk) => brk.id !== breakId),
-          updated_at: new Date(),
-        },
-      });
-
-      deleteBreakMutation.mutate(breakId);
-    });
-  };
 
   const updateMutation = useMutation({
     mutationFn: ({
@@ -358,15 +333,12 @@ export function EntryItem({
                 {isPaidBreakType(brk.break_type) ? "Paid" : "Unpaid"}
               </span>
               {isAdmin && (
-                <button
-                  aria-label="Remove break"
-                  className="p-1 transition-colors hover:text-red-500"
-                  disabled={deleteBreakMutation.isPending}
-                  onClick={() => handleDeleteBreak(brk.id)}
-                  type="button"
-                >
-                  <X className="h-3 w-3" />
-                </button>
+                <DeleteBreakConfirmDialog
+                  breakItem={brk}
+                  breaks={entry.breaks as TimeEntryBreak[]}
+                  entryId={entry.id}
+                  setOptimisticEntries={setOptimisticEntries}
+                />
               )}
             </li>
           ))}

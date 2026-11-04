@@ -336,6 +336,11 @@ describe("EntryItem break records", () => {
     mocks.deleteBreakAction.mockResolvedValue({ success: true });
     const { setOptimisticEntries } = renderItem({ entry: withBreaks });
     fireEvent.click(screen.getAllByRole("button", { name: "Remove break" })[0]);
+    expect(setOptimisticEntries).not.toHaveBeenCalled();
+    expect(screen.getByRole("alertdialog")).toHaveTextContent(
+      "Delete this break?",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
 
     expect(setOptimisticEntries).toHaveBeenCalledWith({
       type: "UPDATE",
@@ -349,6 +354,15 @@ describe("EntryItem break records", () => {
       expect(mocks.deleteBreakAction).toHaveBeenCalledWith(11),
     );
     expect(mocks.toast.success).toHaveBeenCalledWith("Break removed");
+  });
+
+  it("keeps the break when the confirmation is cancelled", () => {
+    const { setOptimisticEntries } = renderItem({ entry: withBreaks });
+    fireEvent.click(screen.getAllByRole("button", { name: "Remove break" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(setOptimisticEntries).not.toHaveBeenCalled();
+    expect(mocks.deleteBreakAction).not.toHaveBeenCalled();
   });
 
   it("hides the remove control from members", () => {
@@ -365,6 +379,7 @@ describe("EntryItem break records", () => {
     mocks.deleteBreakAction.mockResolvedValue({ success: false, error });
     renderItem({ entry: withBreaks });
     fireEvent.click(screen.getAllByRole("button", { name: "Remove break" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(mocks.toast.error).toHaveBeenCalledWith(shown));
   });
 
@@ -372,6 +387,7 @@ describe("EntryItem break records", () => {
     mocks.deleteBreakAction.mockResolvedValue({ success: false });
     renderItem({ entry: withBreaks });
     fireEvent.click(screen.getAllByRole("button", { name: "Remove break" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(mocks.deleteBreakAction).toHaveBeenCalled());
     expect(mocks.toast.error).not.toHaveBeenCalled();
   });
