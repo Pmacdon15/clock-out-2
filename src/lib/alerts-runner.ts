@@ -14,7 +14,6 @@ import {
   dbGetActiveAlertSettings,
   dbGetOpenShiftBreaks,
   dbGetOpenShifts,
-  type OpenShiftBreak,
 } from "./alerts-db";
 import { createFeatureCheck, NOTIFICATIONS_FEATURE } from "./billing";
 import { getBreakLimits } from "./break-utils";
@@ -109,12 +108,27 @@ export function buildDeliveries(
 }
 
 /**
+ * Whether admins also hear about this alert. "Your break is over" goes out
+ * for every break with a time limit, so admins only get it when they asked to
+ * follow breaks (the "forgot to end break" rule is on).
+ */
+export function alertNotifiesAdmins(
+  alert: PlannedAlert,
+  settings: ReturnType<typeof normalizeAlertSettings>,
+): boolean {
+  if (!settings.notify_admins) return false;
+  return alert.kind !== "break_over" || settings.break_reminder_enabled;
+}
+
+/**
  * Runs one org's rules: close what ran too long, then send what's due.
  * With `notify` false (no paid `notifications` feature) shifts are still
- * closed, but no alert is sent.
+ * closed, but no alert is sent. `row` may hold just the org id when the org
+ * has no alert rules saved: break time limits alone still send "your break
+ * is over".
  */
 export async function processOrgAlerts(
-  row: AlertSettingsData,
+  row: Pick<AlertSettingsData, "org_id"> & Partial<AlertSettingsData>,
   now: Date,
   notify = true,
 ): Promise<OrgAlertResult> {
@@ -122,9 +136,9 @@ export async function processOrgAlerts(
   const settings = normalizeAlertSettings(row);
   const [shifts, breaks, breakSettings] = await Promise.all([
     dbGetOpenShifts(orgId),
-    settings.break_reminder_enabled
-      ? dbGetOpenShiftBreaks(orgId)
-      : Promise.resolve([] as OpenShiftBreak[]),
+    // Fetched whatever the rules: a break's time limit alone sends "your
+    // break is over".
+    dbGetOpenShiftBreaks(orgId),
     dbGetBreakSettings(orgId).catch((e) => {
       console.error(`[Alerts] Break settings unavailable for ${orgId}:`, e);
       return undefined;
@@ -165,7 +179,12 @@ export async function processOrgAlerts(
     if (!(await dbClaimAlert(alert.key, orgId))) continue;
 
     const counts = await deliver(
-      buildDeliveries(alert, members, orgId, settings.notify_admins),
+      buildDeliveries(
+        alert,
+        members,
+        orgId,
+        alertNotifiesAdmins(alert, settings),
+      ),
     );
     result.alerts += 1;
     result.emails += counts.email;

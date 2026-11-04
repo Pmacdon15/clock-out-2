@@ -74,7 +74,8 @@ const TOPICS: Toggle[] = [
   {
     key: "break_alerts",
     label: "Forgot to end break",
-    description: "When a break runs long or reaches its time limit.",
+    description:
+      "When a break runs long, or your break is over because it reached its time limit.",
   },
   {
     key: "schedule_alerts",

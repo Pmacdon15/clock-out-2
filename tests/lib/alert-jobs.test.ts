@@ -365,6 +365,7 @@ describe("syncOrgShiftAlerts", () => {
     expect(mocks.dbGetClaimedAlertKeys).toHaveBeenCalledWith([
       "forgot:1",
       "break:5",
+      "break-over:5",
     ]);
     expect(mocks.publishJSON).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -384,6 +385,36 @@ describe("syncOrgShiftAlerts", () => {
       new Date(now.getTime() + 8 * HOUR),
     );
     expect(mocks.dbGetOpenShiftBreaks).not.toHaveBeenCalled();
+  });
+
+  it("schedules a break's end from its limit with no alert rules saved", async () => {
+    configure();
+    mocks.dbGetAlertSettingsFor.mockResolvedValue([]);
+    mocks.dbGetBreakSettings.mockResolvedValue({
+      org_id: "org_1",
+      dock_lunch: false,
+      lunch_duration_minutes: 30,
+      lunch_min_shift_hours: 5,
+      max_paid_break_minutes: 15,
+    });
+    mocks.dbGetOpenShifts.mockResolvedValue([openShift(1, 2 * HOUR)]);
+    mocks.dbGetOpenShiftBreaks.mockResolvedValue([
+      {
+        id: 5,
+        time_entry_id: 1,
+        break_type: "paid_rest",
+        break_start: new Date(now.getTime() - 5 * MIN),
+        user_id: "u1",
+        org_id: "org_1",
+      },
+    ]);
+    const due = new Date(now.getTime() + 10 * MIN);
+    await expect(syncOrgShiftAlerts("org_1", now)).resolves.toEqual(due);
+    expect(mocks.publishJSON).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: { type: "shift-alerts", orgId: "org_1", runAt: due.getTime() },
+      }),
+    );
   });
 
   it("never schedules in the past, nor before the retry floor", async () => {
@@ -679,13 +710,17 @@ describe("runAlertJob", () => {
       expect(mocks.processOrgAlerts).toHaveBeenCalledWith(rules, now, false);
     });
 
-    it("skips processing for an org with no settings row", async () => {
+    it("still processes an org with no settings row, for break limits", async () => {
       mocks.dbGetAlertSettingsFor.mockResolvedValue([]);
       await expect(runAlertJob(job)).resolves.toEqual({
         type: "shift-alerts",
-        sent: 0,
+        sent: 2,
       });
-      expect(mocks.processOrgAlerts).not.toHaveBeenCalled();
+      expect(mocks.processOrgAlerts).toHaveBeenCalledWith(
+        { org_id: "org_1" },
+        expect.any(Date),
+        true,
+      );
     });
   });
 });
