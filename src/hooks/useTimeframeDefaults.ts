@@ -3,8 +3,21 @@ import type { Route } from "next";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect } from "react";
 import { getMonthRange, getWeekRange, getYearRange } from "@/lib/date-utils";
+import {
+  getPayPeriod,
+  isPayPeriodEnabled,
+  payPeriodRangeValue,
+} from "@/lib/pay-period";
+import type { PayPeriodSettingsData } from "@/lib/types";
 
-export function useTimeframeDefaults() {
+/**
+ * Fills in the timezone and Hours range params when they're missing. The
+ * range defaults to the current pay period when the org has pay periods on,
+ * otherwise the current week.
+ */
+export function useTimeframeDefaults(
+  payPeriodSettings?: PayPeriodSettingsData | null,
+) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -24,7 +37,14 @@ export function useTimeframeDefaults() {
       !params.get("start") ||
       !params.get("end")
     ) {
-      const targetTimeframe = params.get("timeframe") || "week";
+      const payPeriods = isPayPeriodEnabled(payPeriodSettings)
+        ? payPeriodSettings
+        : null;
+      const requested = params.get("timeframe");
+      const targetTimeframe =
+        requested === "pay-period" && !payPeriods
+          ? "week"
+          : requested || (payPeriods ? "pay-period" : "week");
       params.set("timeframe", targetTimeframe);
 
       const now = new Date();
@@ -39,6 +59,10 @@ export function useTimeframeDefaults() {
         [start, end] = getMonthRange(year, month).split("|");
       } else if (targetTimeframe === "year") {
         [start, end] = getYearRange(year).split("|");
+      } else if (targetTimeframe === "pay-period" && payPeriods) {
+        [start, end] = payPeriodRangeValue(getPayPeriod(payPeriods, now)).split(
+          "|",
+        );
       }
 
       if (start && end) {
@@ -53,5 +77,5 @@ export function useTimeframeDefaults() {
         scroll: false,
       });
     }
-  }, [searchParams, pathname, router]);
+  }, [searchParams, pathname, router, payPeriodSettings]);
 }

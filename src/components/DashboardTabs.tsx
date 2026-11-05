@@ -172,6 +172,7 @@ export default function DashboardTabs({
           initialEntries={optimisticRecentEntries}
           isAdmin={isAdmin}
           locationSettings={locationSettings}
+          payPeriodSettings={payPeriodSettings}
           setOptimisticEntries={setOptimisticRecentEntries}
         />
       </TabsContent>
