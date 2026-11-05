@@ -51,7 +51,7 @@ export function TimeframeSelector({
   currentUserId,
   payPeriodSettings,
 }: TimeframeSelectorProps) {
-  useTimeframeDefaults();
+  useTimeframeDefaults(payPeriodSettings);
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
