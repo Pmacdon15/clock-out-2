@@ -91,7 +91,10 @@ const searchParams = {
   timeframe: "month",
 };
 
-function renderHome() {
+function renderHome(
+  params: Record<string, string | string[]> = searchParams,
+  payroll: unknown = "payroll",
+) {
   mocks.protect.mockResolvedValue({
     userId: "user_1",
     orgId: "org_1",
@@ -108,7 +111,7 @@ function renderHome() {
     Promise.resolve("pay_period_settings"),
   );
   mocks.getOrgPayRates.mockReturnValue(Promise.resolve("pay_rates"));
-  mocks.getOrgPayroll.mockReturnValue(Promise.resolve("payroll"));
+  mocks.getOrgPayroll.mockReturnValue(Promise.resolve(payroll));
   mocks.getOrgSites.mockReturnValue(Promise.resolve("sites"));
   mocks.getOrgAlertSettings.mockReturnValue(Promise.resolve("alerts"));
   mocks.getMyNotificationSettings.mockReturnValue(
@@ -133,7 +136,7 @@ function renderHome() {
   render(
     <Page
       params={Promise.resolve({})}
-      searchParams={Promise.resolve(searchParams)}
+      searchParams={Promise.resolve(params)}
     />,
   );
   return mocks.dashboardProps[mocks.dashboardProps.length - 1];
@@ -214,10 +217,51 @@ describe("Home page", () => {
     );
     await expect(props.payRatesPromise).resolves.toBe("pay_rates");
     await expect(props.payrollPromise).resolves.toBe("payroll");
+    // The payroll mock isn't an enabled result, so nothing earlier is loaded.
+    await expect(props.earlierEntriesPromise).resolves.toEqual({
+      ok: true,
+      value: [],
+    });
     await expect(props.orgIdPromise).resolves.toBe("org_1");
     await expect(props.userIdPromise).resolves.toBe("user_1");
 
     expect(mocks.has).toHaveBeenCalledWith({ feature: "reporting" });
     expect(mocks.has).toHaveBeenCalledWith({ role: "org:admin" });
+  });
+
+  describe("earlier entries for the deduction maximums", () => {
+    const enabled = {
+      ok: true,
+      value: { enabled: true, province: "SK", rates: [] },
+    };
+    const earlier = { start: "2026-01-01", end: "2026-02-28" };
+
+    it("loads the member's entries from Jan 1 when deductions are on", async () => {
+      const props = renderHome();
+      const withPayroll = renderHome(searchParams, enabled);
+      await expect(props.earlierEntriesPromise).resolves.toEqual({
+        ok: true,
+        value: [],
+      });
+      await expect(withPayroll.earlierEntriesPromise).resolves.toEqual({
+        userId: "user_2",
+        filters: { ...earlier, timezone: "America/Regina" },
+      });
+    });
+
+    it("loads the org's entries when viewing everyone", async () => {
+      const props = renderHome({ start: "2026-03-01", userId: "all" }, enabled);
+      await expect(props.earlierEntriesPromise).resolves.toEqual({
+        org: { ...earlier, timezone: undefined },
+      });
+    });
+
+    it("loads nothing without a start date", async () => {
+      const props = renderHome({}, enabled);
+      await expect(props.earlierEntriesPromise).resolves.toEqual({
+        ok: true,
+        value: [],
+      });
+    });
   });
 });

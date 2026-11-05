@@ -32,6 +32,14 @@ interface PaySummaryProps {
   members?: { id: string; name: string }[];
   /** When deductions are on, CPP/QPP, EI and net pay are estimated too. */
   payroll?: PayrollView | null;
+  /**
+   * Entries from earlier in the year (and their splits): they count toward
+   * the deductions' annual maximums but aren't shown or totalled.
+   */
+  earlier?: {
+    entries: TimeEntry[];
+    splitsByEntry: Map<TimeEntry, OvertimeSplit>;
+  } | null;
 }
 
 /** yyyy-MM-dd in the browser's zone, as the overtime split counts days. */
@@ -64,6 +72,7 @@ export function PaySummary({
   isViewingAll = false,
   members = [],
   payroll = null,
+  earlier = null,
 }: PaySummaryProps) {
   const summary = useMemo(() => {
     const byMember = new Map<string, PayBreakdown[]>();
@@ -93,16 +102,33 @@ export function PaySummary({
     let deductions: (PayrollDeductions & { province: ProvinceCode }) | null =
       null;
     if (payroll?.enabled) {
+      // Pay earlier in the year counts toward each member's annual maximums.
+      const earlierByMemberWeek = new Map<string, Map<string, number>>();
+      for (const entry of earlier?.entries ?? []) {
+        const rate = payRates.get(entry.user_id);
+        if (!rate) continue;
+        const split = earlier?.splitsByEntry.get(entry) as OvertimeSplit;
+        const week = weekStartOf(dayOf(entry.clock_in));
+        const weeks = earlierByMemberWeek.get(entry.user_id) ?? new Map();
+        weeks.set(
+          week,
+          (weeks.get(week) ?? 0) + computePay(split, rate).grossPay,
+        );
+        earlierByMemberWeek.set(entry.user_id, weeks);
+      }
+      const toPeriods = (weeks?: Map<string, number>) =>
+        Array.from(weeks ?? [], ([date, gross]) => ({ date, gross }));
       const jurisdiction = jurisdictionFor(payroll.province);
       const totals = sumDeductions(
         Array.from(
-          byMemberWeek.values(),
-          (weeks) =>
+          byMemberWeek,
+          ([userId, weeks]) =>
             computeDeductionsForPeriods(
-              Array.from(weeks, ([date, gross]) => ({ date, gross })),
+              toPeriods(weeks),
               payroll.rates,
               jurisdiction,
               52,
+              toPeriods(earlierByMemberWeek.get(userId)),
             ).total,
         ),
       );
@@ -126,7 +152,7 @@ export function PaySummary({
       unratedCount: unrated.size,
       deductions,
     };
-  }, [entries, splitsByEntry, payRates, members, payroll]);
+  }, [entries, splitsByEntry, payRates, members, payroll, earlier]);
 
   const ownRate = !isViewingAll ? summary.memberRows[0]?.rate : undefined;
 
@@ -202,7 +228,7 @@ export function PaySummary({
             </li>
           </ul>
           <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-            Annual maximums count only the hours shown here.
+            Annual maximums count all hours recorded in the app this year.
           </p>
         </div>
       )}

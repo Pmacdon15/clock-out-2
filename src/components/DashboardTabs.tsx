@@ -38,6 +38,7 @@ export default function DashboardTabs({
   payPeriodSettingsPromise,
   payRatesPromise,
   payrollPromise,
+  earlierEntriesPromise,
   sitesPromise,
   alertSettingsPromise,
   notificationSettingsPromise,
@@ -182,6 +183,7 @@ export default function DashboardTabs({
           <ViewHours
             breakSettings={breakSettings}
             currentUserIdPromise={userIdPromise}
+            earlierEntriesPromise={earlierEntriesPromise}
             endDatePromise={endDatePromise}
             entries={optimisticEntries}
             isAdmin={isAdmin}

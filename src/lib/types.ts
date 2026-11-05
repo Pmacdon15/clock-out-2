@@ -204,6 +204,10 @@ export interface DashboardTabsProps {
   >;
   /** Optional CPP/QPP and EI deduction settings plus the CRA rates. */
   payrollPromise?: Promise<SerializableResult<PayrollView, { reason: string }>>;
+  /** Entries from earlier in the year, counted toward deduction maximums. */
+  earlierEntriesPromise?: Promise<
+    SerializableResult<TimeEntry[], { reason: string }>
+  >;
   sitesPromise?: Promise<SerializableResult<SiteData[], { reason: string }>>;
   alertSettingsPromise?: Promise<
     SerializableResult<AlertSettingsData, { reason: string }>
@@ -261,6 +265,13 @@ export interface ViewHoursProps {
   payRates?: PayRateData[];
   /** Deductions are estimated beside gross pay when enabled. */
   payroll?: PayrollView | null;
+  /**
+   * Entries from Jan 1 up to the timeframe's start, so the deductions'
+   * annual maximums count every hour recorded this year.
+   */
+  earlierEntriesPromise?: Promise<
+    SerializableResult<TimeEntry[], { reason: string }>
+  >;
   membersPromise?: Promise<
     {
       id: string;

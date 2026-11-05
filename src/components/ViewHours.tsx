@@ -28,6 +28,7 @@ export default function ViewHours({
   payPeriodSettings,
   payRates,
   payroll,
+  earlierEntriesPromise,
   membersPromise,
   orgTimeEntriesPromise,
   timeOffPromise,
@@ -44,6 +45,13 @@ export default function ViewHours({
   const orgTimeEntriesResult = use(orgTimeEntriesPromise);
   const timeOffResult = timeOffPromise ? use(timeOffPromise) : null;
   const timeOffRequests = timeOffResult?.ok ? timeOffResult.value : [];
+  const earlierEntriesResult = earlierEntriesPromise
+    ? use(earlierEntriesPromise)
+    : null;
+  const earlierEntries = useMemo(
+    () => (earlierEntriesResult?.ok ? earlierEntriesResult.value : []),
+    [earlierEntriesResult],
+  );
 
   const startDate =
     (startDatePromise ? use(startDatePromise) : null) ??
@@ -129,6 +137,22 @@ export default function ViewHours({
           computeEntryOvertime(displayEntries, overtimeSettings, breakSettings))
         : undefined,
     [rates, overtimeByEntry, displayEntries, overtimeSettings, breakSettings],
+  );
+
+  // The year's earlier entries only feed the deductions' year-to-date.
+  const earlier = useMemo(
+    () =>
+      earlierEntries.length > 0
+        ? {
+            entries: earlierEntries,
+            splitsByEntry: computeEntryOvertime(
+              earlierEntries,
+              overtimeSettings,
+              breakSettings,
+            ),
+          }
+        : null,
+    [earlierEntries, overtimeSettings, breakSettings],
   );
 
   // Previous total hours calculation placeholder
@@ -251,6 +275,7 @@ export default function ViewHours({
           )}
           {splitsByEntry && (
             <PaySummary
+              earlier={earlier}
               entries={displayEntries}
               isViewingAll={isViewingAll}
               members={members}

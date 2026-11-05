@@ -26,6 +26,7 @@ import {
   getTimeOffAllowances,
   getTimeOffRequests,
 } from "@/lib/dal";
+import { earlierInYearRange } from "@/lib/payroll";
 import { getOrgPayroll } from "@/lib/payroll-dal";
 import { SCHEDULING_FEATURE, TIME_OFF_FEATURE } from "@/lib/plan-features";
 import { parseParams } from "@/lib/utils";
@@ -33,6 +34,23 @@ import { parseParams } from "@/lib/utils";
 export default function Home(props: PageProps<"/">) {
   const authPromise = auth.protect();
   const hasPromise = authPromise.then((data) => data.has);
+  const payrollPromise = getOrgPayroll();
+  // With deductions on, the year's earlier entries count toward the annual
+  // maximums, so a short timeframe doesn't start the year-to-date at zero.
+  const earlierEntriesPromise = Promise.all([
+    props.searchParams,
+    payrollPromise,
+  ]).then(([p, payroll]) => {
+    const range = earlierInYearRange(parseParams(p.start));
+    if (!range || !payroll.ok || !payroll.value.enabled) {
+      return { ok: true as const, value: [] };
+    }
+    const userId = parseParams(p.userId);
+    const filters = { ...range, timezone: parseParams(p.timezone) };
+    return userId === "all"
+      ? getOrgTimeEntries(filters)
+      : getTimeEntries(userId, filters);
+  });
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-3 py-4 sm:px-4 sm:py-8">
       <MainPageHeader />
@@ -45,6 +63,7 @@ export default function Home(props: PageProps<"/">) {
             <DashboardTabs
               alertSettingsPromise={getOrgAlertSettings()}
               breakSettingsPromise={getOrgBreakSettings()}
+              earlierEntriesPromise={earlierEntriesPromise}
               defaultTabPromise={props.searchParams.then((p) =>
                 parseParams(p.defaultTab),
               )}
@@ -84,7 +103,7 @@ export default function Home(props: PageProps<"/">) {
               overtimeSettingsPromise={getOrgOvertimeSettings()}
               payPeriodSettingsPromise={getOrgPayPeriodSettings()}
               payRatesPromise={getOrgPayRates()}
-              payrollPromise={getOrgPayroll()}
+              payrollPromise={payrollPromise}
               orgTimeEntriesPromise={props.searchParams.then((p) =>
                 getOrgTimeEntries({
                   start: parseParams(p.start),

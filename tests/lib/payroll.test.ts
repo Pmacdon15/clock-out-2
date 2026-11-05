@@ -4,6 +4,7 @@ import {
   computePeriodDeductions,
   DEFAULT_PROVINCE,
   EMPTY_YEAR_TO_DATE,
+  earlierInYearRange,
   formatRate,
   isProvinceCode,
   jurisdictionFor,
@@ -225,6 +226,47 @@ describe("computeDeductionsForPeriods", () => {
     expect(unratedPeriods).toBe(1);
     expect(total.pension).toBe(4230.45 * 2);
     expect(total.ei).toBe(Math.round(1123.07 * 2 * 100) / 100);
+  });
+});
+
+describe("computeDeductionsForPeriods with earlier periods", () => {
+  it("counts earlier periods toward the maximums but not the total", () => {
+    const { total, unratedPeriods } = computeDeductionsForPeriods(
+      [{ date: "2026-06-01", gross: 10000 }],
+      [CA],
+      "CA",
+      1,
+      [
+        // Before any rates: skipped, and not reported as unrated.
+        { date: "2025-06-02", gross: 1000 },
+        { date: "2026-06-01", gross: 90000 },
+      ],
+    );
+    expect(unratedPeriods).toBe(0);
+    expect(total.gross).toBe(10000);
+    // $90,000 earlier already reached the CPP and EI maximums.
+    expect(total.pension).toBe(0);
+    expect(total.ei).toBe(0);
+  });
+});
+
+describe("earlierInYearRange", () => {
+  it("runs from Jan 1 of the start's pay-week year to the day before", () => {
+    expect(earlierInYearRange("2026-03-01")).toEqual({
+      start: "2026-01-01",
+      end: "2026-02-28",
+    });
+    // Thu Jan 1, 2026 is in the week of Mon Dec 29, 2025.
+    expect(earlierInYearRange("2026-01-01T00:00:00")).toEqual({
+      start: "2025-01-01",
+      end: "2025-12-31",
+    });
+  });
+
+  it("is null without a start or an earlier day", () => {
+    expect(earlierInYearRange(undefined)).toBeNull();
+    // Mon Jan 1, 2029 starts both its week and its year.
+    expect(earlierInYearRange("2029-01-01")).toBeNull();
   });
 });
 

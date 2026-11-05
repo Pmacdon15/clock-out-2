@@ -12,6 +12,8 @@
  * QPIP and other deductions are not calculated.
  */
 
+import { weekStartOf } from "./overtime";
+
 export const PROVINCES = [
   { code: "AB", name: "Alberta" },
   { code: "BC", name: "British Columbia" },
@@ -291,8 +293,17 @@ export function computeDeductionsForPeriods(
   rows: readonly PayrollRates[],
   jurisdiction: PayrollJurisdiction,
   periodsPerYear: number,
+  /**
+   * Periods paid earlier in the year: they count toward the year-to-date (so
+   * the annual maximums apply) but are left out of the total. On the same
+   * date, an earlier period is taken before a counted one.
+   */
+  earlier: readonly { date: string; gross: number }[] = [],
 ): { total: PayrollDeductions; unratedPeriods: number } {
-  const sorted = [...periods].sort((a, b) => a.date.localeCompare(b.date));
+  const sorted = [
+    ...earlier.map((period) => ({ ...period, counted: false })),
+    ...periods.map((period) => ({ ...period, counted: true })),
+  ].sort((a, b) => a.date.localeCompare(b.date));
   const results: PayrollDeductions[] = [];
   let ytd = EMPTY_YEAR_TO_DATE;
   let year = "";
@@ -305,7 +316,7 @@ export function computeDeductionsForPeriods(
     }
     const rates = selectPayrollRates(rows, jurisdiction, period.date);
     if (!rates) {
-      unratedPeriods += 1;
+      if (period.counted) unratedPeriods += 1;
       continue;
     }
     const next = computePeriodDeductions(
@@ -315,9 +326,27 @@ export function computeDeductionsForPeriods(
       ytd,
     );
     ytd = next.ytd;
-    results.push(next.deductions);
+    if (period.counted) results.push(next.deductions);
   }
   return { total: sumDeductions(results), unratedPeriods };
+}
+
+/**
+ * The days before `start` that count toward its year-to-date: from Jan 1 of
+ * the year its Monday–Sunday pay week falls in, up to the day before `start`.
+ * Null when there is no start (everything is loaded) or no earlier day.
+ */
+export function earlierInYearRange(
+  start: string | undefined,
+): { start: string; end: string } | null {
+  if (!start) return null;
+  const day = start.slice(0, 10);
+  const [y, m, d] = day.split("-").map(Number);
+  const before = new Date(Date.UTC(y, m - 1, d - 1, 12))
+    .toISOString()
+    .slice(0, 10);
+  const from = `${weekStartOf(day).slice(0, 4)}-01-01`;
+  return before < from ? null : { start: from, end: before };
 }
 
 /** "5.95%" */

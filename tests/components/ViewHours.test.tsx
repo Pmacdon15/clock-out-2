@@ -398,6 +398,41 @@ describe("ViewHours pay", () => {
     expect(latest("TimesheetExport").payRates).toBe(rates);
   });
 
+  it("passes the year's earlier entries, split, for the deduction maximums", () => {
+    const earlierEntry = makeEntry({
+      id: 3,
+      user_id: "me",
+      clock_in: new Date("2026-02-02T09:00:00Z"),
+      clock_out: new Date("2026-02-02T17:00:00Z"),
+    });
+    renderView({
+      payRates,
+      earlierEntriesPromise: resolved({
+        ok: true as const,
+        value: [earlierEntry],
+      }),
+    });
+    const earlier = latest("PaySummary").earlier as {
+      entries: unknown[];
+      splitsByEntry: Map<unknown, { regularHours: number }>;
+    };
+    expect(earlier.entries).toEqual([earlierEntry]);
+    expect(earlier.splitsByEntry.get(earlierEntry)?.regularHours).toBe(8);
+  });
+
+  it("passes no earlier entries when there are none or they failed", () => {
+    renderView({ payRates });
+    expect(latest("PaySummary").earlier).toBeNull();
+    renderView({
+      payRates,
+      earlierEntriesPromise: resolved({
+        ok: false as const,
+        error: { reason: "nope" },
+      }),
+    });
+    expect(latest("PaySummary").earlier).toBeNull();
+  });
+
   it("reuses the overtime splits when overtime is tracked", () => {
     renderView({
       payRates,

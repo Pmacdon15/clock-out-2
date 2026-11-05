@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { PaySummary } from "@/components/ViewHours/PaySummary";
 import { computeEntryOvertime } from "@/lib/overtime";
@@ -41,9 +41,18 @@ function renderSummary(
   entries: TimeEntry[],
   isViewingAll = true,
   payroll: PayrollView | null = null,
+  earlierEntries: TimeEntry[] = [],
 ) {
   render(
     <PaySummary
+      earlier={
+        earlierEntries.length > 0
+          ? {
+              entries: earlierEntries,
+              splitsByEntry: computeEntryOvertime(earlierEntries, settings),
+            }
+          : null
+      }
       entries={entries}
       isViewingAll={isViewingAll}
       members={members}
@@ -144,6 +153,25 @@ describe("PaySummary", () => {
       expect(screen.getByTestId("deduction-ei")).toHaveTextContent("$10.11");
       expect(screen.getByTestId("net-pay")).toHaveTextContent("$585.00");
       expect(within(block).getByText("CPP")).toBeVisible();
+    });
+
+    it("count pay from earlier in the year toward the annual maximums", () => {
+      // A $5 EI maximum: Ada's $220 week (EI $3.59) came earlier in the year,
+      // so only $1.41 is left for her $160 week on screen.
+      const [ca] = SEED_PAYROLL_RATES;
+      const lowMax = payroll({
+        rates: [{ ...ca, ei: { ...ca.ei, maxEmployeePremium: 5 } }],
+      });
+      renderSummary([adaNextWeek], false, lowMax);
+      expect(screen.getByTestId("deduction-ei")).toHaveTextContent("$2.61");
+      cleanup();
+      // Linus has no rate, so his earlier hours don't count.
+      renderSummary([adaNextWeek], false, lowMax, [ada, linus]);
+      expect(screen.getByTestId("deduction-ei")).toHaveTextContent("$1.41");
+      expect(screen.getByTestId("gross-pay")).toHaveTextContent("$160.00");
+      expect(screen.getByTestId("pay-deductions")).toHaveTextContent(
+        "Annual maximums count all hours recorded in the app this year.",
+      );
     });
 
     it("use QPP labels and Quebec rates in Quebec", () => {
