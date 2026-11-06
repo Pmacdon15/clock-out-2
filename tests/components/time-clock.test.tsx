@@ -19,7 +19,6 @@ const mocks = vi.hoisted(() => ({
   clockOutAction: vi.fn(),
   startBreakAction: vi.fn(),
   endBreakAction: vi.fn(),
-  useTimeframeDefaults: vi.fn(),
   captureCurrentPosition: vi.fn(),
   toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
 }));
@@ -32,9 +31,6 @@ vi.mock("@/lib/actions", () => ({
 }));
 vi.mock("@/lib/geolocation", () => ({
   captureCurrentPosition: mocks.captureCurrentPosition,
-}));
-vi.mock("@/hooks/useTimeframeDefaults", () => ({
-  useTimeframeDefaults: mocks.useTimeframeDefaults,
 }));
 vi.mock("@/components/DeleteConfirmDialog", () => ({
   DeleteConfirmDialog: ({
@@ -86,9 +82,8 @@ afterEach(() => {
 });
 
 describe("TimeClock when clocked out", () => {
-  it("sets up timeframe defaults and offers to clock in", () => {
+  it("offers to clock in", () => {
     renderClock();
-    expect(mocks.useTimeframeDefaults).toHaveBeenCalled();
     expect(screen.getByText("Offline")).toBeInTheDocument();
     expect(screen.getByText("Ready to start your shift?")).toBeInTheDocument();
   });

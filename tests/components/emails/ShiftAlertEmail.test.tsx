@@ -14,7 +14,7 @@ describe("ShiftAlertEmail", () => {
       ShiftAlertEmail({
         title: "Still clocked in?",
         body: "You've been clocked in for 10h 5m.",
-        actionUrl: "https://clock.test/?defaultTab=time-clock",
+        actionUrl: "https://clock.test/",
         appUrl: "https://clock.test",
       }),
     );
@@ -29,8 +29,8 @@ describe("ShiftAlertEmail", () => {
     const links = Array.from(doc.querySelectorAll("a")).map((a) =>
       a.getAttribute("href"),
     );
-    expect(links).toContain("https://clock.test/?defaultTab=time-clock");
-    expect(links).toContain("https://clock.test/?defaultTab=notifications");
+    expect(links).toContain("https://clock.test/");
+    expect(links).toContain("https://clock.test/notifications");
   });
 
   it("lists detail lines when given", async () => {
@@ -38,7 +38,7 @@ describe("ShiftAlertEmail", () => {
       ShiftAlertEmail({
         title: "Your schedule for Nov 2 – Nov 8",
         body: "2 shifts",
-        actionUrl: "https://clock.test/?defaultTab=schedule",
+        actionUrl: "https://clock.test/schedule",
         appUrl: "https://clock.test",
         lines: [
           "Mon, Nov 2, 9:00 AM – 5:00 PM",

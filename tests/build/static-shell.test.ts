@@ -63,7 +63,18 @@ describe.skipIf(!built && !process.env.REQUIRE_BUILD)(
       manifest.routes[route] ?? manifest.dynamicRoutes[route];
 
     it("built the app's pages", () => {
-      for (const route of ["/", "/plans", "/privacy", "/tos"]) {
+      for (const route of [
+        "/",
+        "/hours",
+        "/notifications",
+        "/schedule",
+        "/time-off",
+        "/settings",
+        "/welcome",
+        "/plans",
+        "/privacy",
+        "/tos",
+      ]) {
         expect(pages).toContain(route);
       }
     });
@@ -99,6 +110,23 @@ describe.skipIf(!built && !process.env.REQUIRE_BUILD)(
         expect(html).toMatch(/<h1[\s>]/);
       },
     );
+
+    it("puts the dashboard's page links in every dashboard shell", () => {
+      for (const route of [
+        "/",
+        "/hours",
+        "/notifications",
+        "/schedule",
+        "/time-off",
+        "/settings",
+      ]) {
+        const html = htmlFor(route) ?? "";
+        expect(html, route).toContain('aria-label="Dashboard"');
+        for (const href of ["/hours", "/schedule", "/time-off"]) {
+          expect(html, `${route} links to ${href}`).toContain(`href="${href}"`);
+        }
+      }
+    });
 
     it("keeps the public pages fully static", () => {
       for (const route of ["/plans", "/privacy", "/tos"]) {

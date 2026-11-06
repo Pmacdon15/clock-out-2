@@ -33,7 +33,7 @@ export const DIGEST_HOUR = 17;
 /** Zone used when we don't know the person's (shown in the text). */
 export const FALLBACK_TIMEZONE = "UTC";
 
-const SCHEDULE_URL = "/?defaultTab=schedule";
+const SCHEDULE_URL = "/schedule";
 
 /** A person's zone, or the fallback when it's unknown or invalid. */
 export function resolveTimezone(...candidates: (string | null | undefined)[]): {
@@ -357,7 +357,7 @@ export function describeUpcomingShift(
   return {
     title: `Your shift starts at ${time}`,
     body: `Heads up: you're scheduled ${range}, starting in ${startsIn}.${note}`,
-    url: "/?defaultTab=time-clock",
+    url: "/",
     tag: `upcoming:${shift.id}`,
   };
 }

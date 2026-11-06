@@ -13,7 +13,6 @@ import {
 } from "lucide-react";
 import { startTransition, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { useTimeframeDefaults } from "@/hooks/useTimeframeDefaults";
 import {
   clockInAction,
   clockOutAction,
@@ -46,7 +45,6 @@ import type {
   BreakSettingsData,
   BreakType,
   LocationSettingsData,
-  PayPeriodSettingsData,
   TimeEntry,
   TimeEntryBreak,
 } from "@/lib/types";
@@ -128,8 +126,6 @@ interface ManageHoursProps {
   setOptimisticEntries: (action: EntryAction) => void;
   breakSettings?: BreakSettingsData | null;
   locationSettings?: LocationSettingsData | null;
-  /** Lets the Hours range default to the current pay period. */
-  payPeriodSettings?: PayPeriodSettingsData | null;
 }
 
 export default function TimeClock({
@@ -138,9 +134,7 @@ export default function TimeClock({
   setOptimisticEntries,
   breakSettings,
   locationSettings,
-  payPeriodSettings,
 }: ManageHoursProps) {
-  useTimeframeDefaults(payPeriodSettings);
   const [elapsedTime, setElapsedTime] = useState<string>("");
   const [breakElapsed, setBreakElapsed] = useState<string>("");
   const [breakRemaining, setBreakRemaining] = useState<string>("");

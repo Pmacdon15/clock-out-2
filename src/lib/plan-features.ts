@@ -5,10 +5,14 @@ import { clerkClient } from "@clerk/nextjs/server";
  * exist in the Clerk dashboard and be attached to the plans that include it.
  */
 
-/** Unlocks the Schedule tab: publishing shifts, reminders and digests. */
+/** Unlocks location capture and geofencing on punches. */
+export const GEOFENCING_FEATURE = "geofencing" as const;
+/** Unlocks weekly email reports. */
+export const REPORTING_FEATURE = "reporting" as const;
+/** Unlocks the Schedule page: publishing shifts, reminders and digests. */
 export const SCHEDULING_FEATURE = "scheduling" as const;
 
-/** Unlocks the Time Off tab: requests, approvals and PTO allowances. */
+/** Unlocks the Time Off page: requests, approvals and PTO allowances. */
 export const TIME_OFF_FEATURE = "time_off" as const;
 
 export const SCHEDULING_UPGRADE_REASON =

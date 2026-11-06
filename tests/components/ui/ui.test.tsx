@@ -8,7 +8,6 @@ import {
   MailIcon,
   ShieldIcon,
 } from "@/components/ui/Icons";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 describe("Card", () => {
   it("merges classes and forwards refs and props", () => {
@@ -80,75 +79,5 @@ describe("Icons", () => {
     const { container } = render(<Icon className="h-4" />);
     expect(screen.getByTitle(title)).toBeInTheDocument();
     expect(container.querySelector("svg")).toHaveClass("h-4");
-  });
-});
-
-function TabsExample(props: Partial<Parameters<typeof Tabs>[0]>) {
-  return (
-    <Tabs className="tabs" {...props}>
-      <TabsList className="list">
-        <TabsTrigger className="t" value="a">
-          A
-        </TabsTrigger>
-        <TabsTrigger value="b">B</TabsTrigger>
-      </TabsList>
-      <TabsContent className="c" value="a">
-        Panel A
-      </TabsContent>
-      <TabsContent value="b">Panel B</TabsContent>
-    </Tabs>
-  );
-}
-
-describe("Tabs", () => {
-  it("shows the default tab and switches on click", () => {
-    const onValueChange = vi.fn();
-    render(<TabsExample defaultValue="a" onValueChange={onValueChange} />);
-    expect(screen.getByText("Panel A")).toBeInTheDocument();
-    expect(screen.queryByText("Panel B")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "A" })).toHaveClass("bg-white");
-
-    fireEvent.click(screen.getByRole("button", { name: "B" }));
-    expect(screen.getByText("Panel B")).toBeInTheDocument();
-    expect(onValueChange).toHaveBeenCalledWith("b");
-  });
-
-  it("works without a change handler", () => {
-    render(<TabsExample defaultValue="a" />);
-    fireEvent.click(screen.getByRole("button", { name: "B" }));
-    expect(screen.getByText("Panel B")).toBeInTheDocument();
-  });
-
-  it("follows the controlled value", () => {
-    const { rerender } = render(<TabsExample value="b" />);
-    expect(screen.getByText("Panel B")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "A" }));
-    expect(screen.getByText("Panel B")).toBeInTheDocument();
-    rerender(<TabsExample value="a" />);
-    expect(screen.getByText("Panel A")).toBeInTheDocument();
-  });
-
-  it("keeps a long tab row inside narrow screens by scrolling it", () => {
-    render(<TabsExample defaultValue="a" />);
-    const list = screen.getByRole("button", { name: "A" }).parentElement;
-    // Without these the row widens the whole page on phones.
-    expect(list).toHaveClass("max-w-full", "overflow-x-auto", "justify-start");
-    expect(list).not.toHaveClass("justify-center");
-    expect(screen.getByRole("button", { name: "A" })).toHaveClass("shrink-0");
-  });
-
-  it("shows nothing when no tab is selected", () => {
-    render(<TabsExample />);
-    expect(screen.queryByText(/Panel/)).not.toBeInTheDocument();
-  });
-
-  it("requires a Tabs parent", () => {
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    expect(() => render(<TabsTrigger value="a">A</TabsTrigger>)).toThrow(
-      "TabsTrigger must be used within Tabs",
-    );
-    expect(() => render(<TabsContent value="a">A</TabsContent>)).toThrow(
-      "TabsContent must be used within Tabs",
-    );
   });
 });

@@ -144,7 +144,7 @@ describe("describeShiftChange", () => {
     expect(describeShiftChange("added", s, REGINA)).toEqual({
       title: "New shift: Mon, Nov 2",
       body: "You're scheduled Mon, Nov 2, 9:00 AM – 5:00 PM. Note: Front desk",
-      url: "/?defaultTab=schedule",
+      url: "/schedule",
       tag: "shift-added:7",
     });
   });
@@ -153,7 +153,7 @@ describe("describeShiftChange", () => {
     expect(describeShiftChange("changed", s, REGINA)).toEqual({
       title: "Shift changed: Mon, Nov 2",
       body: "Your shift is now Mon, Nov 2, 9:00 AM – 5:00 PM. Note: Front desk",
-      url: "/?defaultTab=schedule",
+      url: "/schedule",
       tag: "shift-changed:7",
     });
   });
@@ -164,7 +164,7 @@ describe("describeShiftChange", () => {
     ).toEqual({
       title: "Shift cancelled: Mon, Nov 2",
       body: "Your shift Mon, Nov 2, 9:00 AM – 5:00 PM was removed from the schedule.",
-      url: "/?defaultTab=schedule",
+      url: "/schedule",
       tag: "shift-removed:7",
     });
   });
@@ -309,7 +309,7 @@ describe("describeWeeklyDigest", () => {
     expect(message).toEqual({
       title: "Your schedule for Nov 2 – Nov 8",
       body: "2 shifts, 15.5h scheduled next week. First up: Mon, Nov 2, 9:00 AM – 5:00 PM (Opening).",
-      url: "/?defaultTab=schedule",
+      url: "/schedule",
       tag: "week:2026-11-02",
       lines: [
         "Mon, Nov 2, 9:00 AM – 5:00 PM (Opening)",
@@ -462,7 +462,7 @@ describe("upcoming shift reminders", () => {
     expect(describeUpcomingShift(soon, REGINA, now)).toEqual({
       title: "Your shift starts at 9:00 AM",
       body: "Heads up: you're scheduled Mon, Nov 2, 9:00 AM – 5:00 PM, starting in 1 hour.",
-      url: "/?defaultTab=time-clock",
+      url: "/",
       tag: `upcoming:${soon.id}`,
     });
     const msg = describeUpcomingShift(

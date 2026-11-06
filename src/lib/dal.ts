@@ -81,6 +81,7 @@ import {
 import { isValidHourlyRate, isValidOvertimeMultiplier } from "./pay";
 import { isValidPayPeriodInput } from "./pay-period";
 import {
+  GEOFENCING_FEATURE,
   SCHEDULING_FEATURE,
   SCHEDULING_UPGRADE_REASON,
   TIME_OFF_FEATURE,
@@ -124,9 +125,6 @@ import type {
 import { getProcessedMembers, isOverMemberShipLimit } from "./utils-clerk";
 
 export type { SerializableResult, TimeEntry, TimeEntryBreak };
-
-/** Clerk billing feature slug that unlocks location capture and geofencing. */
-const GEOFENCING_FEATURE = "geofencing" as const;
 
 /**
  * Resolves what should be stored with a punch, and whether the punch is

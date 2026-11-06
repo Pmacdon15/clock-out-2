@@ -20,8 +20,19 @@ describe("route discovery", () => {
     expect(pageFiles.length).toBeGreaterThan(0);
   });
 
-  test("finds the root page", () => {
-    expect(pageFiles.map((f) => displayPath(f))).toContain("src/app/page.tsx");
+  test("finds the dashboard pages", () => {
+    const pages = pageFiles.map((f) => displayPath(f));
+    for (const page of [
+      "src/app/(dashboard)/page.tsx",
+      "src/app/(dashboard)/hours/page.tsx",
+      "src/app/(dashboard)/notifications/page.tsx",
+      "src/app/(dashboard)/schedule/page.tsx",
+      "src/app/(dashboard)/time-off/page.tsx",
+      "src/app/(dashboard)/settings/page.tsx",
+      "src/app/welcome/page.tsx",
+    ]) {
+      expect(pages).toContain(page);
+    }
   });
 });
 

@@ -466,8 +466,8 @@ export function describeAlert(
 ): NotificationMessage {
   const { forAdmin, memberName, orgId } = audience;
   const userId = alertUserId(alert);
-  const memberUrl = `/?defaultTab=time-clock&orgId=${encodeURIComponent(orgId)}`;
-  const adminUrl = `/?defaultTab=view&orgId=${encodeURIComponent(orgId)}&userId=${encodeURIComponent(userId)}`;
+  const memberUrl = `/?orgId=${encodeURIComponent(orgId)}`;
+  const adminUrl = `/hours?orgId=${encodeURIComponent(orgId)}&userId=${encodeURIComponent(userId)}`;
   const url = forAdmin ? adminUrl : memberUrl;
   const tag = forAdmin ? `${alert.key}:admin` : alert.key;
 

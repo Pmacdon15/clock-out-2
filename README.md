@@ -236,11 +236,11 @@ Devices are stored per user in `fcm_tokens`. Each visit to the dashboard refresh
    - `FIREBASE_SERVICE_ACCOUNT` (secret)
    - `NEXT_PUBLIC_FIREBASE_API_KEY`, `NEXT_PUBLIC_FIREBASE_PROJECT_ID`, `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID`, `NEXT_PUBLIC_FIREBASE_APP_ID`
    - `NEXT_PUBLIC_FIREBASE_VAPID_KEY` (only if you didn't import the existing key pair)
-5. Redeploy. The Notifications tab's **Turn on for this device** now registers with FCM.
+5. Redeploy. The Notifications page's **Turn on for this device** now registers with FCM.
 
 **Legacy Web Push.** Keep `NEXT_PUBLIC_VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` set: devices that subscribed before FCM keep receiving alerts over plain Web Push (`push_subscriptions`) until they next open the app and move over, and browsers where Firebase messaging isn't supported still use it. A device is only ever notified on one channel.
 
-**iPhone / iPad (iOS 16.4+):** Apple only allows push for web apps installed to the Home Screen. In Safari tap **Share → Add to Home Screen**, open Clock Out from the new icon, go to **Notifications → Turn on for this device**, and allow notifications. The Notifications tab walks people through this.
+**iPhone / iPad (iOS 16.4+):** Apple only allows push for web apps installed to the Home Screen. In Safari tap **Share → Add to Home Screen**, open Clock Out from the new icon, go to **Notifications → Turn on for this device**, and allow notifications. The Notifications page walks people through this.
 
 **No on-device scheduled backup.** A web app can't schedule a local notification for later (the Notification Triggers API never shipped), so every alert is sent from the server at its exact time.
 

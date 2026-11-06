@@ -71,7 +71,7 @@ describe("WeeklyReportEmail", () => {
       customEnd: "2026-01-07",
     });
     const expected =
-      "https://clockout.test/?defaultTab=view&timeframe=week&userId=user_1&orgId=org_1&week=2&month=0&year=2026";
+      "https://clockout.test/hours?timeframe=week&userId=user_1&orgId=org_1&week=2&month=0&year=2026";
     expect(dashboardLinks(doc)).toEqual([expected, expected]);
   });
 
@@ -84,14 +84,14 @@ describe("WeeklyReportEmail", () => {
       customEnd: "2026-01-15",
     });
     expect(dashboardLinks(doc)[0]).toBe(
-      "https://clockout.test/?defaultTab=view&timeframe=custom&start=2026-01-01&end=2026-01-15",
+      "https://clockout.test/hours?timeframe=custom&start=2026-01-01&end=2026-01-15",
     );
   });
 
   it("omits missing custom range params", async () => {
     const doc = await renderEmail({ ...base, timeframe: "custom" });
     expect(dashboardLinks(doc)[0]).toBe(
-      "https://clockout.test/?defaultTab=view&timeframe=custom",
+      "https://clockout.test/hours?timeframe=custom",
     );
   });
 
@@ -127,7 +127,7 @@ describe("WeeklyReportEmail", () => {
     expect(text).toContain("No hours logged in this period.");
     expect(doc.querySelector("img")).toBeNull();
     expect(dashboardLinks(doc)[0]).toBe(
-      "https://clockout.patmac.ca/?defaultTab=view&timeframe=week",
+      "https://clockout.patmac.ca/hours?timeframe=week",
     );
   });
 

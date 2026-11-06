@@ -27,14 +27,14 @@ describe("Web App Manifest", () => {
         name: "Clock In / Clock Out",
         short_name: "Punch Clock",
         description: "Open the time clock directly",
-        url: "/?defaultTab=time-clock",
+        url: "/",
         icons: [{ src: "/icon-192.png", sizes: "192x192" }],
       },
       {
         name: "View Hours",
         short_name: "Hours",
         description: "View logged shifts and hours",
-        url: "/?defaultTab=view",
+        url: "/hours",
         icons: [{ src: "/icon-192.png", sizes: "192x192" }],
       },
     ]);
