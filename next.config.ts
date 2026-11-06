@@ -6,6 +6,7 @@ const nextConfig: NextConfig = {
   reactCompiler: true,
   typedRoutes: true,
   cacheComponents: true,
+  partialPrefetching: true,
   headers() {
     return Promise.resolve([
       { source: "/:path*", headers: [...securityHeaders] },
