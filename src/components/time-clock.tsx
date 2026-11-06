@@ -88,6 +88,13 @@ const settle = async (pending: Promise<unknown>) => {
 /** What the "back to work" dialog says about the break that just ran out. */
 type ExpiredBreak = { label: string; limitMinutes: number };
 
+/**
+ * How long the "back to work" dialog takes to cover the card. The break view
+ * swaps to the break picker only after that, so the card's change in height
+ * happens under the overlay instead of as a jump beside the opening dialog.
+ */
+const BACK_TO_WORK_COVER_MS = 200;
+
 const formatDurationMs = (diffMs: number) => {
   const totalMinutes = Math.floor(Math.max(0, diffMs) / (1000 * 60));
   const hours = Math.floor(totalMinutes / 60);
@@ -136,7 +143,9 @@ export default function TimeClock({
   const [elapsedTime, setElapsedTime] = useState<string>("");
   const [breakElapsed, setBreakElapsed] = useState<string>("");
   const [breakRemaining, setBreakRemaining] = useState<string>("");
+  // Kept after the dialog closes so its text doesn't empty mid fade-out.
   const [expiredBreak, setExpiredBreak] = useState<ExpiredBreak | null>(null);
+  const [backToWorkOpen, setBackToWorkOpen] = useState(false);
   const [confirmingClockOut, setConfirmingClockOut] = useState(false);
   // The break already being auto-ended, so the ticker fires it only once.
   const autoEndedBreakId = useRef<number | null>(null);
@@ -284,20 +293,26 @@ export default function TimeClock({
         (deadlineMs - new Date(brk.break_start).getTime()) / 60_000,
       ),
     });
+    setBackToWorkOpen(true);
 
-    startTransition(async () => {
-      setOptimisticEntries({
-        type: "UPDATE",
-        payload: {
-          id: activeEntry.id,
-          breaks: breaks.map((b) =>
-            b.id === brk.id ? { ...b, break_end: new Date(deadlineMs) } : b,
-          ),
-          updated_at: new Date(),
-        },
+    // The server caps the break at its deadline, so waiting for the dialog
+    // to cover the card changes nothing on the record.
+    const entryId = activeEntry.id;
+    setTimeout(() => {
+      startTransition(async () => {
+        setOptimisticEntries({
+          type: "UPDATE",
+          payload: {
+            id: entryId,
+            breaks: breaks.map((b) =>
+              b.id === brk.id ? { ...b, break_end: new Date(deadlineMs) } : b,
+            ),
+            updated_at: new Date(),
+          },
+        });
+        await settle(autoEnd.mutateAsync());
       });
-      await settle(autoEnd.mutateAsync());
-    });
+    }, BACK_TO_WORK_COVER_MS);
   }
 
   const handleStartBreak = () => {
@@ -669,11 +684,7 @@ export default function TimeClock({
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog
-        // There is no trigger, so the only change is the member closing it.
-        onOpenChange={() => setExpiredBreak(null)}
-        open={expiredBreak !== null}
-      >
+      <AlertDialog onOpenChange={setBackToWorkOpen} open={backToWorkOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>

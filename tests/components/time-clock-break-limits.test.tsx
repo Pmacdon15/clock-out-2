@@ -115,6 +115,14 @@ describe("TimeClock break limits", () => {
       settings(),
     );
 
+    // The dialog opens first; the break view swaps once it covers the card.
+    expect(
+      screen.getByText("Break's over — time to get back to work"),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("running-break")).toBeInTheDocument();
+    expect(setOptimisticEntries).not.toHaveBeenCalled();
+
+    await waitFor(() => expect(setOptimisticEntries).toHaveBeenCalled());
     expect(setOptimisticEntries).toHaveBeenCalledWith({
       type: "UPDATE",
       payload: {
@@ -169,7 +177,7 @@ describe("TimeClock break limits", () => {
     await waitFor(() => expect(mocks.endBreakAction).toHaveBeenCalledTimes(1));
   });
 
-  it("leaves the shift's earlier breaks untouched when auto-ending", () => {
+  it("leaves the shift's earlier breaks untouched when auto-ending", async () => {
     mocks.endBreakAction.mockResolvedValue({ success: true });
     const entry = onBreak("paid_rest", "2026-01-05T11:40:00Z");
     const earlier = makeBreak({
@@ -184,6 +192,7 @@ describe("TimeClock break limits", () => {
       { ...entry, breaks: [earlier, ...(entry.breaks ?? [])] },
       settings(),
     );
+    await waitFor(() => expect(setOptimisticEntries).toHaveBeenCalled());
     expect(setOptimisticEntries).toHaveBeenCalledWith(
       expect.objectContaining({
         payload: expect.objectContaining({
