@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation } from "@tanstack/react-query";
+import { format } from "date-fns";
 import {
   Clock,
   Coffee,
@@ -495,7 +496,7 @@ export default function TimeClock({
             <Clock className="h-4 w-4" />
             Started at{" "}
             <LocalTime>
-              {() => new Date(activeEntry.clock_in).toLocaleTimeString()}
+              {() => format(new Date(activeEntry.clock_in), "h:mm a")}
             </LocalTime>
           </p>
 
@@ -728,9 +729,9 @@ export default function TimeClock({
                   <span className="text-muted-foreground text-xs">
                     <LocalTime>
                       {() =>
-                        `${new Date(entry.clock_in).toLocaleTimeString()} - ${
+                        `${format(new Date(entry.clock_in), "h:mm a")} - ${
                           entry.clock_out
-                            ? new Date(entry.clock_out).toLocaleTimeString()
+                            ? format(new Date(entry.clock_out), "h:mm a")
                             : "Current"
                         }`
                       }
