@@ -10,7 +10,7 @@ import {
   Square,
   Trash2,
 } from "lucide-react";
-import { startTransition, useEffect, useRef, useState } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useTimeframeDefaults } from "@/hooks/useTimeframeDefaults";
 import {
@@ -95,6 +95,30 @@ type ExpiredBreak = { label: string; limitMinutes: number };
  */
 const BACK_TO_WORK_COVER_MS = 200;
 
+/** What the server says when the break was already over (ended elsewhere). */
+const NO_BREAK_RUNNING = "No break is running";
+
+/**
+ * Shows each auto-ended break as ended at its limit. This holds until the
+ * server's copy says the same, so a late or stale refresh can't put a break
+ * that ran out back on screen, still ticking.
+ */
+function withAutoEndedBreaks(
+  entries: TimeEntry[],
+  endedAt: ReadonlyMap<number, number>,
+): TimeEntry[] {
+  if (endedAt.size === 0) return entries;
+  return entries.map((entry) => ({
+    ...entry,
+    breaks: (entry.breaks ?? []).map((brk) => {
+      const end = endedAt.get(brk.id);
+      return end !== undefined && !brk.break_end
+        ? { ...brk, break_end: new Date(end) }
+        : brk;
+    }),
+  }));
+}
+
 const formatDurationMs = (diffMs: number) => {
   const totalMinutes = Math.floor(Math.max(0, diffMs) / (1000 * 60));
   const hours = Math.floor(totalMinutes / 60);
@@ -149,6 +173,14 @@ export default function TimeClock({
   const [confirmingClockOut, setConfirmingClockOut] = useState(false);
   // The break already being auto-ended, so the ticker fires it only once.
   const autoEndedBreakId = useRef<number | null>(null);
+  // Breaks the server has ended at their limit, by id, with that end time.
+  const [autoEndedAt, setAutoEndedAt] = useState<ReadonlyMap<number, number>>(
+    () => new Map(),
+  );
+  const entries = useMemo(
+    () => withAutoEndedBreaks(initialEntries, autoEndedAt),
+    [initialEntries, autoEndedAt],
+  );
   // The kinds the org offers, lunch (paid or unpaid, per the org) first.
   const offeredBreakTypes = getOfferedBreakTypes(breakSettings);
   const [pickedBreakType, setBreakType] = useState<BreakType | null>(null);
@@ -163,7 +195,7 @@ export default function TimeClock({
   const captureLocation = isCaptureEnabled(locationSettings);
   const locationRequired = isLocationRequired(locationSettings);
 
-  const activeEntry = initialEntries
+  const activeEntry = entries
     .filter((entry: TimeEntry) => entry.clock_out === null)
     .sort(
       (a, b) => new Date(b.clock_in).getTime() - new Date(a.clock_in).getTime(),
@@ -267,52 +299,45 @@ export default function TimeClock({
     onError: () => toast.error("Failed to end break", CLOCK_TOAST),
   });
 
-  // Ends a break that ran past its limit and tells the member to get back
-  // to work. The server caps the record at the limit, so it doesn't matter
-  // how late this fires (e.g. the tab was asleep).
+  const markAutoEnded = (breakId: number, endMs: number) =>
+    setAutoEndedAt((current) => new Map(current).set(breakId, endMs));
+
+  // Ends a break that ran past its limit. The server caps the record at the
+  // limit, so it doesn't matter how late this fires (e.g. the tab was asleep).
+  // The view only changes once the server has answered, so a failed call
+  // can't show the member as back at work when they aren't.
   const autoEnd = useMutation({
-    mutationFn: endBreakAction,
-    onSuccess: (res) => {
-      if (!res.success && "error" in res)
-        toast.error(res.error || "Failed to end break", CLOCK_TOAST);
+    mutationFn: (_: { brk: TimeEntryBreak; deadlineMs: number }) =>
+      endBreakAction(),
+    onSuccess: (res, { brk, deadlineMs }) => {
+      if (res.success) {
+        setExpiredBreak({
+          label: breakTypeLabel(brk.break_type),
+          limitMinutes: Math.round(
+            (deadlineMs - new Date(brk.break_start).getTime()) / 60_000,
+          ),
+        });
+        setBackToWorkOpen(true);
+        // Swap the break view once the dialog covers the card, so its change
+        // in height happens under the overlay instead of as a jump.
+        setTimeout(
+          () => markAutoEnded(brk.id, deadlineMs),
+          BACK_TO_WORK_COVER_MS,
+        );
+      } else if ("error" in res) {
+        // Already ended (another tab or device, or the page loaded stale
+        // data): the break is over, there's just nothing to announce.
+        if (res.error === NO_BREAK_RUNNING) markAutoEnded(brk.id, deadlineMs);
+        else toast.error(res.error || "Failed to end break", CLOCK_TOAST);
+      }
     },
     onError: () => toast.error("Failed to end break", CLOCK_TOAST),
   });
 
   function autoEndBreak(brk: TimeEntryBreak, deadlineMs: number) {
-    // The ticker only runs while a break is open on the active entry.
-    /* v8 ignore next -- @preserve */
-    if (!activeEntry) return;
     if (autoEndedBreakId.current === brk.id) return;
     autoEndedBreakId.current = brk.id;
-
-    const breaks = activeEntry.breaks as TimeEntryBreak[];
-    setExpiredBreak({
-      label: breakTypeLabel(brk.break_type),
-      limitMinutes: Math.round(
-        (deadlineMs - new Date(brk.break_start).getTime()) / 60_000,
-      ),
-    });
-    setBackToWorkOpen(true);
-
-    // The server caps the break at its deadline, so waiting for the dialog
-    // to cover the card changes nothing on the record.
-    const entryId = activeEntry.id;
-    setTimeout(() => {
-      startTransition(async () => {
-        setOptimisticEntries({
-          type: "UPDATE",
-          payload: {
-            id: entryId,
-            breaks: breaks.map((b) =>
-              b.id === brk.id ? { ...b, break_end: new Date(deadlineMs) } : b,
-            ),
-            updated_at: new Date(),
-          },
-        });
-        await settle(autoEnd.mutateAsync());
-      });
-    }, BACK_TO_WORK_COVER_MS);
+    autoEnd.mutate({ brk, deadlineMs });
   }
 
   const handleStartBreak = () => {
@@ -707,7 +732,7 @@ export default function TimeClock({
           <h3 className="font-bold text-lg">Recent Activity</h3>
         </div>
         <div className="space-y-3">
-          {initialEntries.slice(0, 5).map((entry) => {
+          {entries.slice(0, 5).map((entry) => {
             const dockedMinutes = getDockedMinutes(entry, breakSettings);
             const unpaidBreakMinutes = Math.round(
               getUnpaidBreakMs(entry) / 60_000,
