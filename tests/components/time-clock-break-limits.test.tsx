@@ -29,6 +29,8 @@ vi.mock("sonner", () => ({ toast: mocks.toast }));
 
 import TimeClock from "@/components/time-clock";
 
+const CLOCK_TOAST = { id: "time-clock" };
+
 const NOW = new Date("2026-01-05T12:00:00Z");
 
 const settings = (
@@ -200,7 +202,20 @@ describe("TimeClock break limits", () => {
   ])("shows %s when the auto-end fails", async (_l, error, shown) => {
     mocks.endBreakAction.mockResolvedValue({ success: false, error });
     renderClock(onBreak("paid_rest", "2026-01-05T11:40:00Z"), settings());
-    await waitFor(() => expect(mocks.toast.error).toHaveBeenCalledWith(shown));
+    await waitFor(() =>
+      expect(mocks.toast.error).toHaveBeenCalledWith(shown, CLOCK_TOAST),
+    );
+  });
+
+  it("reports an auto-end that throws", async () => {
+    mocks.endBreakAction.mockRejectedValue(new Error("network"));
+    renderClock(onBreak("paid_rest", "2026-01-05T11:40:00Z"), settings());
+    await waitFor(() =>
+      expect(mocks.toast.error).toHaveBeenCalledWith(
+        "Failed to end break",
+        CLOCK_TOAST,
+      ),
+    );
   });
 
   it("stays quiet for a failed auto-end without an error field", async () => {

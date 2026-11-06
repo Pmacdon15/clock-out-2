@@ -63,6 +63,28 @@ import {
   AlertDialogTitle,
 } from "./ui/alert-dialog";
 
+/**
+ * Punch and break toasts share one id so a new one replaces the last instead
+ * of stacking when someone punches in and out in quick succession.
+ */
+const CLOCK_TOAST = { id: "time-clock" } as const;
+/** Location problems get their own slot so the punch result can't hide them. */
+const LOCATION_TOAST = { id: "time-clock-location" } as const;
+
+/**
+ * Waits for a mutation inside an async transition, so the optimistic state
+ * stays up until the server action (and the refresh it triggers) lands, and
+ * the view swaps once instead of flickering back to the old state. Failures
+ * are already reported by the mutation's own callbacks.
+ */
+const settle = async (pending: Promise<unknown>) => {
+  try {
+    await pending;
+  } catch {
+    // Reported by onError; the optimistic state rolls back on its own.
+  }
+};
+
 /** What the "back to work" dialog says about the break that just ran out. */
 type ExpiredBreak = { label: string; limitMinutes: number };
 
@@ -126,7 +148,9 @@ export default function TimeClock({
     pickedBreakType && offeredBreakTypes.includes(pickedBreakType)
       ? pickedBreakType
       : offeredBreakTypes[0];
-  const [isLocating, setIsLocating] = useState(false);
+  // Which punch is waiting on the browser for a position, if any.
+  const [locatingFor, setLocatingFor] = useState<"in" | "out" | null>(null);
+  const isLocating = locatingFor !== null;
   const captureLocation = isCaptureEnabled(locationSettings);
   const locationRequired = isLocationRequired(locationSettings);
 
@@ -197,34 +221,41 @@ export default function TimeClock({
   const clockInMutation = useMutation({
     mutationFn: (coordinates?: Coordinates) => clockInAction(coordinates),
     onSuccess: (res) => {
-      if (res.success) toast.success("Clocked in");
-      else if ("error" in res) toast.error(res.error || "Failed to clock in");
+      if (res.success) toast.success("Clocked in", CLOCK_TOAST);
+      else if ("error" in res)
+        toast.error(res.error || "Failed to clock in", CLOCK_TOAST);
     },
+    onError: () => toast.error("Failed to clock in", CLOCK_TOAST),
   });
 
   const clockOutMutation = useMutation({
     mutationFn: (coordinates?: Coordinates) => clockOutAction(coordinates),
     onSuccess: (res) => {
-      if (res.success) toast.success("Clocked out");
-      else if ("error" in res) toast.error(res.error || "Failed to clock out");
+      if (res.success) toast.success("Clocked out", CLOCK_TOAST);
+      else if ("error" in res)
+        toast.error(res.error || "Failed to clock out", CLOCK_TOAST);
     },
+    onError: () => toast.error("Failed to clock out", CLOCK_TOAST),
   });
 
   const startBreakMutation = useMutation({
     mutationFn: (type: BreakType) => startBreakAction(type),
     onSuccess: (res) => {
-      if (res.success) toast.success("Break started");
+      if (res.success) toast.success("Break started", CLOCK_TOAST);
       else if ("error" in res)
-        toast.error(res.error || "Failed to start break");
+        toast.error(res.error || "Failed to start break", CLOCK_TOAST);
     },
+    onError: () => toast.error("Failed to start break", CLOCK_TOAST),
   });
 
   const endBreakMutation = useMutation({
     mutationFn: endBreakAction,
     onSuccess: (res) => {
-      if (res.success) toast.success("Break ended");
-      else if ("error" in res) toast.error(res.error || "Failed to end break");
+      if (res.success) toast.success("Break ended", CLOCK_TOAST);
+      else if ("error" in res)
+        toast.error(res.error || "Failed to end break", CLOCK_TOAST);
     },
+    onError: () => toast.error("Failed to end break", CLOCK_TOAST),
   });
 
   // Ends a break that ran past its limit and tells the member to get back
@@ -234,8 +265,9 @@ export default function TimeClock({
     mutationFn: endBreakAction,
     onSuccess: (res) => {
       if (!res.success && "error" in res)
-        toast.error(res.error || "Failed to end break");
+        toast.error(res.error || "Failed to end break", CLOCK_TOAST);
     },
+    onError: () => toast.error("Failed to end break", CLOCK_TOAST),
   });
 
   function autoEndBreak(brk: TimeEntryBreak, deadlineMs: number) {
@@ -253,7 +285,7 @@ export default function TimeClock({
       ),
     });
 
-    startTransition(() => {
+    startTransition(async () => {
       setOptimisticEntries({
         type: "UPDATE",
         payload: {
@@ -264,7 +296,7 @@ export default function TimeClock({
           updated_at: new Date(),
         },
       });
-      autoEnd.mutate();
+      await settle(autoEnd.mutateAsync());
     });
   }
 
@@ -285,7 +317,7 @@ export default function TimeClock({
       break_end: null,
     };
 
-    startTransition(() => {
+    startTransition(async () => {
       setOptimisticEntries({
         type: "UPDATE",
         payload: {
@@ -295,7 +327,7 @@ export default function TimeClock({
         },
       });
 
-      startBreakMutation.mutate(breakType);
+      await settle(startBreakMutation.mutateAsync(breakType));
     });
   };
 
@@ -310,7 +342,7 @@ export default function TimeClock({
     // `openBreak` came out of this list, so the list is always there.
     const breaks = activeEntry.breaks as TimeEntryBreak[];
 
-    startTransition(() => {
+    startTransition(async () => {
       setOptimisticEntries({
         type: "UPDATE",
         payload: {
@@ -322,7 +354,7 @@ export default function TimeClock({
         },
       });
 
-      endBreakMutation.mutate();
+      await settle(endBreakMutation.mutateAsync());
     });
   };
 
@@ -332,28 +364,42 @@ export default function TimeClock({
    * being abandoned (`aborted`), which happens when capture is required and
    * the browser refused. The server re-checks either way — the client's word
    * is evidence, never the verdict.
+   *
+   * The caller sets `locatingFor` before its transition starts (a set inside
+   * the transition would only show once the whole punch had finished); this
+   * clears it as soon as the browser answers.
    */
   const resolveCoordinates = async (): Promise<
     { send: Coordinates | undefined } | { aborted: true }
   > => {
-    setIsLocating(true);
-    const capture = await captureCurrentPosition();
-    setIsLocating(false);
+    const capture = await captureCurrentPosition().finally(() =>
+      setLocatingFor(null),
+    );
 
     if (capture.ok) return { send: capture.coordinates };
 
     if (locationRequired) {
-      toast.error(capture.failure.message);
+      toast.error(capture.failure.message, LOCATION_TOAST);
       return { aborted: true };
     }
     // Capture is optional: say what happened, but don't block the punch.
-    toast.warning(capture.failure.message);
+    toast.warning(capture.failure.message, LOCATION_TOAST);
     return { send: undefined };
   };
 
-  const submitClockIn = (coordinates?: Coordinates) => {
-    const now = new Date();
+  /**
+   * The punch shows straight away and the location check runs behind it. If a
+   * required location can't be had, the transition ends without a punch and
+   * React drops the optimistic entry, so the view returns to "ready".
+   */
+  const handleClockIn = () => {
+    triggerHaptic();
 
+    // Orgs that never switched location on take exactly the old path: no
+    // geolocation prompt at all.
+    if (captureLocation) setLocatingFor("in");
+
+    const now = new Date();
     const tempEntry: TimeEntry = {
       id: Math.random(),
       user_id: "current",
@@ -364,42 +410,17 @@ export default function TimeClock({
       updated_at: now,
     };
 
-    startTransition(() => {
+    startTransition(async () => {
       setOptimisticEntries({ type: "ADD", payload: tempEntry });
-      clockInMutation.mutate(coordinates);
-    });
-  };
 
-  const submitClockOut = (entry: TimeEntry, coordinates?: Coordinates) => {
-    const now = new Date();
+      let coordinates: Coordinates | undefined;
+      if (captureLocation) {
+        const resolved = await resolveCoordinates();
+        if ("aborted" in resolved) return;
+        coordinates = resolved.send;
+      }
 
-    startTransition(() => {
-      setOptimisticEntries({
-        type: "UPDATE",
-        payload: {
-          id: entry.id,
-          clock_out: now,
-          updated_at: now,
-        },
-      });
-
-      clockOutMutation.mutate(coordinates);
-    });
-  };
-
-  const handleClockIn = () => {
-    triggerHaptic();
-
-    // Orgs that never switched location on take exactly the old path: no
-    // geolocation prompt, no extra tick before the optimistic entry appears.
-    if (!captureLocation) {
-      submitClockIn();
-      return;
-    }
-
-    void resolveCoordinates().then((resolved) => {
-      if ("aborted" in resolved) return;
-      submitClockIn(resolved.send);
+      await settle(clockInMutation.mutateAsync(coordinates));
     });
   };
 
@@ -411,19 +432,35 @@ export default function TimeClock({
 
     triggerHaptic();
 
-    if (!captureLocation) {
-      submitClockOut(activeEntry);
-      return;
-    }
+    if (captureLocation) setLocatingFor("out");
 
-    // Clocking out is never geofenced, so a capture failure is not fatal.
-    void resolveCoordinates().then((resolved) => {
-      submitClockOut(
-        activeEntry,
-        "aborted" in resolved ? undefined : resolved.send,
-      );
+    const entry = activeEntry;
+    const now = new Date();
+
+    startTransition(async () => {
+      setOptimisticEntries({
+        type: "UPDATE",
+        payload: {
+          id: entry.id,
+          clock_out: now,
+          updated_at: now,
+        },
+      });
+
+      let coordinates: Coordinates | undefined;
+      if (captureLocation) {
+        // Clocking out is never geofenced, so a capture failure is not fatal.
+        const resolved = await resolveCoordinates();
+        coordinates = "aborted" in resolved ? undefined : resolved.send;
+      }
+
+      await settle(clockOutMutation.mutateAsync(coordinates));
     });
   };
+
+  // A punch is in flight until the server answers; the other button waits.
+  const isPunching =
+    clockInMutation.isPending || clockOutMutation.isPending || isLocating;
 
   return (
     <Card className="mb-8 flex flex-col items-center justify-center p-8 text-center sm:p-12">
@@ -557,17 +594,26 @@ export default function TimeClock({
 
           <Button
             className="h-16 w-full max-w-sm gap-3 rounded-2xl font-bold text-lg transition-transform active:scale-[0.98] touch-manipulation"
-            disabled={clockOutMutation.isPending || isLocating}
+            disabled={isPunching}
             onClick={() => setConfirmingClockOut(true)}
             variant="destructive"
           >
-            {clockOutMutation.isPending || isLocating ? (
+            {isPunching ? (
               <Loader2 className="animate-spin" />
             ) : (
               <Square className="fill-current" />
             )}
             Clock Out
           </Button>
+          {locatingFor === "in" && (
+            <p
+              className="mt-4 flex items-center gap-1.5 text-muted-foreground text-xs"
+              role="status"
+            >
+              <MapPin className="h-3 w-3" />
+              Checking location...
+            </p>
+          )}
         </>
       ) : (
         <>
@@ -579,15 +625,15 @@ export default function TimeClock({
           </div>
           <Button
             className="h-16 w-full max-w-sm gap-3 rounded-2xl font-bold text-lg transition-transform active:scale-[0.98] touch-manipulation"
-            disabled={clockInMutation.isPending || isLocating}
+            disabled={isPunching}
             onClick={handleClockIn}
           >
-            {clockInMutation.isPending || isLocating ? (
+            {isPunching ? (
               <Loader2 className="animate-spin" />
             ) : (
               <Play className="fill-current" />
             )}
-            {isLocating ? "Checking location..." : "Clock In"}
+            {locatingFor === "in" ? "Checking location..." : "Clock In"}
           </Button>
           {captureLocation && (
             <p className="mt-4 flex items-center gap-1.5 text-muted-foreground text-xs">
@@ -658,7 +704,9 @@ export default function TimeClock({
             return (
               <div
                 className="flex items-center justify-between rounded-xl border p-4 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900"
-                key={entry.id}
+                // The open shift keeps one key from its optimistic stand-in
+                // to the saved row, so the list doesn't remount it.
+                key={entry === activeEntry ? "active" : entry.id}
               >
                 <div className="flex flex-col">
                   <span className="font-semibold">

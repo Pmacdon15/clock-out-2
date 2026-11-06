@@ -49,6 +49,9 @@ vi.mock("sonner", () => ({ toast: mocks.toast }));
 
 import TimeClock from "@/components/time-clock";
 
+const CLOCK_TOAST = { id: "time-clock" };
+const LOCATION_TOAST = { id: "time-clock-location" };
+
 const NOW = new Date("2026-01-05T12:00:00Z");
 
 function renderClock(
@@ -105,7 +108,10 @@ describe("TimeClock when clocked out", () => {
       }),
     });
     await waitFor(() =>
-      expect(mocks.toast.success).toHaveBeenCalledWith("Clocked in"),
+      expect(mocks.toast.success).toHaveBeenCalledWith(
+        "Clocked in",
+        CLOCK_TOAST,
+      ),
     );
   });
 
@@ -116,7 +122,9 @@ describe("TimeClock when clocked out", () => {
     mocks.clockInAction.mockResolvedValue({ success: false, error });
     renderClock();
     fireEvent.click(screen.getByRole("button", { name: "Clock In" }));
-    await waitFor(() => expect(mocks.toast.error).toHaveBeenCalledWith(shown));
+    await waitFor(() =>
+      expect(mocks.toast.error).toHaveBeenCalledWith(shown, CLOCK_TOAST),
+    );
   });
 
   it("stays quiet for a failed result without an error field", async () => {
@@ -183,7 +191,10 @@ describe("TimeClock when clocked in", () => {
       payload: { id: 2, clock_out: NOW, updated_at: NOW },
     });
     await waitFor(() =>
-      expect(mocks.toast.success).toHaveBeenCalledWith("Clocked out"),
+      expect(mocks.toast.success).toHaveBeenCalledWith(
+        "Clocked out",
+        CLOCK_TOAST,
+      ),
     );
   });
 
@@ -194,7 +205,9 @@ describe("TimeClock when clocked in", () => {
     mocks.clockOutAction.mockResolvedValue({ success: false, error });
     renderClock([active]);
     clockOut();
-    await waitFor(() => expect(mocks.toast.error).toHaveBeenCalledWith(shown));
+    await waitFor(() =>
+      expect(mocks.toast.error).toHaveBeenCalledWith(shown, CLOCK_TOAST),
+    );
   });
 
   it("asks for confirmation before clocking out", () => {
@@ -464,7 +477,10 @@ describe("TimeClock break control", () => {
     await waitFor(() =>
       expect(mocks.startBreakAction).toHaveBeenCalledWith("unpaid_meal"),
     );
-    expect(mocks.toast.success).toHaveBeenCalledWith("Break started");
+    expect(mocks.toast.success).toHaveBeenCalledWith(
+      "Break started",
+      CLOCK_TOAST,
+    );
   });
 
   it("starts a break on an entry that has no break list yet", async () => {
@@ -505,7 +521,9 @@ describe("TimeClock break control", () => {
     mocks.startBreakAction.mockResolvedValue({ success: false, error });
     renderClock([active]);
     fireEvent.click(screen.getByRole("button", { name: "Start Break" }));
-    await waitFor(() => expect(mocks.toast.error).toHaveBeenCalledWith(shown));
+    await waitFor(() =>
+      expect(mocks.toast.error).toHaveBeenCalledWith(shown, CLOCK_TOAST),
+    );
   });
 
   it("stays quiet for a failed start without an error field", async () => {
@@ -603,7 +621,10 @@ describe("TimeClock break control", () => {
         },
       });
       await waitFor(() =>
-        expect(mocks.toast.success).toHaveBeenCalledWith("Break ended"),
+        expect(mocks.toast.success).toHaveBeenCalledWith(
+          "Break ended",
+          CLOCK_TOAST,
+        ),
       );
     });
 
@@ -650,7 +671,7 @@ describe("TimeClock break control", () => {
       renderClock([onBreak]);
       fireEvent.click(screen.getByRole("button", { name: "End Break" }));
       await waitFor(() =>
-        expect(mocks.toast.error).toHaveBeenCalledWith(shown),
+        expect(mocks.toast.error).toHaveBeenCalledWith(shown, CLOCK_TOAST),
       );
     });
 
@@ -801,10 +822,17 @@ describe("TimeClock with location capture", () => {
       fireEvent.click(screen.getByRole("button", { name: "Clock In" }));
 
       await waitFor(() =>
-        expect(mocks.toast.error).toHaveBeenCalledWith(failure.message),
+        expect(mocks.toast.error).toHaveBeenCalledWith(
+          failure.message,
+          LOCATION_TOAST,
+        ),
       );
       expect(mocks.clockInAction).not.toHaveBeenCalled();
-      expect(setOptimisticEntries).not.toHaveBeenCalled();
+      // The punch showed straight away; React drops it when the transition
+      // ends without a clock-in (see the useOptimistic tests below).
+      expect(setOptimisticEntries).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "ADD" }),
+      );
     },
   );
 
@@ -823,6 +851,7 @@ describe("TimeClock with location capture", () => {
     );
     expect(mocks.toast.warning).toHaveBeenCalledWith(
       "Location access is blocked.",
+      LOCATION_TOAST,
     );
     expect(mocks.toast.error).not.toHaveBeenCalled();
   });
