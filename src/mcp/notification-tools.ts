@@ -16,7 +16,7 @@ import type { McpCaller, ToolResult } from "@/mcp/tools";
 
 /*
  * The caller's own notification settings: the same switches as the app's
- * Notifications tab. They are personal (shared across organizations), so
+ * Notifications page. They are personal (shared across organizations), so
  * nobody, admins included, can change someone else's.
  */
 
@@ -91,7 +91,7 @@ export async function manageNotificationPreferencesTool(
         message: {
           title: "Test notification",
           body: "Shift alerts are working. You'll be notified like this if you forget to clock out or end a break.",
-          url: "/?defaultTab=notifications",
+          url: "/notifications",
           tag: "test",
         },
       },

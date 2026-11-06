@@ -401,7 +401,7 @@ describe("wording", () => {
     expect(describeAlert(forgot, member)).toEqual({
       title: "Still clocked in?",
       body: "You've been clocked in for 10h 5m. Forgot to clock out? Tap to open Clock Out.",
-      url: "/?defaultTab=time-clock&orgId=org%201",
+      url: "/?orgId=org%201",
       tag: "forgot:1",
     });
     expect(describeAlert(auto, member).body).toContain("16-hour limit");
@@ -413,7 +413,7 @@ describe("wording", () => {
     expect(describeAlert(breakLimit, member)).toEqual({
       title: "Your break is over",
       body: "Your meal period reached its 30-minute limit, so you're back on the clock.",
-      url: "/?defaultTab=time-clock&orgId=org%201",
+      url: "/?orgId=org%201",
       tag: "break-over:5",
     });
   });
@@ -423,7 +423,7 @@ describe("wording", () => {
     expect(describeAlert(forgot, admin)).toEqual({
       title: "Ada may have forgotten to clock out",
       body: "Ada has been clocked in for 10h 5m.",
-      url: "/?defaultTab=view&orgId=org%201&userId=u1",
+      url: "/hours?orgId=org%201&userId=u1",
       tag: "forgot:1:admin",
     });
     expect(describeAlert(auto, admin).title).toBe(

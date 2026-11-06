@@ -155,7 +155,7 @@ describe("Service worker push alerts", () => {
         json: () => ({
           title: "Still clocked in?",
           body: "10h",
-          url: "/?defaultTab=time-clock",
+          url: "/",
           tag: "forgot:1",
         }),
       },
@@ -168,7 +168,7 @@ describe("Service worker push alerts", () => {
       badge: "/notification-badge.png",
       tag: "forgot:1",
       renotify: true,
-      data: { url: "/?defaultTab=time-clock" },
+      data: { url: "/" },
     });
   });
 
@@ -180,7 +180,7 @@ describe("Service worker push alerts", () => {
           data: {
             title: "Your break is over",
             body: "15m",
-            url: "/?defaultTab=time-clock",
+            url: "/",
             tag: "break:3",
           },
           from: "123",
@@ -231,13 +231,11 @@ describe("Service worker push alerts", () => {
     const close = vi.fn();
     const { listeners, openWindow } = loadWorker([other, appWindow]);
     await dispatch(listeners.notificationclick, {
-      notification: { close, data: { url: "/?defaultTab=view" } },
+      notification: { close, data: { url: "/hours" } },
     });
     expect(close).toHaveBeenCalled();
     expect(other.focus).not.toHaveBeenCalled();
-    expect(navigate).toHaveBeenCalledWith(
-      "https://clock.test/?defaultTab=view",
-    );
+    expect(navigate).toHaveBeenCalledWith("https://clock.test/hours");
     expect(openWindow).not.toHaveBeenCalled();
 
     const fresh = loadWorker([]);

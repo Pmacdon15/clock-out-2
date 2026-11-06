@@ -79,7 +79,7 @@ export const WeeklyReportEmail = ({
   totalTimeOff = "0h",
   totalUnpaidTimeOff,
 }: WeeklyReportEmailProps) => {
-  let linkWithParams = `${dashboardUrl}/?defaultTab=view&timeframe=${timeframe}`;
+  let linkWithParams = `${dashboardUrl}/hours?timeframe=${timeframe}`;
   if (userId) linkWithParams += `&userId=${userId}`;
   if (orgId) linkWithParams += `&orgId=${orgId}`;
   if (timeframe === "custom") {

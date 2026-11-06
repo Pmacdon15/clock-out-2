@@ -12,29 +12,69 @@ vi.mock("@clerk/nextjs/server", () => ({
 
 import { config, proxy } from "@/proxy";
 
-type Handler = (
-  auth: { protect: () => Promise<void> },
-  req: Request,
-) => Promise<void>;
+type Auth = (() => Promise<{ userId: string | null }>) & {
+  protect: () => Promise<void>;
+};
+type Handler = (auth: Auth, req: Request) => Promise<Response | undefined>;
 
-const run = async (path: string) => {
+const run = async (path: string, userId: string | null = null) => {
   const protect = vi.fn(async () => {});
-  await (proxy as unknown as Handler)(
+  const auth = Object.assign(
+    vi.fn(async () => ({ userId })),
     { protect },
+  );
+  const response = await (proxy as unknown as Handler)(
+    auth,
     new Request(`https://example.test${path}`),
   );
-  return protect;
+  return { auth, protect, response };
 };
 
 describe("proxy", () => {
-  it("requires sign-in for dashboard routes", async () => {
-    expect(await run("/dashboard")).toHaveBeenCalledTimes(1);
-    expect(await run("/dashboard/settings")).toHaveBeenCalledTimes(1);
+  it("requires sign-in for every dashboard page but the time clock", async () => {
+    for (const path of [
+      "/hours",
+      "/hours?timeframe=week",
+      "/notifications",
+      "/schedule",
+      "/time-off",
+      "/settings",
+    ]) {
+      const { protect, response } = await run(path);
+      expect(protect, path).toHaveBeenCalledTimes(1);
+      expect(response, path).toBeUndefined();
+    }
+  });
+
+  it("shows signed-out visitors the welcome page at /", async () => {
+    const { response, protect } = await run("/");
+    expect(protect).not.toHaveBeenCalled();
+    expect(response?.headers.get("x-middleware-rewrite")).toBe(
+      "https://example.test/welcome",
+    );
+  });
+
+  it("shows members the time clock at /", async () => {
+    const { response } = await run("/", "user_1");
+    expect(response).toBeUndefined();
+  });
+
+  it("redirects old tab links to their page", async () => {
+    const { response, auth } = await run("/?defaultTab=view&timeframe=week");
+    expect(response?.status).toBe(307);
+    expect(response?.headers.get("location")).toBe(
+      "https://example.test/hours?timeframe=week",
+    );
+    expect(auth).not.toHaveBeenCalled();
   });
 
   it("leaves other routes public", async () => {
-    expect(await run("/")).not.toHaveBeenCalled();
-    expect(await run("/plans")).not.toHaveBeenCalled();
+    for (const path of ["/plans", "/welcome", "/privacy"]) {
+      const { auth, protect, response } = await run(path);
+      expect(protect, path).not.toHaveBeenCalled();
+      expect(auth, path).not.toHaveBeenCalled();
+      expect(response, path).toBeUndefined();
+    }
   });
 
   it("runs on pages and API routes but skips static assets", () => {

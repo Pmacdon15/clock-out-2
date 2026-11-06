@@ -59,7 +59,7 @@ import {
 const message = {
   title: "Still clocked in?",
   body: "You've been clocked in for 10h.",
-  url: "/?defaultTab=time-clock",
+  url: "/",
   tag: "forgot:1",
 };
 
@@ -157,9 +157,7 @@ describe("sendAlertEmail", () => {
     expect(input.Destination.ToAddresses).toEqual(["a@b.c"]);
     expect(input.Message.Subject.Data).toBe(message.title);
     expect(input.Message.Body.Html.Data).toBe("<html />");
-    expect(input.Message.Body.Text.Data).toContain(
-      "https://clock.test/?defaultTab=time-clock",
-    );
+    expect(input.Message.Body.Text.Data).toContain("https://clock.test/");
     expect(input.Source).toBe("Alerts <alerts@clock.test>");
   });
 

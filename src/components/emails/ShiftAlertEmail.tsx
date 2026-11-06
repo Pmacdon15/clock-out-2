@@ -33,7 +33,7 @@ export const ShiftAlertEmail = ({
   appUrl,
   lines = [],
 }: ShiftAlertEmailProps) => {
-  const preferencesUrl = `${appUrl}/?defaultTab=notifications`;
+  const preferencesUrl = `${appUrl}/notifications`;
   return (
     <Html>
       <Head />

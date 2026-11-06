@@ -28,9 +28,6 @@ vi.mock("@/lib/actions", () => ({
 vi.mock("@/lib/geolocation", () => ({
   captureCurrentPosition: mocks.captureCurrentPosition,
 }));
-vi.mock("@/hooks/useTimeframeDefaults", () => ({
-  useTimeframeDefaults: vi.fn(),
-}));
 vi.mock("sonner", () => ({ toast: mocks.toast }));
 
 import TimeClock from "@/components/time-clock";
@@ -49,7 +46,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-/** Hosts TimeClock on a real useOptimistic, the way DashboardTabs does. */
+/** Hosts TimeClock on a real useOptimistic, the way TimeClockPanel does. */
 function OptimisticHost({
   entries,
   locationSettings,
@@ -84,7 +81,7 @@ function clockOut() {
 
 /**
  * Issue #93: these drive TimeClock through a real `useOptimistic`, the way
- * DashboardTabs does, so they catch the punch flickering back to the old view
+ * TimeClockPanel does, so they catch the punch flickering back to the old view
  * before the server answers, and the punch waiting on the location check.
  */
 describe("TimeClock punch transitions", () => {

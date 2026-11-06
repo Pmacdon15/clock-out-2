@@ -98,7 +98,7 @@ export async function updateAlertSettingsDal(
     });
 }
 
-/** What the notifications tab needs: my preferences and what's configured. */
+/** What the Notifications page needs: my preferences and what's configured. */
 export type NotificationSettingsView = {
   preferences: NotificationPreferencesInput;
   emailAvailable: boolean;
@@ -268,7 +268,7 @@ export async function sendTestNotificationDal(): Promise<
         message: {
           title: "Test notification",
           body: "Shift alerts are working. You'll be notified like this if you forget to clock out or end a break.",
-          url: "/?defaultTab=notifications",
+          url: "/notifications",
           tag: "test",
         },
       },

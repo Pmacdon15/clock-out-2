@@ -53,7 +53,6 @@ export type SerializableResult<T, E> =
   | { value: T; ok: true }
   | { error: E; ok: false };
 
-import type { NotificationSettingsView } from "./alerts-dal";
 import type { PayrollView } from "./payroll";
 import type { EntryAction } from "./reducers/time-entries";
 
@@ -165,90 +164,6 @@ export type OrgSettingsData = {
   location?: LocationSettingsData;
 };
 
-export interface DashboardTabsProps {
-  defaultTabPromise: Promise<string | undefined>;
-  entriesPromise: Promise<SerializableResult<TimeEntry[], { reason: string }>>;
-  orgSettingsPromise: Promise<
-    SerializableResult<
-      ReportingSettingsData | null,
-      {
-        reason: string;
-      }
-    >
-  >;
-  breakSettingsPromise?: Promise<
-    SerializableResult<
-      BreakSettingsData | null,
-      {
-        reason: string;
-      }
-    >
-  >;
-  locationSettingsPromise?: Promise<
-    SerializableResult<
-      LocationSettingsData | null,
-      {
-        reason: string;
-      }
-    >
-  >;
-  overtimeSettingsPromise?: Promise<
-    SerializableResult<OvertimeSettingsData | null, { reason: string }>
-  >;
-  payPeriodSettingsPromise?: Promise<
-    SerializableResult<PayPeriodSettingsData | null, { reason: string }>
-  >;
-  /** Admins get every member's rate; members get only their own. */
-  payRatesPromise?: Promise<
-    SerializableResult<PayRateData[], { reason: string }>
-  >;
-  /** Optional CPP/QPP and EI deduction settings plus the CRA rates. */
-  payrollPromise?: Promise<SerializableResult<PayrollView, { reason: string }>>;
-  sitesPromise?: Promise<SerializableResult<SiteData[], { reason: string }>>;
-  alertSettingsPromise?: Promise<
-    SerializableResult<AlertSettingsData, { reason: string }>
-  >;
-  notificationSettingsPromise?: Promise<
-    SerializableResult<NotificationSettingsView, { reason: string }>
-  >;
-  orgTimeEntriesPromise: Promise<
-    SerializableResult<TimeEntry[], { reason: string }>
-  >;
-  recentEntriesPromise: Promise<
-    SerializableResult<TimeEntry[], { reason: string }>
-  >;
-  schedulePromise: Promise<
-    SerializableResult<ScheduledShiftWithStatus[], { reason: string }>
-  >;
-  timeOffPromise: Promise<
-    SerializableResult<TimeOffRequest[], { reason: string }>
-  >;
-  timeOffAllowancesPromise?: Promise<
-    SerializableResult<TimeOffAllowance[], { reason: string }>
-  >;
-  membersPromise?: Promise<
-    {
-      id: string;
-      name: string;
-    }[]
-  >;
-  selectedUserIdPromise?: Promise<string | undefined>;
-  selectedWeekPromise?: Promise<string | undefined>;
-  selectedMonthPromise?: Promise<string | undefined>;
-  selectedYearPromise?: Promise<string | undefined>;
-  timeframePromise?: Promise<string | undefined>;
-  endDatePromise: Promise<string | undefined>;
-  startDatePromise: Promise<string | undefined>;
-  isAdminPromise: Promise<boolean>;
-  hasReportingPromise: Promise<boolean>;
-  hasGeofencingPromise?: Promise<boolean>;
-  hasSchedulingPromise: Promise<boolean>;
-  hasTimeOffPromise: Promise<boolean>;
-  /** Whether the org's plan includes the paid `notifications` feature. */
-  hasNotificationsPromise?: Promise<boolean>;
-  userIdPromise: Promise<string | undefined>;
-  orgIdPromise: Promise<string | undefined>;
-}
 export interface ViewHoursProps {
   entries: TimeEntry[];
   setOptimisticEntries: (action: EntryAction) => void;

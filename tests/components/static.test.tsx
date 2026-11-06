@@ -14,18 +14,17 @@ vi.mock("@clerk/nextjs", () => ({
 vi.mock("@clerk/ui/themes", () => ({ dark: {} }));
 
 import Footer from "@/components/Footer";
-import DashboardSkeleton from "@/components/fallbacks/home-page-fallback";
 import { SettingsFallback } from "@/components/fallbacks/settings-fallback";
+import TimeClockSkeleton from "@/components/fallbacks/time-clock-fallback";
 import { ViewHoursFallback } from "@/components/fallbacks/view-hours-fallback";
 import MainPageHeader from "@/components/headers/main-page-header";
 
 describe("fallbacks", () => {
-  it("renders the dashboard skeleton", () => {
-    const { container, getByRole } = render(<DashboardSkeleton />);
+  it("renders the time clock skeleton", () => {
+    const { container, getByRole } = render(<TimeClockSkeleton />);
     expect(container.firstChild).toHaveClass("animate-pulse");
-    expect(getByRole("status", { name: "Loading dashboard" })).toBeVisible();
-    // Three tab placeholders and three recent-activity rows.
-    expect(container.querySelectorAll(".h-8.w-24")).toHaveLength(3);
+    expect(getByRole("status", { name: "Loading time clock" })).toBeVisible();
+    // Three recent-activity rows.
     expect(container.querySelectorAll(".rounded-xl.border.p-4")).toHaveLength(
       3,
     );
