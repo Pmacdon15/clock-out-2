@@ -168,7 +168,7 @@ On the Schedule page, **Google Calendar** (per shift) and **Add all to Google Ca
 Only the `https://www.googleapis.com/auth/calendar.events` scope is requested, and only from users who tap the button, so nothing changes for anyone else's sign-in. One-time setup in the Google Cloud project behind Clerk's Google connection (the custom credentials in Clerk → SSO connections → Google):
 
 1. **APIs & Services → Library →** enable the **Google Calendar API**.
-2. **OAuth consent screen → Data access →** add the `.../auth/calendar.events` scope. While the app is in *Testing*, only listed test users can grant it; publish (and complete Google's verification for this sensitive scope) for everyone else.
+2. **OAuth consent screen → Data access →** add the `.../auth/calendar.events` scope. While the app is in _Testing_, only listed test users can grant it; publish (and complete Google's verification for this sensitive scope) for everyone else.
 
 No new env vars are needed. Until step 1 is done, the button shows "Google Calendar isn't set up for Clock Out yet" and opens the fallback link.
 
