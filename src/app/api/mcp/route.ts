@@ -1,6 +1,7 @@
 import { createMcpHandler } from "mcp-handler";
 import { verifyMcpToken } from "@/mcp/auth";
 import { mcpRoute } from "@/mcp/http";
+import { registerClockOutPrompts } from "@/mcp/prompts";
 import { registerClockOutTools, SERVER_OPTIONS } from "@/mcp/server";
 
 /*
@@ -10,8 +11,12 @@ import { registerClockOutTools, SERVER_OPTIONS } from "@/mcp/server";
  * there isn't one, the 401 points the client at
  * `/.well-known/oauth-protected-resource/api/mcp`, which sends it to Clerk to
  * sign the user in. Every tool runs only for that token's verified Clerk user.
+ * Prompts (`src/mcp/prompts.ts`) only build instructions and touch no data.
  */
-const handler = createMcpHandler(registerClockOutTools, SERVER_OPTIONS);
+const handler = createMcpHandler((server) => {
+  registerClockOutTools(server);
+  registerClockOutPrompts(server);
+}, SERVER_OPTIONS);
 const route = mcpRoute(handler, verifyMcpToken);
 
 export { route as DELETE, route as GET, route as OPTIONS, route as POST };

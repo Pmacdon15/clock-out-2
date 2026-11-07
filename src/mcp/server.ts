@@ -1,6 +1,8 @@
 import type { AuthInfo, McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import {
+  getCalendarShiftsInputSchema,
+  getCalendarShiftsTool,
   manageAlertSettingsInputSchema,
   manageAlertSettingsTool,
   manageLocationSettingsInputSchema,
@@ -37,6 +39,8 @@ import {
   getClockStatusInputSchema,
   getLocationSettingsInputSchema,
   getLocationSettingsTool,
+  getTimesheetTablesInputSchema,
+  getTimesheetTablesTool,
   getWeeklyTimecardInputSchema,
   getWeeklyTimecardTool,
   inviteMemberInputSchema,
@@ -97,10 +101,13 @@ export const SERVER_INFO = {
 export const SERVER_OPTIONS = {
   serverInfo: SERVER_INFO,
   instructions: MCP_INSTRUCTIONS,
-  // The tool list never changes while a client is connected. Saying so keeps
+  // The tool and prompt lists never change while a client is connected. Saying so keeps
   // clients from holding a `subscriptions/listen` stream open for change
   // notifications on serverless functions.
-  capabilities: { tools: { listChanged: false } },
+  capabilities: {
+    tools: { listChanged: false },
+    prompts: { listChanged: false },
+  },
 };
 
 /** The verified caller from the request's auth, or null when there isn't one. */
@@ -345,6 +352,21 @@ export function registerClockOutTools(server: McpServer) {
   );
 
   server.registerTool(
+    "get_timesheet_tables",
+    {
+      title: "Get timesheet tables for Google Sheets",
+      description:
+        "Returns a timesheet as two ready-to-write tables for a spreadsheet app such as Google Sheets: 'Shifts' (one row per shift: employee, date, day, clock in/out, unpaid and paid break hours, hours, plus overtime, pay and location when the org has them) and 'Summary' (one row per employee with a column per day, or per week for periods over 31 days, their totals, and an organization Total row). Each table has a title (the tab name), headers and rows; hours are numbers and empty cells are null. Takes the same period and member options as export_timesheet. Use it when the user wants their hours in a spreadsheet through another connector (e.g. Google Sheets): write each table to its own tab with headers in row 1, as raw values. For PDF, Excel or CSV files use export_timesheet instead.",
+      inputSchema: portable(getTimesheetTablesInputSchema),
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    (args, ctx) =>
+      run(server, ctx.http?.authInfo, (caller) =>
+        getTimesheetTablesTool(caller, args),
+      ),
+  );
+
+  server.registerTool(
     "toggle_break",
     {
       title: "Start, end, or toggle a live break",
@@ -525,11 +547,26 @@ export function registerClockOutTools(server: McpServer) {
   );
 
   server.registerTool(
+    "get_calendar_shifts",
+    {
+      title: "Get scheduled shifts for a calendar sync",
+      description:
+        "Returns scheduled shifts as calendar-ready events for syncing into the user's own calendar (e.g. Google Calendar through another connector): title, start and end with timezone offset, description, and a sync_tag per shift. Defaults to your own shifts for today plus 14 days (at most 93 days); admins can pass a member or 'all'. Store each event's sync_tag on the calendar event (in its description, and as a private extended property when the calendar tool supports it). To sync, create events for new shifts, update tagged events that differ, and delete events in the window whose tag starts with sync_scope_prefix but isn't in the result (cancelled shifts). Never touch other events. Needs a plan with Scheduling.",
+      inputSchema: portable(getCalendarShiftsInputSchema),
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    (args, ctx) =>
+      run(server, ctx.http?.authInfo, (caller) =>
+        getCalendarShiftsTool(caller, args),
+      ),
+  );
+
+  server.registerTool(
     "manage_time_off",
     {
       title: "Request, approve, deny, or cancel time off",
       description:
-        "Lists vacation and sick time off, files a request (action: 'request'), approves or denies a pending request (actions 'approve'/'deny', admin-only), or cancels one (action: 'cancel': members withdraw their own pending requests; admins can also revoke approved time off). Admins ('org:admin') can file time off for any member by passing member, and it is approved right away unless approve: false. Approved time off shows in hours views and reports.",
+        "Lists vacation and sick time off, files a request (action: 'request'), approves or denies a pending request (actions 'approve'/'deny', admin-only), or cancels one (action: 'cancel': members withdraw their own pending requests; admins can also revoke approved time off). Admins ('org:admin') can file time off for any member by passing member, and it is approved right away unless approve: false. Approved time off shows in hours views and reports. When importing time off from a calendar, pass external_ref (the event's ID) so the same event is never filed twice.",
       inputSchema: portable(manageTimeOffInputSchema),
       annotations: {
         readOnlyHint: false,

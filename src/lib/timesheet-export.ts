@@ -1797,6 +1797,169 @@ export const toCsv = (rows: ExportRow[], meta: ExportMeta) =>
 
 export const CSV_MIME = "text/csv; charset=utf-8";
 
+/* -------------------------------------------------------- sheet tables -- */
+
+/*
+ * Plain tables for spreadsheet apps (Google Sheets, Excel online, ...) that an
+ * AI client fills through its own connector. Unlike the CSV these carry real
+ * numbers, so the sheet can sum and chart them, and one table per tab:
+ *
+ * - Shifts: one row per shift, the detail behind every total.
+ * - Summary: one row per employee with a column per day (or per week for
+ *   long periods), their totals, and an organization total row.
+ *
+ * Text cells go through the same formula guard as the CSV, because a sheet
+ * written with "user entered" input evaluates `=...` exactly like Excel.
+ */
+
+export type SheetCell = string | number | null;
+
+export type SheetTable = {
+  /** Suggested tab name. */
+  title: string;
+  headers: string[];
+  rows: SheetCell[][];
+};
+
+/** Periods longer than this get one summary column per week, not per day. */
+export const MAX_DAILY_SUMMARY_COLUMNS = 31;
+
+const sheetText = (value: string) => neutralizeCsvValue(value);
+const round2 = (value: number) => Math.round(value * 100) / 100;
+
+/** The Shifts tab: one row per shift with numeric hours (blank while open). */
+export function buildShiftDetailTable(rows: ExportRow[]): SheetTable {
+  const showOvertime = hasOvertime(rows);
+  const showPay = hasPay(rows);
+  const showLocation = rows.some((r) => Boolean(r.location));
+  const headers = [
+    "Employee",
+    "Date",
+    "Day",
+    "Clock In",
+    "Clock Out",
+    "Unpaid Breaks (hrs)",
+    "Paid Breaks (hrs)",
+    "Hours",
+    ...(showOvertime ? ["Overtime Hours"] : []),
+    ...(showPay ? ["Hourly Rate", "Gross Pay"] : []),
+    ...(showLocation ? ["Location"] : []),
+  ];
+  const body = rows.map((r): SheetCell[] => [
+    sheetText(r.employee),
+    r.date,
+    r.dayOfWeek ?? getDayOfWeekShort(r.date),
+    r.clockIn,
+    r.clockOut,
+    round2(r.unpaidBreakHours ?? 0),
+    round2(r.paidBreakHours ?? 0),
+    r.hours === null ? null : round2(r.hours),
+    ...(showOvertime ? [round2(r.overtimeHours ?? 0)] : []),
+    ...(showPay
+      ? [
+          r.payRate ? r.payRate.hourlyRate : null,
+          r.pay && r.hours !== null ? round2(r.pay.grossPay) : null,
+        ]
+      : []),
+    ...(showLocation ? [r.location ? sheetText(r.location) : null] : []),
+  ]);
+  return { title: "Shifts", headers, rows: body };
+}
+
+/** Every "yyyy-MM-dd" from start to end, inclusive. */
+export function datesInRange(startDate: string, endDate: string): string[] {
+  const start = parseDateString(startDate);
+  const end = parseDateString(endDate);
+  const out: string[] = [];
+  for (let t = start.getTime(); t <= end.getTime(); t += 86_400_000) {
+    out.push(toYmd(new Date(t)));
+  }
+  return out;
+}
+
+/** "Mon Nov 3" for a "yyyy-MM-dd". */
+const shortDayHeader = (ymd: string) => {
+  const [, month, day] = ymd.slice(0, 10).split("-").map(Number);
+  return `${getDayOfWeekShort(ymd)} ${MONTHS[month - 1]} ${day}`;
+};
+
+/**
+ * The Summary tab: an employee × day grid (employee × week past
+ * {@link MAX_DAILY_SUMMARY_COLUMNS} days) of paid hours, each employee's
+ * totals, and a last "Total" row. Days with no work are blank, not 0.
+ */
+export function buildEmployeeSummaryTable(
+  rows: ExportRow[],
+  meta: ExportMeta,
+): SheetTable {
+  const days = datesInRange(meta.startDate, meta.endDate);
+  const byWeek = days.length > MAX_DAILY_SUMMARY_COLUMNS;
+  const columnKey = (ymd: string) =>
+    byWeek ? getWeekBounds(ymd).key : ymd.slice(0, 10);
+  const columns: { key: string; header: string }[] = [];
+  for (const day of days) {
+    const key = columnKey(day);
+    if (columns.some((c) => c.key === key)) continue;
+    columns.push({
+      key,
+      header: byWeek ? `Week of ${shortDayHeader(key)}` : shortDayHeader(day),
+    });
+  }
+
+  const showOvertime = hasOvertime(rows);
+  const showPay = hasPay(rows);
+  const headers = [
+    "Employee",
+    ...columns.map((c) => c.header),
+    "Total Hours",
+    ...(showOvertime ? ["Overtime Hours"] : []),
+    ...(showPay ? ["Gross Pay"] : []),
+  ];
+
+  type Totals = {
+    cells: Map<string, number>;
+    hours: number;
+    overtime: number;
+    pay: number;
+  };
+  const blank = (): Totals => ({
+    cells: new Map(),
+    hours: 0,
+    overtime: 0,
+    pay: 0,
+  });
+  const employees = new Map<string, Totals>();
+  const org = blank();
+  for (const r of rows) {
+    const emp = employees.get(r.employee) ?? blank();
+    employees.set(r.employee, emp);
+    const key = columnKey(r.date);
+    for (const t of [emp, org]) {
+      t.cells.set(key, (t.cells.get(key) ?? 0) + (r.hours ?? 0));
+      t.hours += r.hours ?? 0;
+      t.overtime += r.overtimeHours ?? 0;
+      t.pay += r.pay && r.hours !== null ? r.pay.grossPay : 0;
+    }
+  }
+
+  const line = (label: string, t: Totals): SheetCell[] => [
+    sheetText(label),
+    ...columns.map((c) => {
+      const value = t.cells.get(c.key);
+      return value === undefined ? null : round2(value);
+    }),
+    round2(t.hours),
+    ...(showOvertime ? [round2(t.overtime)] : []),
+    ...(showPay ? [round2(t.pay)] : []),
+  ];
+
+  const body = [...employees.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([name, t]) => line(name, t));
+  body.push(line("Total", org));
+  return { title: "Summary", headers, rows: body };
+}
+
 /* ------------------------------------------------------------- download -- */
 
 export function downloadFile(

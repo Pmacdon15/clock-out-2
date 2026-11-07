@@ -238,6 +238,12 @@ CREATE TABLE IF NOT EXISTS time_off_requests (
 );
 CREATE INDEX IF NOT EXISTS idx_time_off_requests_org_dates
     ON time_off_requests (org_id, end_date);
+-- Set on requests imported from a calendar event (e.g. "google-calendar:<id>")
+-- so importing the same event again finds the request instead of duplicating it.
+ALTER TABLE time_off_requests ADD COLUMN IF NOT EXISTS external_ref TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_time_off_requests_external_ref
+    ON time_off_requests (org_id, user_id, external_ref)
+    WHERE external_ref IS NOT NULL;
 
 -- PTO (vacation) days each member gets per calendar year. No row = no limit.
 CREATE TABLE IF NOT EXISTS time_off_allowances (

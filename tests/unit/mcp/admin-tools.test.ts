@@ -18,6 +18,7 @@ const m = vi.hoisted(() => ({
   dbGetTimeEntries: vi.fn(async () => []),
   dbGetTimeOffRequests: vi.fn(async () => [] as unknown[]),
   dbCreateTimeOffRequest: vi.fn(),
+  dbGetTimeOffByExternalRef: vi.fn(),
   dbReviewTimeOffRequest: vi.fn(),
   dbCancelTimeOffRequest: vi.fn(),
   dbGetOvertimeSettings: vi.fn(),
@@ -72,6 +73,7 @@ vi.mock("@/lib/db", () => ({
   dbGetTimeEntries: m.dbGetTimeEntries,
   dbGetTimeOffRequests: m.dbGetTimeOffRequests,
   dbCreateTimeOffRequest: m.dbCreateTimeOffRequest,
+  dbGetTimeOffByExternalRef: m.dbGetTimeOffByExternalRef,
   dbReviewTimeOffRequest: m.dbReviewTimeOffRequest,
   dbCancelTimeOffRequest: m.dbCancelTimeOffRequest,
   dbGetOvertimeSettings: m.dbGetOvertimeSettings,
@@ -87,6 +89,11 @@ vi.mock("@/lib/db", () => ({
 }));
 
 import {
+  CALENDAR_SYNC_MAX_DAYS,
+  calendarShiftTag,
+  calendarSyncScope,
+  getCalendarShiftsTool,
+  MAX_TIME_OFF_EXTERNAL_REF_LENGTH,
   manageAlertSettingsTool,
   manageLocationSettingsTool,
   manageMemberTool,
@@ -355,6 +362,154 @@ describe("manage_schedule", () => {
   });
 });
 
+describe("get_calendar_shifts", () => {
+  beforeEach(() => {
+    m.getBillingSubscription.mockResolvedValue({
+      subscriptionItems: [{ plan: { features: [{ slug: "scheduling" }] } }],
+    });
+  });
+
+  it("builds tags that are scoped to the org and member", () => {
+    expect(calendarSyncScope("org_1", "user_sam")).toBe(
+      "clockout:org_1:user_sam:",
+    );
+    expect(calendarSyncScope("org_1", null)).toBe("clockout:org_1:");
+    expect(calendarShiftTag(shift)).toBe("clockout:org_1:user_sam:shift:7");
+    // A member's tag falls under both their own scope and the org's.
+    expect(
+      calendarShiftTag(shift).startsWith(calendarSyncScope("org_1", null)),
+    ).toBe(true);
+  });
+
+  it("needs the scheduling plan feature", async () => {
+    m.getBillingSubscription.mockResolvedValue({ subscriptionItems: [] });
+    const res = await getCalendarShiftsTool(member, {});
+    expect(res.data.status).toBe("scheduling_not_enabled");
+    expect(m.dbGetScheduledShifts).not.toHaveBeenCalled();
+  });
+
+  it("returns your own shifts as calendar events for the window", async () => {
+    asRole("org:member");
+    m.dbGetScheduledShifts.mockResolvedValue([
+      {
+        ...shift,
+        note: "Front desk",
+        updated_at: new Date("2026-10-30T12:00:00Z"),
+      },
+      { ...shift, id: 8, user_id: "user_gone" },
+    ]);
+    const res = await getCalendarShiftsTool(member, {
+      start_date: "2026-11-01",
+      end_date: "2026-11-07",
+      timezone: TZ,
+    });
+
+    expect(m.dbGetScheduledShifts).toHaveBeenCalledWith(
+      "org_1",
+      "user_sam",
+      new Date("2026-11-01T06:00:00Z"),
+      new Date("2026-11-08T06:00:00Z"),
+    );
+    expect(res.data.status).toBe("ready");
+    expect(res.data.member).toBe("Sam Lee");
+    expect(res.data.window).toEqual({
+      start_date: "2026-11-01",
+      end_date: "2026-11-07",
+      start: "2026-11-01T06:00:00.000Z",
+      end: "2026-11-08T06:00:00.000Z",
+      timezone: TZ,
+    });
+    expect(res.data.sync_scope_prefix).toBe("clockout:org_1:user_sam:");
+    expect(res.summary).toMatch(/^2 scheduled shifts for you from 2026-11-01/);
+    expect(res.summary).toContain('starting "clockout:org_1:user_sam:"');
+
+    const [first, second] = res.data.events as Record<string, unknown>[];
+    expect(first).toEqual({
+      shift_id: 7,
+      user_id: "user_sam",
+      member: "Sam Lee",
+      sync_tag: "clockout:org_1:user_sam:shift:7",
+      title: "Shift · Acme",
+      description:
+        "Front desk\n\nScheduled in Clock Out for Sam Lee. Changes made here are overwritten on the next sync.\nclockout:org_1:user_sam:shift:7",
+      start: "2026-11-03T09:00:00-06:00",
+      end: "2026-11-03T17:00:00-06:00",
+      timezone: TZ,
+      note: "Front desk",
+      updated_at: "2026-10-30T12:00:00.000Z",
+    });
+    // No note: the description starts with the Clock Out line.
+    expect(second?.description).toMatch(/^Scheduled in Clock Out for/);
+    expect(second?.member).toBe("Unknown member");
+    expect(second?.updated_at).toBeNull();
+  });
+
+  it("defaults to today plus 14 days", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-05T18:00:00Z"));
+    try {
+      const res = await getCalendarShiftsTool(member, { timezone: TZ });
+      expect(res.data.window).toMatchObject({
+        start_date: "2026-11-05",
+        end_date: "2026-11-19",
+      });
+      expect(res.summary).toContain("0 scheduled shifts for");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("lets an admin sync one member's or everyone's shifts", async () => {
+    m.dbGetScheduledShifts.mockResolvedValue([shift]);
+    const one = await getCalendarShiftsTool(admin, {
+      member: "Sam",
+      start_date: "2026-11-01",
+      end_date: "2026-11-01",
+    });
+    expect(m.dbGetScheduledShifts.mock.calls[0][1]).toBe("user_sam");
+    expect(one.summary).toMatch(/^1 scheduled shift for Sam Lee/);
+
+    const all = await getCalendarShiftsTool(admin, {
+      member: " ALL ",
+      start_date: "2026-11-01",
+      end_date: "2026-11-01",
+    });
+    expect(m.dbGetScheduledShifts.mock.calls[1][1]).toBeNull();
+    expect(all.data.member).toBe("all");
+    expect(all.data.sync_scope_prefix).toBe("clockout:org_1:");
+    expect(all.summary).toContain("for everyone");
+    const [event] = all.data.events as { title: string }[];
+    // Everyone's shifts on one calendar say whose shift it is.
+    expect(event?.title).toBe("Sam Lee: Shift · Acme");
+  });
+
+  it("keeps members to their own shifts", async () => {
+    asRole("org:member");
+    const all = await getCalendarShiftsTool(member, { member: "all" });
+    expect(all.data.status).toBe("forbidden");
+    const other = await getCalendarShiftsTool(member, { member: "Pat" });
+    expect(other.isError).toBe(true);
+    expect(m.dbGetScheduledShifts).not.toHaveBeenCalled();
+  });
+
+  it("rejects backwards and overlong windows", async () => {
+    const backwards = await getCalendarShiftsTool(member, {
+      start_date: "2026-11-05",
+      end_date: "2026-11-04",
+    });
+    expect(backwards.data.status).toBe("invalid_input");
+    expect(backwards.summary).toContain("on or after start_date");
+
+    const long = await getCalendarShiftsTool(member, {
+      start_date: "2026-01-01",
+      end_date: "2026-12-31",
+    });
+    expect(long.data.status).toBe("invalid_input");
+    expect(long.summary).toContain(`at most ${CALENDAR_SYNC_MAX_DAYS} days`);
+    expect(m.dbGetScheduledShifts).not.toHaveBeenCalled();
+  });
+});
+
 describe("manage_time_off", () => {
   beforeEach(() => {
     m.getBillingSubscription.mockResolvedValue({
@@ -388,10 +543,87 @@ describe("manage_time_off", () => {
       8,
       null,
       "user_admin",
+      null,
     );
+    expect(m.dbGetTimeOffByExternalRef).not.toHaveBeenCalled();
+    expect(res.data.request).toMatchObject({ external_ref: null });
     expect(m.revalidateTag).toHaveBeenCalledWith("time-off-org_1", {
       expire: 0,
     });
+  });
+
+  it("files calendar imports with their external_ref", async () => {
+    asRole("org:member");
+    m.dbGetTimeOffByExternalRef.mockResolvedValue(undefined);
+    m.dbCreateTimeOffRequest.mockResolvedValue({
+      ...timeOff,
+      user_id: "user_sam",
+      status: "pending",
+      external_ref: "google-calendar:primary:evt1",
+    });
+    const res = await manageTimeOffTool(member, {
+      action: "request",
+      start_date: "2026-11-03",
+      external_ref: "  google-calendar:primary:evt1 ",
+    });
+    expect(res.data.status).toBe("pending");
+    expect(m.dbGetTimeOffByExternalRef).toHaveBeenCalledWith(
+      "org_1",
+      "user_sam",
+      "google-calendar:primary:evt1",
+    );
+    expect(m.dbCreateTimeOffRequest.mock.calls[0][8]).toBe(
+      "google-calendar:primary:evt1",
+    );
+    expect(res.data.request).toMatchObject({
+      external_ref: "google-calendar:primary:evt1",
+    });
+  });
+
+  it("returns the existing request instead of importing an event twice", async () => {
+    m.dbGetTimeOffByExternalRef.mockResolvedValue({
+      ...timeOff,
+      status: "denied",
+      external_ref: "google-calendar:primary:evt1",
+    });
+    const own = await manageTimeOffTool(admin, {
+      action: "request",
+      start_date: "2026-11-03",
+      external_ref: "google-calendar:primary:evt1",
+    });
+    expect(own.isError).toBeUndefined();
+    expect(own.data.status).toBe("already_imported");
+    expect(own.summary).toContain("Already imported: your vacation");
+    expect(own.summary).toContain("(denied)");
+    expect(own.data.request).toMatchObject({ request_id: timeOff.id });
+    expect(m.dbCreateTimeOffRequest).not.toHaveBeenCalled();
+
+    const forSam = await manageTimeOffTool(admin, {
+      action: "request",
+      member: "Sam",
+      start_date: "2026-11-03",
+      external_ref: "google-calendar:primary:evt1",
+    });
+    expect(forSam.summary).toMatch(/^Already imported: Sam .*'s vacation/);
+  });
+
+  it("treats a blank external_ref as none and rejects an overlong one", async () => {
+    m.dbCreateTimeOffRequest.mockResolvedValue(timeOff);
+    await manageTimeOffTool(admin, {
+      action: "request",
+      start_date: "2026-11-03",
+      external_ref: "   ",
+    });
+    expect(m.dbGetTimeOffByExternalRef).not.toHaveBeenCalled();
+    expect(m.dbCreateTimeOffRequest.mock.calls[0][8]).toBeNull();
+
+    const res = await manageTimeOffTool(admin, {
+      action: "request",
+      start_date: "2026-11-03",
+      external_ref: "x".repeat(MAX_TIME_OFF_EXTERNAL_REF_LENGTH + 1),
+    });
+    expect(res.data.status).toBe("invalid_input");
+    expect(res.summary).toContain("external_ref is too long");
   });
 
   it("files a member's own request as pending", async () => {

@@ -82,6 +82,8 @@ Schedule (manage_schedule):
 Time Off (manage_time_off):
 - Members request vacation or sick days for themselves (action 'request'); they stay pending until an admin approves them.
 - Admins can file time off for any member (pass member); it is approved right away unless approve: false. Admins approve or deny pending requests (actions 'approve'/'deny' with request_id from 'list') and can revoke approved time off (action 'cancel').
+- To put shifts on someone's own calendar (e.g. Google Calendar), use get_calendar_shifts and match events by sync_tag: add new shifts, update changed ones, and delete only tagged events (tag starting with sync_scope_prefix) in the returned window that are no longer in the result. Never touch untagged events. Show the planned changes and ask before writing.
+- When filing time off from calendar events (e.g. Google Calendar), confirm the list with the user first, and pass external_ref as 'google-calendar:<calendar id>:<event id>' for each one. Status "already_imported" means that event was filed before, so nothing new was created; it is not an error.
 - Needs a plan with Time Off; if it returns status "time_off_not_enabled", tell the user their organization's plan needs the Time Off feature.
 
 Overtime, Alerts & Other Settings (admins):
@@ -106,4 +108,5 @@ Location Tracking & Punch Location:
 
 Downloading Timesheet PDFs or Spreadsheets:
 - When the user asks to download or export a PDF or Excel spreadsheet of a timesheet (by week, month, or custom date range), call export_timesheet (use group_by: 'week' or 'month' when a weekly or monthly breakdown is desired).
-- Always include both returned clickable markdown download links (pdf.download_url and spreadsheet.download_url) in your response so the user can download either the PDF or the Excel spreadsheet on their phone or computer (requires being signed into Clock Out in their browser).`;
+- Always include both returned clickable markdown download links (pdf.download_url and spreadsheet.download_url) in your response so the user can download either the PDF or the Excel spreadsheet on their phone or computer (requires being signed into Clock Out in their browser).
+- When the user wants their hours in Google Sheets (or another spreadsheet app you have a connector for), call get_timesheet_tables instead and write each returned table to its own tab ("Shifts" and "Summary"), headers in row 1, as raw values rather than formulas. Ask before overwriting tabs that already hold data.`;
