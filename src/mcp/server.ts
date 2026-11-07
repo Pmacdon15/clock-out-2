@@ -1,6 +1,8 @@
 import type { AuthInfo, McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import {
+  getCalendarShiftsInputSchema,
+  getCalendarShiftsTool,
   manageAlertSettingsInputSchema,
   manageAlertSettingsTool,
   manageLocationSettingsInputSchema,
@@ -541,6 +543,21 @@ export function registerClockOutTools(server: McpServer) {
     (args, ctx) =>
       run(server, ctx.http?.authInfo, (caller) =>
         manageScheduleTool(caller, args),
+      ),
+  );
+
+  server.registerTool(
+    "get_calendar_shifts",
+    {
+      title: "Get scheduled shifts for a calendar sync",
+      description:
+        "Returns scheduled shifts as calendar-ready events for syncing into the user's own calendar (e.g. Google Calendar through another connector): title, start and end with timezone offset, description, and a sync_tag per shift. Defaults to your own shifts for today plus 14 days (at most 93 days); admins can pass a member or 'all'. Store each event's sync_tag on the calendar event (in its description, and as a private extended property when the calendar tool supports it). To sync, create events for new shifts, update tagged events that differ, and delete events in the window whose tag starts with sync_scope_prefix but isn't in the result (cancelled shifts). Never touch other events. Needs a plan with Scheduling.",
+      inputSchema: portable(getCalendarShiftsInputSchema),
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    (args, ctx) =>
+      run(server, ctx.http?.authInfo, (caller) =>
+        getCalendarShiftsTool(caller, args),
       ),
   );
 

@@ -181,6 +181,7 @@ describe("Clock Out MCP server", () => {
       "clock_out",
       "delete_time_entry",
       "export_timesheet",
+      "get_calendar_shifts",
       "get_clock_status",
       "get_location_settings",
       "get_timesheet_tables",
@@ -233,6 +234,7 @@ describe("Clock Out MCP server", () => {
       "get_weekly_timecard",
       "export_timesheet",
       "get_timesheet_tables",
+      "get_calendar_shifts",
     ]) {
       expect(tools.get(name)?.annotations?.readOnlyHint, name).toBe(true);
     }

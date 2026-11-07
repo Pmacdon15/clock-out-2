@@ -5,6 +5,8 @@ import {
   importTimeOffArgsSchema,
   importTimeOffPromptText,
   registerClockOutPrompts,
+  syncShiftsArgsSchema,
+  syncShiftsPromptText,
 } from "@/mcp/prompts";
 
 type PromptConfig = {
@@ -37,6 +39,19 @@ function registered() {
 describe("Clock Out MCP prompts", () => {
   const prompts = registered();
 
+  it("registers the sync-shifts-to-calendar prompt", () => {
+    const prompt = prompts.get("sync-shifts-to-calendar");
+    expect(prompt?.config.title).toBe("Sync my shifts to Google Calendar");
+    expect(prompt?.config.description).toMatch(/Google Calendar connector/);
+    expect(prompt?.config.argsSchema).toBe(syncShiftsArgsSchema);
+    const result = prompt?.cb({ calendar: "Work" });
+    expect(result?.messages).toHaveLength(1);
+    expect(result?.messages[0]?.role).toBe("user");
+    expect(result?.messages[0]?.content.text).toContain(
+      'my "Work" Google calendar',
+    );
+  });
+
   it("registers the import-time-off-from-calendar prompt", () => {
     const prompt = prompts.get("import-time-off-from-calendar");
     expect(prompt?.config.title).toBe("Import time off from Google Calendar");
@@ -52,6 +67,7 @@ describe("Clock Out MCP prompts", () => {
     expect([...prompts.keys()].sort()).toEqual([
       "export-timesheet-to-sheets",
       "import-time-off-from-calendar",
+      "sync-shifts-to-calendar",
     ]);
     const prompt = prompts.get("export-timesheet-to-sheets");
     expect(prompt?.config.title).toBe("Export timesheet to Google Sheets");
@@ -150,6 +166,43 @@ describe("importTimeOffPromptText", () => {
     ]) {
       expect(text).toContain(status);
     }
+    expect(text).toContain("If I don't have a Google Calendar connector");
+  });
+});
+
+describe("syncShiftsPromptText", () => {
+  it("defaults to the next 14 days on the primary calendar", () => {
+    expect(syncShiftsPromptText({})).toContain(
+      "Sync my Clock Out shifts for the next 14 days to my primary Google calendar.",
+    );
+    expect(syncShiftsPromptText({ period: " ", calendar: "" })).toBe(
+      syncShiftsPromptText({}),
+    );
+  });
+
+  it("uses the named period and calendar", () => {
+    expect(
+      syncShiftsPromptText({ period: " December ", calendar: " Work " }),
+    ).toContain('shifts for December to my "Work" Google calendar');
+  });
+
+  it("matches by sync_tag and only deletes tagged events in the window", () => {
+    const text = syncShiftsPromptText({});
+    expect(text).toContain("get_calendar_shifts");
+    expect(text).toContain("sync_scope_prefix");
+    expect(text).toContain(
+      "delete a tagged event whose tag isn't in the result",
+    );
+    expect(text).toContain(
+      "Never change or delete any event without a matching tag",
+    );
+    expect(text).toContain("don't touch events outside the window");
+  });
+
+  it("asks before writing and falls back without a connector", () => {
+    const text = syncShiftsPromptText({});
+    expect(text).toContain("ask before making them");
+    expect(text).toContain("private extended property");
     expect(text).toContain("If I don't have a Google Calendar connector");
   });
 });

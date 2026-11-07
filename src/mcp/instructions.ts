@@ -82,6 +82,7 @@ Schedule (manage_schedule):
 Time Off (manage_time_off):
 - Members request vacation or sick days for themselves (action 'request'); they stay pending until an admin approves them.
 - Admins can file time off for any member (pass member); it is approved right away unless approve: false. Admins approve or deny pending requests (actions 'approve'/'deny' with request_id from 'list') and can revoke approved time off (action 'cancel').
+- To put shifts on someone's own calendar (e.g. Google Calendar), use get_calendar_shifts and match events by sync_tag: add new shifts, update changed ones, and delete only tagged events (tag starting with sync_scope_prefix) in the returned window that are no longer in the result. Never touch untagged events. Show the planned changes and ask before writing.
 - When filing time off from calendar events (e.g. Google Calendar), confirm the list with the user first, and pass external_ref as 'google-calendar:<calendar id>:<event id>' for each one. Status "already_imported" means that event was filed before, so nothing new was created; it is not an error.
 - Needs a plan with Time Off; if it returns status "time_off_not_enabled", tell the user their organization's plan needs the Time Off feature.
 

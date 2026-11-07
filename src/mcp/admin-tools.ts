@@ -182,6 +182,23 @@ export const manageScheduleInputSchema = z.object({
   timezone: timezoneField,
 });
 
+export const getCalendarShiftsInputSchema = z.object({
+  org_id: orgIdField,
+  member: z
+    .string()
+    .optional()
+    .describe(
+      "Whose shifts: defaults to yourself. Admins can pass a member's name, email or user_id, or 'all' for everyone's shifts.",
+    ),
+  start_date: dateField(
+    "First day of the sync window (YYYY-MM-DD in `timezone`). Defaults to today.",
+  ),
+  end_date: dateField(
+    "Last day of the sync window (YYYY-MM-DD, inclusive). Defaults to 14 days after start_date.",
+  ),
+  timezone: timezoneField,
+});
+
 export const manageTimeOffInputSchema = z.object({
   org_id: orgIdField,
   action: z
@@ -835,6 +852,163 @@ export async function manageScheduleTool(
       organization: orgInfo(org),
       previous: formatShift(existing, tz, names),
       shift: formatShift(updated, tz, names),
+    },
+  };
+}
+
+/* --------------------------------------------------- calendar sync -- */
+
+/** Default sync window length, in days after start_date. */
+export const CALENDAR_SYNC_DEFAULT_DAYS = 14;
+/** Longest sync window, so one call can't pull a whole year of shifts. */
+export const CALENDAR_SYNC_MAX_DAYS = 93;
+
+/**
+ * The tag a synced calendar event carries, and the prefix that covers every
+ * event one sync owns. Org and member are part of it, so a sync of your own
+ * shifts never touches events another member's (or another org's) sync made.
+ */
+export const calendarSyncScope = (orgId: string, userId: string | null) =>
+  `clockout:${orgId}:${userId ? `${userId}:` : ""}`;
+
+export const calendarShiftTag = (shift: ScheduledShift) =>
+  `${calendarSyncScope(shift.org_id, shift.user_id)}shift:${shift.id}`;
+
+const isoInTz = (date: Date, tz: string) =>
+  formatInTimeZone(date, tz, "yyyy-MM-dd'T'HH:mm:ssXXX");
+
+function calendarEvent(
+  shift: ScheduledShift,
+  tz: string,
+  orgName: string,
+  memberName: string,
+  forEveryone: boolean,
+) {
+  const tag = calendarShiftTag(shift);
+  const title = `${forEveryone ? `${memberName}: ` : ""}Shift · ${orgName}`;
+  const description = [
+    ...(shift.note ? [shift.note, ""] : []),
+    `Scheduled in Clock Out for ${memberName}. Changes made here are overwritten on the next sync.`,
+    tag,
+  ].join("\n");
+  return {
+    shift_id: shift.id,
+    user_id: shift.user_id,
+    member: memberName,
+    sync_tag: tag,
+    title,
+    description,
+    start: isoInTz(new Date(shift.shift_start), tz),
+    end: isoInTz(new Date(shift.shift_end), tz),
+    timezone: tz,
+    note: shift.note,
+    updated_at: shift.updated_at
+      ? new Date(shift.updated_at).toISOString()
+      : null,
+  };
+}
+
+/**
+ * `get_calendar_shifts`: scheduled shifts as calendar-ready events for the AI
+ * to sync into the user's own calendar (e.g. Google Calendar) through its own
+ * connector. Every event carries a sync tag, and the result names the window
+ * and tag prefix the sync owns: tagged events in that window with no matching
+ * shift are shifts that were cancelled, and can be deleted.
+ */
+export async function getCalendarShiftsTool(
+  caller: McpCaller,
+  input: z.infer<typeof getCalendarShiftsInputSchema>,
+): Promise<ToolResult> {
+  const orgRes = await resolveOrg(caller.userId, input.org_id);
+  if (!orgRes.ok) return orgRes.result;
+  const { org } = orgRes;
+  if (!(await orgHasPlanFeature(org.orgId, SCHEDULING_FEATURE))) {
+    return {
+      summary: SCHEDULING_UPGRADE_REASON,
+      data: { status: "scheduling_not_enabled" },
+      isError: true,
+    };
+  }
+  const tz = validTimezone(input.timezone);
+
+  const forEveryone = input.member?.trim().toLowerCase() === "all";
+  if (forEveryone && !org.isAdmin) {
+    return forbidden("sync everyone's shifts");
+  }
+  let members: OrgMemberInfo[];
+  let onlyUserId: string | null = null;
+  if (forEveryone) {
+    members = await fetchOrgMembers(org.orgId);
+  } else {
+    const targetRes = await resolveTarget(caller, org, input.member);
+    if (!targetRes.ok) return targetRes.result;
+    members = targetRes.members;
+    onlyUserId = targetRes.member.userId;
+  }
+  const names = new Map(members.map((m) => [m.userId, m.name]));
+
+  const startDate =
+    input.start_date ?? formatInTimeZone(new Date(), tz, "yyyy-MM-dd");
+  const endDate =
+    input.end_date ??
+    format(
+      addDays(new Date(`${startDate}T12:00:00Z`), CALENDAR_SYNC_DEFAULT_DAYS),
+      "yyyy-MM-dd",
+    );
+  const rangeStart = parseFlexibleDateTime("00:00", tz, startDate) as Date;
+  const rangeEnd = addDays(
+    parseFlexibleDateTime("00:00", tz, endDate) as Date,
+    1,
+  );
+  const days = Math.round(
+    (rangeEnd.getTime() - rangeStart.getTime()) / 86_400_000,
+  );
+  if (days < 1) {
+    return invalid("end_date must be on or after start_date.");
+  }
+  if (days > CALENDAR_SYNC_MAX_DAYS) {
+    return invalid(
+      `Sync at most ${CALENDAR_SYNC_MAX_DAYS} days at a time; pick a shorter window.`,
+    );
+  }
+
+  const shifts = await dbGetScheduledShifts(
+    org.orgId,
+    onlyUserId,
+    rangeStart,
+    rangeEnd,
+  );
+  const events = shifts.map((shift) =>
+    calendarEvent(
+      shift,
+      tz,
+      org.orgName,
+      names.get(shift.user_id) ?? "Unknown member",
+      forEveryone,
+    ),
+  );
+  const who = onlyUserId
+    ? onlyUserId === caller.userId
+      ? "you"
+      : (names.get(onlyUserId) ?? "this member")
+    : "everyone";
+  const scope = calendarSyncScope(org.orgId, onlyUserId);
+
+  return {
+    summary: `${events.length} scheduled shift${events.length === 1 ? "" : "s"} for ${who} from ${startDate} to ${endDate}. To sync: create a calendar event for each shift whose sync_tag isn't on the calendar yet, update tagged events whose title, times or description differ, and delete events tagged with a sync_tag starting "${scope}" that start in this window but aren't in this list (those shifts were cancelled). Leave every other event alone.`,
+    data: {
+      status: "ready",
+      organization: orgInfo(org),
+      member: onlyUserId ? (names.get(onlyUserId) ?? null) : "all",
+      window: {
+        start_date: startDate,
+        end_date: endDate,
+        start: rangeStart.toISOString(),
+        end: rangeEnd.toISOString(),
+        timezone: tz,
+      },
+      sync_scope_prefix: scope,
+      events,
     },
   };
 }

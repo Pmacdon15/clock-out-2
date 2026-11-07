@@ -89,6 +89,10 @@ vi.mock("@/lib/db", () => ({
 }));
 
 import {
+  CALENDAR_SYNC_MAX_DAYS,
+  calendarShiftTag,
+  calendarSyncScope,
+  getCalendarShiftsTool,
   MAX_TIME_OFF_EXTERNAL_REF_LENGTH,
   manageAlertSettingsTool,
   manageLocationSettingsTool,
@@ -355,6 +359,154 @@ describe("manage_schedule", () => {
     });
     expect(res.data.status).toBe("invalid_input");
     expect(res.summary).toContain("has no shift");
+  });
+});
+
+describe("get_calendar_shifts", () => {
+  beforeEach(() => {
+    m.getBillingSubscription.mockResolvedValue({
+      subscriptionItems: [{ plan: { features: [{ slug: "scheduling" }] } }],
+    });
+  });
+
+  it("builds tags that are scoped to the org and member", () => {
+    expect(calendarSyncScope("org_1", "user_sam")).toBe(
+      "clockout:org_1:user_sam:",
+    );
+    expect(calendarSyncScope("org_1", null)).toBe("clockout:org_1:");
+    expect(calendarShiftTag(shift)).toBe("clockout:org_1:user_sam:shift:7");
+    // A member's tag falls under both their own scope and the org's.
+    expect(
+      calendarShiftTag(shift).startsWith(calendarSyncScope("org_1", null)),
+    ).toBe(true);
+  });
+
+  it("needs the scheduling plan feature", async () => {
+    m.getBillingSubscription.mockResolvedValue({ subscriptionItems: [] });
+    const res = await getCalendarShiftsTool(member, {});
+    expect(res.data.status).toBe("scheduling_not_enabled");
+    expect(m.dbGetScheduledShifts).not.toHaveBeenCalled();
+  });
+
+  it("returns your own shifts as calendar events for the window", async () => {
+    asRole("org:member");
+    m.dbGetScheduledShifts.mockResolvedValue([
+      {
+        ...shift,
+        note: "Front desk",
+        updated_at: new Date("2026-10-30T12:00:00Z"),
+      },
+      { ...shift, id: 8, user_id: "user_gone" },
+    ]);
+    const res = await getCalendarShiftsTool(member, {
+      start_date: "2026-11-01",
+      end_date: "2026-11-07",
+      timezone: TZ,
+    });
+
+    expect(m.dbGetScheduledShifts).toHaveBeenCalledWith(
+      "org_1",
+      "user_sam",
+      new Date("2026-11-01T06:00:00Z"),
+      new Date("2026-11-08T06:00:00Z"),
+    );
+    expect(res.data.status).toBe("ready");
+    expect(res.data.member).toBe("Sam Lee");
+    expect(res.data.window).toEqual({
+      start_date: "2026-11-01",
+      end_date: "2026-11-07",
+      start: "2026-11-01T06:00:00.000Z",
+      end: "2026-11-08T06:00:00.000Z",
+      timezone: TZ,
+    });
+    expect(res.data.sync_scope_prefix).toBe("clockout:org_1:user_sam:");
+    expect(res.summary).toMatch(/^2 scheduled shifts for you from 2026-11-01/);
+    expect(res.summary).toContain('starting "clockout:org_1:user_sam:"');
+
+    const [first, second] = res.data.events as Record<string, unknown>[];
+    expect(first).toEqual({
+      shift_id: 7,
+      user_id: "user_sam",
+      member: "Sam Lee",
+      sync_tag: "clockout:org_1:user_sam:shift:7",
+      title: "Shift · Acme",
+      description:
+        "Front desk\n\nScheduled in Clock Out for Sam Lee. Changes made here are overwritten on the next sync.\nclockout:org_1:user_sam:shift:7",
+      start: "2026-11-03T09:00:00-06:00",
+      end: "2026-11-03T17:00:00-06:00",
+      timezone: TZ,
+      note: "Front desk",
+      updated_at: "2026-10-30T12:00:00.000Z",
+    });
+    // No note: the description starts with the Clock Out line.
+    expect(second?.description).toMatch(/^Scheduled in Clock Out for/);
+    expect(second?.member).toBe("Unknown member");
+    expect(second?.updated_at).toBeNull();
+  });
+
+  it("defaults to today plus 14 days", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-05T18:00:00Z"));
+    try {
+      const res = await getCalendarShiftsTool(member, { timezone: TZ });
+      expect(res.data.window).toMatchObject({
+        start_date: "2026-11-05",
+        end_date: "2026-11-19",
+      });
+      expect(res.summary).toContain("0 scheduled shifts for");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("lets an admin sync one member's or everyone's shifts", async () => {
+    m.dbGetScheduledShifts.mockResolvedValue([shift]);
+    const one = await getCalendarShiftsTool(admin, {
+      member: "Sam",
+      start_date: "2026-11-01",
+      end_date: "2026-11-01",
+    });
+    expect(m.dbGetScheduledShifts.mock.calls[0][1]).toBe("user_sam");
+    expect(one.summary).toMatch(/^1 scheduled shift for Sam Lee/);
+
+    const all = await getCalendarShiftsTool(admin, {
+      member: " ALL ",
+      start_date: "2026-11-01",
+      end_date: "2026-11-01",
+    });
+    expect(m.dbGetScheduledShifts.mock.calls[1][1]).toBeNull();
+    expect(all.data.member).toBe("all");
+    expect(all.data.sync_scope_prefix).toBe("clockout:org_1:");
+    expect(all.summary).toContain("for everyone");
+    const [event] = all.data.events as { title: string }[];
+    // Everyone's shifts on one calendar say whose shift it is.
+    expect(event?.title).toBe("Sam Lee: Shift · Acme");
+  });
+
+  it("keeps members to their own shifts", async () => {
+    asRole("org:member");
+    const all = await getCalendarShiftsTool(member, { member: "all" });
+    expect(all.data.status).toBe("forbidden");
+    const other = await getCalendarShiftsTool(member, { member: "Pat" });
+    expect(other.isError).toBe(true);
+    expect(m.dbGetScheduledShifts).not.toHaveBeenCalled();
+  });
+
+  it("rejects backwards and overlong windows", async () => {
+    const backwards = await getCalendarShiftsTool(member, {
+      start_date: "2026-11-05",
+      end_date: "2026-11-04",
+    });
+    expect(backwards.data.status).toBe("invalid_input");
+    expect(backwards.summary).toContain("on or after start_date");
+
+    const long = await getCalendarShiftsTool(member, {
+      start_date: "2026-01-01",
+      end_date: "2026-12-31",
+    });
+    expect(long.data.status).toBe("invalid_input");
+    expect(long.summary).toContain(`at most ${CALENDAR_SYNC_MAX_DAYS} days`);
+    expect(m.dbGetScheduledShifts).not.toHaveBeenCalled();
   });
 });
 
