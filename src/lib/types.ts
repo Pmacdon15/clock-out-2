@@ -345,6 +345,11 @@ export type TimeOffRequest = {
   status: TimeOffStatus;
   reviewed_by: string | null;
   reviewed_at: Date | null;
+  /**
+   * Where an imported request came from, e.g. "google-calendar:<event id>".
+   * Null for requests filed by hand.
+   */
+  external_ref?: string | null;
   created_at?: Date;
   updated_at?: Date;
 };

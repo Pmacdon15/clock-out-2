@@ -1247,6 +1247,16 @@ export function ensureTimeOffTable(): Promise<void> {
 			END IF;
 		END $$
 	`;
+    // Set on requests an AI imported from a calendar event, so importing the
+    // same event again finds the request instead of filing a second one.
+    await sql`
+		ALTER TABLE time_off_requests ADD COLUMN IF NOT EXISTS external_ref TEXT
+	`;
+    await sql`
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_time_off_requests_external_ref
+			ON time_off_requests (org_id, user_id, external_ref)
+			WHERE external_ref IS NOT NULL
+	`;
     await sql`
 		CREATE TABLE IF NOT EXISTS time_off_allowances (
 			org_id TEXT NOT NULL,
@@ -1288,7 +1298,7 @@ export async function dbGetTimeOffRequests(
 		SELECT id, org_id, user_id, request_type,
 			start_date::TEXT AS start_date, end_date::TEXT AS end_date,
 			hours_per_day, note, status, reviewed_by, reviewed_at,
-			created_at, updated_at
+			external_ref, created_at, updated_at
 		FROM time_off_requests
 		WHERE org_id = ${orgId}
 		AND (${userId}::TEXT IS NULL OR user_id = ${userId})
@@ -1431,6 +1441,7 @@ export async function dbCreateTimeOffRequest(
   hoursPerDay: number,
   note: string | null,
   approvedBy: string | null = null,
+  externalRef: string | null = null,
 ) {
   await ensureTimeOffTable();
   const [, inserted] = await sql.transaction([
@@ -1438,23 +1449,49 @@ export async function dbCreateTimeOffRequest(
     sql`
 		INSERT INTO time_off_requests
 			(org_id, user_id, request_type, start_date, end_date, hours_per_day, note,
-			status, reviewed_by, reviewed_at)
+			status, reviewed_by, reviewed_at, external_ref)
 		SELECT ${orgId}, ${userId}, ${type}, ${startDate}::DATE, ${endDate}::DATE,
 			${hoursPerDay}, ${note}, ${approvedBy ? "approved" : "pending"},
-			${approvedBy}, ${approvedBy ? new Date() : null}
+			${approvedBy}, ${approvedBy ? new Date() : null}, ${externalRef}
 		WHERE NOT EXISTS (
 			SELECT 1 FROM time_off_requests
 			WHERE user_id = ${userId} AND org_id = ${orgId}
-			AND status IN ('pending', 'approved')
-			AND start_date <= ${endDate}::DATE AND end_date >= ${startDate}::DATE
+			AND (
+				(status IN ('pending', 'approved')
+				AND start_date <= ${endDate}::DATE AND end_date >= ${startDate}::DATE)
+				OR external_ref = ${externalRef}
+			)
 		)
 		RETURNING id, org_id, user_id, request_type,
 			start_date::TEXT AS start_date, end_date::TEXT AS end_date,
 			hours_per_day, note, status, reviewed_by, reviewed_at,
-			created_at, updated_at
+			external_ref, created_at, updated_at
 	`,
   ]);
   return inserted[0] as unknown as TimeOffRequest | undefined;
+}
+
+/**
+ * The member's request imported from this external event (see
+ * `external_ref`), in any status, or undefined if it was never imported.
+ */
+export async function dbGetTimeOffByExternalRef(
+  orgId: string,
+  userId: string,
+  externalRef: string,
+) {
+  await ensureTimeOffTable();
+  const [row] = await sql`
+		SELECT id, org_id, user_id, request_type,
+			start_date::TEXT AS start_date, end_date::TEXT AS end_date,
+			hours_per_day, note, status, reviewed_by, reviewed_at,
+			external_ref, created_at, updated_at
+		FROM time_off_requests
+		WHERE org_id = ${orgId} AND user_id = ${userId}
+		AND external_ref = ${externalRef}
+		LIMIT 1
+	`;
+  return row as unknown as TimeOffRequest | undefined;
 }
 
 /** Approves or denies a pending request. Undefined if none matched. */

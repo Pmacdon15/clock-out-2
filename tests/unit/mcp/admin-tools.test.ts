@@ -18,6 +18,7 @@ const m = vi.hoisted(() => ({
   dbGetTimeEntries: vi.fn(async () => []),
   dbGetTimeOffRequests: vi.fn(async () => [] as unknown[]),
   dbCreateTimeOffRequest: vi.fn(),
+  dbGetTimeOffByExternalRef: vi.fn(),
   dbReviewTimeOffRequest: vi.fn(),
   dbCancelTimeOffRequest: vi.fn(),
   dbGetOvertimeSettings: vi.fn(),
@@ -72,6 +73,7 @@ vi.mock("@/lib/db", () => ({
   dbGetTimeEntries: m.dbGetTimeEntries,
   dbGetTimeOffRequests: m.dbGetTimeOffRequests,
   dbCreateTimeOffRequest: m.dbCreateTimeOffRequest,
+  dbGetTimeOffByExternalRef: m.dbGetTimeOffByExternalRef,
   dbReviewTimeOffRequest: m.dbReviewTimeOffRequest,
   dbCancelTimeOffRequest: m.dbCancelTimeOffRequest,
   dbGetOvertimeSettings: m.dbGetOvertimeSettings,
@@ -87,6 +89,7 @@ vi.mock("@/lib/db", () => ({
 }));
 
 import {
+  MAX_TIME_OFF_EXTERNAL_REF_LENGTH,
   manageAlertSettingsTool,
   manageLocationSettingsTool,
   manageMemberTool,
@@ -388,10 +391,87 @@ describe("manage_time_off", () => {
       8,
       null,
       "user_admin",
+      null,
     );
+    expect(m.dbGetTimeOffByExternalRef).not.toHaveBeenCalled();
+    expect(res.data.request).toMatchObject({ external_ref: null });
     expect(m.revalidateTag).toHaveBeenCalledWith("time-off-org_1", {
       expire: 0,
     });
+  });
+
+  it("files calendar imports with their external_ref", async () => {
+    asRole("org:member");
+    m.dbGetTimeOffByExternalRef.mockResolvedValue(undefined);
+    m.dbCreateTimeOffRequest.mockResolvedValue({
+      ...timeOff,
+      user_id: "user_sam",
+      status: "pending",
+      external_ref: "google-calendar:primary:evt1",
+    });
+    const res = await manageTimeOffTool(member, {
+      action: "request",
+      start_date: "2026-11-03",
+      external_ref: "  google-calendar:primary:evt1 ",
+    });
+    expect(res.data.status).toBe("pending");
+    expect(m.dbGetTimeOffByExternalRef).toHaveBeenCalledWith(
+      "org_1",
+      "user_sam",
+      "google-calendar:primary:evt1",
+    );
+    expect(m.dbCreateTimeOffRequest.mock.calls[0][8]).toBe(
+      "google-calendar:primary:evt1",
+    );
+    expect(res.data.request).toMatchObject({
+      external_ref: "google-calendar:primary:evt1",
+    });
+  });
+
+  it("returns the existing request instead of importing an event twice", async () => {
+    m.dbGetTimeOffByExternalRef.mockResolvedValue({
+      ...timeOff,
+      status: "denied",
+      external_ref: "google-calendar:primary:evt1",
+    });
+    const own = await manageTimeOffTool(admin, {
+      action: "request",
+      start_date: "2026-11-03",
+      external_ref: "google-calendar:primary:evt1",
+    });
+    expect(own.isError).toBeUndefined();
+    expect(own.data.status).toBe("already_imported");
+    expect(own.summary).toContain("Already imported: your vacation");
+    expect(own.summary).toContain("(denied)");
+    expect(own.data.request).toMatchObject({ request_id: timeOff.id });
+    expect(m.dbCreateTimeOffRequest).not.toHaveBeenCalled();
+
+    const forSam = await manageTimeOffTool(admin, {
+      action: "request",
+      member: "Sam",
+      start_date: "2026-11-03",
+      external_ref: "google-calendar:primary:evt1",
+    });
+    expect(forSam.summary).toMatch(/^Already imported: Sam .*'s vacation/);
+  });
+
+  it("treats a blank external_ref as none and rejects an overlong one", async () => {
+    m.dbCreateTimeOffRequest.mockResolvedValue(timeOff);
+    await manageTimeOffTool(admin, {
+      action: "request",
+      start_date: "2026-11-03",
+      external_ref: "   ",
+    });
+    expect(m.dbGetTimeOffByExternalRef).not.toHaveBeenCalled();
+    expect(m.dbCreateTimeOffRequest.mock.calls[0][8]).toBeNull();
+
+    const res = await manageTimeOffTool(admin, {
+      action: "request",
+      start_date: "2026-11-03",
+      external_ref: "x".repeat(MAX_TIME_OFF_EXTERNAL_REF_LENGTH + 1),
+    });
+    expect(res.data.status).toBe("invalid_input");
+    expect(res.summary).toContain("external_ref is too long");
   });
 
   it("files a member's own request as pending", async () => {

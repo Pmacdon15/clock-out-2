@@ -1300,7 +1300,7 @@ describe("time off requests", () => {
   it("ensureTimeOffTable creates the tables and index once", async () => {
     sql.mockResolvedValue([]);
     await Promise.all([db.ensureTimeOffTable(), db.ensureTimeOffTable()]);
-    expect(sql).toHaveBeenCalledTimes(4);
+    expect(sql).toHaveBeenCalledTimes(6);
     expect(textOf(0)).toContain("CREATE TABLE IF NOT EXISTS time_off_requests");
     expect(textOf(0)).toContain("CHECK (end_date >= start_date)");
     expect(textOf(0)).toContain("'vacation', 'sick', 'unpaid'");
@@ -1308,7 +1308,15 @@ describe("time off requests", () => {
     // Older tables get the unpaid type added to their check constraint.
     expect(textOf(2)).toContain("time_off_requests_request_type_check");
     expect(textOf(2)).toContain("'vacation', 'sick', 'unpaid'");
-    expect(textOf(3)).toContain(
+    // Older tables get the external_ref column for calendar imports, and
+    // each member can import an event only once.
+    expect(textOf(3)).toContain("ADD COLUMN IF NOT EXISTS external_ref TEXT");
+    expect(textOf(4)).toContain(
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_time_off_requests_external_ref",
+    );
+    expect(textOf(4)).toContain("(org_id, user_id, external_ref)");
+    expect(textOf(4)).toContain("WHERE external_ref IS NOT NULL");
+    expect(textOf(5)).toContain(
       "CREATE TABLE IF NOT EXISTS time_off_allowances",
     );
   });
@@ -1319,7 +1327,7 @@ describe("time off requests", () => {
     sql.mockReset();
     sql.mockResolvedValue([]);
     await db.ensureTimeOffTable();
-    expect(sql).toHaveBeenCalledTimes(4);
+    expect(sql).toHaveBeenCalledTimes(6);
   });
 
   it("dbGetTimeOffRequests reads dates as text and tags the cache", async () => {
@@ -1329,6 +1337,7 @@ describe("time off requests", () => {
       db.dbGetTimeOffRequests("o1", null, "2025-01-01"),
     ).resolves.toEqual([{ id: 1 }]);
     expect(textOf(0)).toContain("start_date::TEXT AS start_date");
+    expect(textOf(0)).toContain("external_ref");
     expect(textOf(0)).toContain("FROM time_off_requests");
     expect(valuesOf(0)).toEqual(["o1", null, null, "2025-01-01"]);
     expect(cacheTag).toHaveBeenCalledWith("time-off-o1");
@@ -1376,11 +1385,15 @@ describe("time off requests", () => {
       "pending",
       null,
       null,
+      null,
       "u1",
       "o1",
       "2026-01-07",
       "2026-01-05",
+      null,
     ]);
+    expect(textOf(1)).toContain("OR external_ref = ");
+    expect(textOf(1)).toContain("external_ref, created_at, updated_at");
 
     sql.mockClear();
     sql.transaction.mockResolvedValue([[], [{ id: 6 }]]);
@@ -1405,6 +1418,45 @@ describe("time off requests", () => {
     sql.transaction.mockResolvedValue([[], []]);
     await expect(
       db.dbCreateTimeOffRequest("o1", "u1", "sick", "a", "b", 8, null),
+    ).resolves.toBeUndefined();
+  });
+
+  it("dbCreateTimeOffRequest stores a calendar import's external_ref", async () => {
+    await ready();
+    sql.mockImplementation((strings: TemplateStringsArray) => strings);
+    sql.transaction.mockResolvedValue([[], [{ id: 7 }]]);
+    await expect(
+      db.dbCreateTimeOffRequest(
+        "o1",
+        "u1",
+        "vacation",
+        "2026-01-05",
+        "2026-01-05",
+        8,
+        "Trip",
+        null,
+        "google-calendar:primary:evt1",
+      ),
+    ).resolves.toEqual({ id: 7 });
+    // Stored on the row, and an existing request with the same ref blocks
+    // the insert even if it was denied or cancelled.
+    expect(valuesOf(1)[10]).toBe("google-calendar:primary:evt1");
+    expect(valuesOf(1).at(-1)).toBe("google-calendar:primary:evt1");
+  });
+
+  it("dbGetTimeOffByExternalRef finds a member's imported request", async () => {
+    await ready();
+    sql.mockResolvedValueOnce([{ id: 9 }]);
+    await expect(
+      db.dbGetTimeOffByExternalRef("o1", "u1", "google-calendar:primary:evt1"),
+    ).resolves.toEqual({ id: 9 });
+    expect(textOf(0)).toContain("AND external_ref = ");
+    expect(textOf(0)).toContain("start_date::TEXT AS start_date");
+    expect(valuesOf(0)).toEqual(["o1", "u1", "google-calendar:primary:evt1"]);
+
+    sql.mockResolvedValueOnce([]);
+    await expect(
+      db.dbGetTimeOffByExternalRef("o1", "u1", "missing"),
     ).resolves.toBeUndefined();
   });
 

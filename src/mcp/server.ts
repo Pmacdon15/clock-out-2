@@ -549,7 +549,7 @@ export function registerClockOutTools(server: McpServer) {
     {
       title: "Request, approve, deny, or cancel time off",
       description:
-        "Lists vacation and sick time off, files a request (action: 'request'), approves or denies a pending request (actions 'approve'/'deny', admin-only), or cancels one (action: 'cancel': members withdraw their own pending requests; admins can also revoke approved time off). Admins ('org:admin') can file time off for any member by passing member, and it is approved right away unless approve: false. Approved time off shows in hours views and reports.",
+        "Lists vacation and sick time off, files a request (action: 'request'), approves or denies a pending request (actions 'approve'/'deny', admin-only), or cancels one (action: 'cancel': members withdraw their own pending requests; admins can also revoke approved time off). Admins ('org:admin') can file time off for any member by passing member, and it is approved right away unless approve: false. Approved time off shows in hours views and reports. When importing time off from a calendar, pass external_ref (the event's ID) so the same event is never filed twice.",
       inputSchema: portable(manageTimeOffInputSchema),
       annotations: {
         readOnlyHint: false,

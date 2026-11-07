@@ -26,6 +26,7 @@ import {
   dbGetScheduledShifts,
   dbGetSites,
   dbGetTimeEntries,
+  dbGetTimeOffByExternalRef,
   dbGetTimeOffRequests,
   dbReviewTimeOffRequest,
   dbUpdateLocationSettings,
@@ -230,6 +231,12 @@ export const manageTimeOffInputSchema = z.object({
     .enum(["pending", "approved", "denied", "cancelled"])
     .optional()
     .describe("For 'list': only show requests with this status."),
+  external_ref: z
+    .string()
+    .optional()
+    .describe(
+      "For 'request' when importing from a calendar: a stable ID for the source event, e.g. 'google-calendar:<calendar id>:<event id>' (for one occurrence of a recurring event, use that occurrence's own event id). If this member already has a request with the same external_ref, in any status, nothing new is filed and the existing request is returned with status 'already_imported'.",
+    ),
 });
 
 export const manageOvertimeSettingsInputSchema = z.object({
@@ -854,8 +861,12 @@ function formatTimeOff(request: TimeOffRequest, names: Map<string, string>) {
     reviewed_by: request.reviewed_by
       ? (names.get(request.reviewed_by) ?? request.reviewed_by)
       : null,
+    external_ref: request.external_ref ?? null,
   };
 }
+
+/** Longest external_ref accepted; real calendar event IDs are far shorter. */
+export const MAX_TIME_OFF_EXTERNAL_REF_LENGTH = 300;
 
 export async function manageTimeOffTool(
   caller: McpCaller,
@@ -941,6 +952,29 @@ export async function manageTimeOffTool(
     if (note && note.length > MAX_TIME_OFF_NOTE_LENGTH) {
       return invalid("Note is too long (500 characters at most).");
     }
+    const externalRef = input.external_ref?.trim() || null;
+    if (externalRef && externalRef.length > MAX_TIME_OFF_EXTERNAL_REF_LENGTH) {
+      return invalid(
+        `external_ref is too long (${MAX_TIME_OFF_EXTERNAL_REF_LENGTH} characters at most).`,
+      );
+    }
+    if (externalRef) {
+      const existing = await dbGetTimeOffByExternalRef(
+        org.orgId,
+        target.userId,
+        externalRef,
+      );
+      if (existing) {
+        return {
+          summary: `Already imported: ${forSomeoneElse ? `${target.name}'s` : "your"} ${TIME_OFF_TYPE_LABELS[existing.request_type].toLowerCase()} on ${formatTimeOffDates(existing)} (${TIME_OFF_STATUS_LABELS[existing.status].toLowerCase()}). Nothing new was filed.`,
+          data: {
+            status: "already_imported",
+            organization: orgInfo(org),
+            request: formatTimeOff(existing, names),
+          },
+        };
+      }
+    }
     const created = await dbCreateTimeOffRequest(
       org.orgId,
       target.userId,
@@ -950,6 +984,7 @@ export async function manageTimeOffTool(
       hoursPerDay,
       note,
       approve ? caller.userId : null,
+      externalRef,
     );
     if (!created) {
       return {
