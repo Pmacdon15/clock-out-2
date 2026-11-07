@@ -1,10 +1,9 @@
 import type { ScheduledShift } from "./types";
 
 /**
- * Adding scheduled shifts to the user's own calendar straight from the app,
- * without going through the AI: a Google Calendar "add event" link per shift,
- * and an iCalendar (.ics) file for one or many shifts that Apple Calendar,
- * Outlook and Google Calendar can all import.
+ * Putting scheduled shifts on the user's own calendar straight from the app,
+ * without going through the AI: "add event" links for one shift, and the
+ * iCalendar text the subscription feed (see calendar-feed.ts) serves.
  */
 
 export type CalendarShiftEvent = {
@@ -54,6 +53,19 @@ export function googleCalendarUrl(event: CalendarShiftEvent): string {
   return `https://calendar.google.com/calendar/render?${params.toString()}`;
 }
 
+/** An Outlook.com link that opens a prefilled "new event" page. */
+export function outlookCalendarUrl(event: CalendarShiftEvent): string {
+  const params = new URLSearchParams({
+    path: "/calendar/action/compose",
+    rru: "addevent",
+    subject: event.title,
+    startdt: event.start.toISOString(),
+    enddt: event.end.toISOString(),
+    body: event.description,
+  });
+  return `https://outlook.live.com/calendar/0/deeplink/compose?${params.toString()}`;
+}
+
 /** Escapes text for an iCalendar TEXT value (RFC 5545 §3.3.11). */
 export const escapeIcsText = (text: string) =>
   text
@@ -87,6 +99,7 @@ export function foldIcsLine(line: string): string {
 export function buildIcsCalendar(
   events: CalendarShiftEvent[],
   now: Date = new Date(),
+  name = "Clock Out shifts",
 ): string {
   const stamp = formatUtcStamp(now);
   const lines = [
@@ -95,6 +108,10 @@ export function buildIcsCalendar(
     "PRODID:-//Clock Out//Schedule//EN",
     "CALSCALE:GREGORIAN",
     "METHOD:PUBLISH",
+    `X-WR-CALNAME:${escapeIcsText(name)}`,
+    // Ask subscribed apps to check for changes every hour.
+    "REFRESH-INTERVAL;VALUE=DURATION:PT1H",
+    "X-PUBLISHED-TTL:PT1H",
     ...events.flatMap((event) => [
       "BEGIN:VEVENT",
       `UID:${event.uid}`,
@@ -108,19 +125,4 @@ export function buildIcsCalendar(
     "END:VCALENDAR",
   ];
   return `${lines.map(foldIcsLine).join("\r\n")}\r\n`;
-}
-
-/** Downloads an .ics file in the browser. */
-export function downloadIcs(events: CalendarShiftEvent[], fileName: string) {
-  const blob = new Blob([buildIcsCalendar(events)], {
-    type: "text/calendar;charset=utf-8",
-  });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = fileName.endsWith(".ics") ? fileName : `${fileName}.ics`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
 }

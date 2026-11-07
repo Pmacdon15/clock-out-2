@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => {
       getOrgReportingSettings: vi.fn(() => "reporting_settings"),
       getOrgSites: vi.fn(() => "sites"),
       getOrgTimeEntries: vi.fn(async (filters: unknown) => ({ org: filters })),
+      getCalendarFeedPath: vi.fn(() => "calendar_feed"),
       getSchedule: vi.fn(() => "schedule"),
       getTimeEntries: vi.fn(async (...args: unknown[]) => ({ args })),
       getTimeOffAllowances: vi.fn(() => "allowances"),
@@ -225,6 +226,7 @@ describe("SchedulePage", () => {
     await renderOnce(SchedulePage);
     expect(await screen.findByTestId("schedule")).toBeVisible();
     expect(latest("schedule")).toEqual({
+      calendarFeedPromise: "calendar_feed",
       isAdmin: true,
       membersPromise: "members",
       schedulePromise: "schedule",

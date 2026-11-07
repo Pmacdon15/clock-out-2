@@ -15,6 +15,7 @@ import {
   isValidBreakLimit,
   validateBreak,
 } from "./break-utils";
+import { createFeedToken, feedPath } from "./calendar-feed";
 import { fetchAllPages } from "./clerk-pagination";
 import {
   dbCancelTimeOffRequest,
@@ -1934,4 +1935,16 @@ export async function setTimeOffAllowanceDal(
       console.error("Error saving PTO allowance: ", e);
       return errAsync({ reason: "Failed to save PTO allowance" } as const);
     });
+}
+
+/**
+ * The path of the signed-in member's private calendar feed for the current
+ * org, for subscribing to their shifts in a calendar app. Null when there is
+ * no org or the server has no secret to sign feed URLs with.
+ */
+export async function getCalendarFeedPath(): Promise<string | null> {
+  const { userId, orgId } = await auth.protect();
+  if (!userId || !orgId) return null;
+  const token = createFeedToken(orgId, userId);
+  return token ? feedPath(token) : null;
 }
