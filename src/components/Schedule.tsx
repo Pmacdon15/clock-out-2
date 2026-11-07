@@ -2,7 +2,13 @@
 
 import { useMutation } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { CalendarClock, Loader2, Pencil, Trash2 } from "lucide-react";
+import {
+  CalendarClock,
+  CalendarPlus,
+  Loader2,
+  Pencil,
+  Trash2,
+} from "lucide-react";
 import { use, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -10,6 +16,11 @@ import {
   deleteScheduledShiftAction,
   updateScheduledShiftAction,
 } from "@/lib/actions";
+import {
+  downloadIcs,
+  googleCalendarUrl,
+  shiftToCalendarEvent,
+} from "@/lib/calendar-export";
 import {
   countShiftStatuses,
   isFlaggedStatus,
@@ -236,17 +247,50 @@ function EditShiftForm({
   );
 }
 
+/** Links to put one shift on the user's own calendar. */
+function AddToCalendarLinks({
+  shift,
+  memberName,
+}: {
+  shift: ScheduledShiftWithStatus;
+  memberName?: string;
+}) {
+  const event = shiftToCalendarEvent(shift, memberName);
+  return (
+    <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
+      <a
+        className="rounded-lg border border-zinc-200 px-2.5 py-1 font-semibold hover:bg-zinc-100 dark:border-zinc-800 dark:hover:bg-zinc-800"
+        href={googleCalendarUrl(event)}
+        rel="noopener noreferrer"
+        target="_blank"
+      >
+        Google Calendar
+      </a>
+      <button
+        className="rounded-lg border border-zinc-200 px-2.5 py-1 font-semibold hover:bg-zinc-100 dark:border-zinc-800 dark:hover:bg-zinc-800"
+        onClick={() => downloadIcs([event], `shift-${shift.id}`)}
+        type="button"
+      >
+        Apple / Outlook (.ics)
+      </button>
+    </div>
+  );
+}
+
 function ShiftRow({
   shift,
   memberName,
   isAdmin,
+  canAddToCalendar,
 }: {
   shift: ScheduledShiftWithStatus;
   memberName?: string;
   isAdmin: boolean;
+  canAddToCalendar: boolean;
 }) {
   const [confirming, setConfirming] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [addingToCalendar, setAddingToCalendar] = useState(false);
   const { mutate, isPending } = useMutation({
     mutationFn: (id: number) =>
       deleteScheduledShiftAction(id, browserTimezone()),
@@ -284,6 +328,18 @@ function ShiftRow({
           >
             {SHIFT_STATUS_LABELS[shift.status]}
           </span>
+          {canAddToCalendar && (
+            <button
+              aria-expanded={addingToCalendar}
+              aria-label="Add shift to calendar"
+              className="p-1 text-muted-foreground transition-colors hover:text-foreground"
+              onClick={() => setAddingToCalendar((open) => !open)}
+              title="Add to calendar"
+              type="button"
+            >
+              <CalendarPlus className="h-3.5 w-3.5" />
+            </button>
+          )}
           {isAdmin &&
             (confirming ? (
               <span className="flex items-center gap-1 text-xs">
@@ -339,6 +395,9 @@ function ShiftRow({
       )}
       {shift.note && (
         <p className="text-muted-foreground text-xs italic">{shift.note}</p>
+      )}
+      {canAddToCalendar && addingToCalendar && (
+        <AddToCalendarLinks memberName={memberName} shift={shift} />
       )}
       {isAdmin && editing && (
         <EditShiftForm onDone={() => setEditing(false)} shift={shift} />
@@ -526,20 +585,30 @@ export default function Schedule({
   const upcoming = shifts.filter(isCurrentOrUpcoming);
   const past = shifts.filter((shift) => !isCurrentOrUpcoming(shift)).reverse();
 
-  const renderList = (list: ScheduledShiftWithStatus[], empty: string) =>
+  const nameFor = (shift: ScheduledShiftWithStatus) =>
+    isAdmin ? (memberNames.get(shift.user_id) ?? "Unknown member") : undefined;
+
+  const addAllToCalendar = () =>
+    downloadIcs(
+      upcoming.map((shift) => shiftToCalendarEvent(shift, nameFor(shift))),
+      isAdmin ? "clock-out-schedule" : "my-shifts",
+    );
+
+  const renderList = (
+    list: ScheduledShiftWithStatus[],
+    empty: string,
+    canAddToCalendar = false,
+  ) =>
     list.length === 0 ? (
       <p className="py-4 text-muted-foreground text-sm">{empty}</p>
     ) : (
       <ul>
         {list.map((shift) => (
           <ShiftRow
+            canAddToCalendar={canAddToCalendar}
             isAdmin={isAdmin}
             key={shift.id}
-            memberName={
-              isAdmin
-                ? (memberNames.get(shift.user_id) ?? "Unknown member")
-                : undefined
-            }
+            memberName={nameFor(shift)}
             shift={shift}
           />
         ))}
@@ -587,20 +656,40 @@ export default function Schedule({
       </Card>
 
       <Card className="p-6 sm:p-8">
-        <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <h4 className="font-bold text-lg">Upcoming &amp; in progress</h4>
-          {isAdmin && (
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                checked={flaggedOnly}
-                onChange={(e) => setFlaggedOnly(e.target.checked)}
-                type="checkbox"
-              />
-              Flagged only
-            </label>
-          )}
+          <div className="flex flex-wrap items-center gap-3">
+            {isAdmin && (
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  checked={flaggedOnly}
+                  onChange={(e) => setFlaggedOnly(e.target.checked)}
+                  type="checkbox"
+                />
+                Flagged only
+              </label>
+            )}
+            {upcoming.length > 0 && (
+              <Button
+                onClick={addAllToCalendar}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                <CalendarPlus className="mr-2 h-4 w-4" />
+                Add all to calendar
+              </Button>
+            )}
+          </div>
         </div>
-        {renderList(upcoming, "No upcoming shifts.")}
+        {upcoming.length > 0 && (
+          <p className="mb-2 text-muted-foreground text-xs">
+            Downloads an .ics file you can open in Apple Calendar or Outlook, or
+            import into Google Calendar. Use the calendar icon on a shift to add
+            just that one.
+          </p>
+        )}
+        {renderList(upcoming, "No upcoming shifts.", true)}
       </Card>
 
       <Card className="p-6 sm:p-8">
