@@ -12,12 +12,6 @@ const mocks = vi.hoisted(() => ({
   deleteScheduledShiftAction: vi.fn(),
   updateScheduledShiftAction: vi.fn(),
   toast: { success: vi.fn(), error: vi.fn() },
-  downloadIcs: vi.fn(),
-}));
-
-vi.mock("@/lib/calendar-export", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/calendar-export")>()),
-  downloadIcs: mocks.downloadIcs,
 }));
 
 vi.mock("@/lib/actions", () => ({
@@ -493,7 +487,7 @@ describe("Schedule", () => {
     expect(screen.queryByLabelText("Edit shift")).toBeNull();
   });
 
-  it("adds one upcoming shift to Google Calendar or as an .ics file", () => {
+  it("adds one upcoming shift to Google Calendar or Outlook", () => {
     const upcoming = shift("scheduled", { id: 501 });
     renderSchedule(
       [
@@ -519,51 +513,38 @@ describe("Schedule", () => {
     );
     expect(url.searchParams.get("text")).toBe("Shift · Clock Out");
     expect(google).toHaveAttribute("target", "_blank");
-
-    fireEvent.click(
-      screen.getByRole("button", { name: "Apple / Outlook (.ics)" }),
-    );
-    expect(mocks.downloadIcs).toHaveBeenCalledWith(
-      [expect.objectContaining({ uid: "clockout-org_1-shift-501@clockout" })],
-      "shift-501",
+    const outlook = screen.getByRole("link", { name: "Outlook" });
+    expect(outlook.getAttribute("href")).toContain(
+      "https://outlook.live.com/calendar/0/deeplink/compose",
     );
 
     fireEvent.click(screen.getByLabelText("Add shift to calendar"));
     expect(screen.queryByRole("link", { name: "Google Calendar" })).toBeNull();
   });
 
-  it("adds every upcoming shift to the calendar at once", () => {
-    mocks.downloadIcs.mockClear();
-    renderSchedule([
-      shift("scheduled", { id: 601 }),
-      shift("scheduled", { id: 602, user_id: "user_2" }),
-      shift("no_show", { id: 603 }),
-    ]);
-    fireEvent.click(
-      screen.getByRole("button", { name: "Add all to calendar" }),
-    );
-    expect(mocks.downloadIcs).toHaveBeenCalledTimes(1);
-    const [events, fileName] = mocks.downloadIcs.mock.calls[0];
-    expect(fileName).toBe("clock-out-schedule");
-    expect(events.map((e: { title: string }) => e.title)).toEqual([
-      "Sam: Shift · Clock Out",
+  it("puts the member's name on an admin's single-shift link", () => {
+    renderSchedule([shift("scheduled", { user_id: "user_2" })]);
+    fireEvent.click(screen.getByLabelText("Add shift to calendar"));
+    const href = screen
+      .getByRole("link", { name: "Google Calendar" })
+      .getAttribute("href") as string;
+    expect(new URL(href).searchParams.get("text")).toBe(
       "Alex: Shift · Clock Out",
-    ]);
-  });
-
-  it("names a member's download after their own shifts", () => {
-    mocks.downloadIcs.mockClear();
-    renderSchedule([shift("scheduled", { id: 701 })], false, false);
-    fireEvent.click(
-      screen.getByRole("button", { name: "Add all to calendar" }),
     );
-    expect(mocks.downloadIcs.mock.calls[0][1]).toBe("my-shifts");
   });
 
-  it("hides add all to calendar when nothing is upcoming", () => {
-    renderSchedule([shift("no_show")], false, false);
+  it("offers a calendar subscription when there is a feed", async () => {
+    renderWithClient(
+      <Schedule
+        calendarFeedPromise={resolved("/api/calendar/tok.ics")}
+        isAdmin={false}
+        schedulePromise={resolved({ ok: true as const, value: [] })}
+      />,
+    );
     expect(
-      screen.queryByRole("button", { name: "Add all to calendar" }),
-    ).toBeNull();
+      await screen.findByRole("heading", {
+        name: "Add my shifts to my calendar",
+      }),
+    ).toBeVisible();
   });
 });

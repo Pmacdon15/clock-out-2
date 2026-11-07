@@ -1,11 +1,11 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   buildIcsCalendar,
-  downloadIcs,
   escapeIcsText,
   foldIcsLine,
   formatUtcStamp,
   googleCalendarUrl,
+  outlookCalendarUrl,
   shiftEventUid,
   shiftToCalendarEvent,
 } from "@/lib/calendar-export";
@@ -22,8 +22,6 @@ const shift: ScheduledShift = {
 };
 
 describe("calendar export", () => {
-  afterEach(() => vi.restoreAllMocks());
-
   it("turns a shift into a calendar event with a stable uid", () => {
     expect(shiftEventUid(shift)).toBe("clockout-org_1-shift-7@clockout");
     expect(shiftToCalendarEvent(shift)).toEqual({
@@ -82,25 +80,19 @@ describe("calendar export", () => {
     );
   });
 
-  it("downloads the calendar as an .ics file", () => {
-    const createObjectURL = vi.fn(() => "blob:ics");
-    const revokeObjectURL = vi.fn();
-    Object.assign(URL, { createObjectURL, revokeObjectURL });
-    const click = vi
-      .spyOn(HTMLAnchorElement.prototype, "click")
-      .mockImplementation(() => {});
+  it("builds an Outlook link with the shift's times", () => {
+    const url = new URL(outlookCalendarUrl(shiftToCalendarEvent(shift)));
+    expect(url.origin).toBe("https://outlook.live.com");
+    expect(url.searchParams.get("rru")).toBe("addevent");
+    expect(url.searchParams.get("subject")).toBe("Shift · Clock Out");
+    expect(url.searchParams.get("startdt")).toBe("2026-01-05T09:00:00.000Z");
+    expect(url.searchParams.get("enddt")).toBe("2026-01-05T17:30:00.000Z");
+  });
 
-    downloadIcs([shiftToCalendarEvent(shift)], "my-shifts");
-    downloadIcs([shiftToCalendarEvent(shift)], "shift.ics");
-
-    expect(click).toHaveBeenCalledTimes(2);
-    const anchor = click.mock.contexts[0] as HTMLAnchorElement;
-    expect(anchor.download).toBe("my-shifts.ics");
-    expect((click.mock.contexts[1] as HTMLAnchorElement).download).toBe(
-      "shift.ics",
-    );
-    const blob = (createObjectURL.mock.calls[0] as unknown[])[0] as Blob;
-    expect(blob.type).toBe("text/calendar;charset=utf-8");
-    expect(revokeObjectURL).toHaveBeenCalledWith("blob:ics");
+  it("names the calendar and asks apps to refresh it hourly", () => {
+    const ics = buildIcsCalendar([], new Date(), "Shifts, Acme");
+    expect(ics).toContain("X-WR-CALNAME:Shifts\\, Acme");
+    expect(ics).toContain("REFRESH-INTERVAL;VALUE=DURATION:PT1H");
+    expect(ics).not.toContain("BEGIN:VEVENT");
   });
 });

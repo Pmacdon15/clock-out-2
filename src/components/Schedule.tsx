@@ -17,8 +17,8 @@ import {
   updateScheduledShiftAction,
 } from "@/lib/actions";
 import {
-  downloadIcs,
   googleCalendarUrl,
+  outlookCalendarUrl,
   shiftToCalendarEvent,
 } from "@/lib/calendar-export";
 import {
@@ -38,6 +38,7 @@ import type {
   ShiftStatus,
   TimeOffRequest,
 } from "@/lib/types";
+import CalendarSubscribe from "./CalendarSubscribe";
 import LocalTime from "./LocalTime";
 import { Button, Card } from "./ui";
 
@@ -51,6 +52,8 @@ interface ScheduleProps {
   timeOffPromise?: Promise<
     SerializableResult<TimeOffRequest[], { reason: string }>
   >;
+  /** Path of the member's private calendar feed, for subscribing. */
+  calendarFeedPromise?: Promise<string | null>;
   isAdmin: boolean;
 }
 
@@ -266,13 +269,14 @@ function AddToCalendarLinks({
       >
         Google Calendar
       </a>
-      <button
+      <a
         className="rounded-lg border border-zinc-200 px-2.5 py-1 font-semibold hover:bg-zinc-100 dark:border-zinc-800 dark:hover:bg-zinc-800"
-        onClick={() => downloadIcs([event], `shift-${shift.id}`)}
-        type="button"
+        href={outlookCalendarUrl(event)}
+        rel="noopener noreferrer"
+        target="_blank"
       >
-        Apple / Outlook (.ics)
-      </button>
+        Outlook
+      </a>
     </div>
   );
 }
@@ -560,6 +564,7 @@ export default function Schedule({
   schedulePromise,
   membersPromise,
   timeOffPromise,
+  calendarFeedPromise,
   isAdmin,
 }: ScheduleProps) {
   const result = use(schedulePromise);
@@ -587,12 +592,6 @@ export default function Schedule({
 
   const nameFor = (shift: ScheduledShiftWithStatus) =>
     isAdmin ? (memberNames.get(shift.user_id) ?? "Unknown member") : undefined;
-
-  const addAllToCalendar = () =>
-    downloadIcs(
-      upcoming.map((shift) => shiftToCalendarEvent(shift, nameFor(shift))),
-      isAdmin ? "clock-out-schedule" : "my-shifts",
-    );
 
   const renderList = (
     list: ScheduledShiftWithStatus[],
@@ -658,39 +657,23 @@ export default function Schedule({
       <Card className="p-6 sm:p-8">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <h4 className="font-bold text-lg">Upcoming &amp; in progress</h4>
-          <div className="flex flex-wrap items-center gap-3">
-            {isAdmin && (
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  checked={flaggedOnly}
-                  onChange={(e) => setFlaggedOnly(e.target.checked)}
-                  type="checkbox"
-                />
-                Flagged only
-              </label>
-            )}
-            {upcoming.length > 0 && (
-              <Button
-                onClick={addAllToCalendar}
-                size="sm"
-                type="button"
-                variant="outline"
-              >
-                <CalendarPlus className="mr-2 h-4 w-4" />
-                Add all to calendar
-              </Button>
-            )}
-          </div>
+          {isAdmin && (
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                checked={flaggedOnly}
+                onChange={(e) => setFlaggedOnly(e.target.checked)}
+                type="checkbox"
+              />
+              Flagged only
+            </label>
+          )}
         </div>
-        {upcoming.length > 0 && (
-          <p className="mb-2 text-muted-foreground text-xs">
-            Downloads an .ics file you can open in Apple Calendar or Outlook, or
-            import into Google Calendar. Use the calendar icon on a shift to add
-            just that one.
-          </p>
-        )}
         {renderList(upcoming, "No upcoming shifts.", true)}
       </Card>
+
+      {calendarFeedPromise && (
+        <CalendarSubscribe feedPathPromise={calendarFeedPromise} />
+      )}
 
       <Card className="p-6 sm:p-8">
         <h4 className="mb-2 font-bold text-lg">Past two weeks</h4>

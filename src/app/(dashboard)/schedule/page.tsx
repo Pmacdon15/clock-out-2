@@ -4,7 +4,12 @@ import { Suspense } from "react";
 import { ViewHoursFallback } from "@/components/fallbacks/view-hours-fallback";
 import { PremiumFeatureCard } from "@/components/PremiumFeatureCard";
 import Schedule from "@/components/Schedule";
-import { getOrgMembers, getSchedule, getTimeOffRequests } from "@/lib/dal";
+import {
+  getCalendarFeedPath,
+  getOrgMembers,
+  getSchedule,
+  getTimeOffRequests,
+} from "@/lib/dal";
 import { SCHEDULING_FEATURE } from "@/lib/plan-features";
 import { hasFeature, isAdmin } from "@/lib/session";
 
@@ -19,6 +24,7 @@ export default function SchedulePage() {
           ([hasScheduling, admin]) =>
             hasScheduling ? (
               <Schedule
+                calendarFeedPromise={getCalendarFeedPath()}
                 isAdmin={admin}
                 membersPromise={getOrgMembers()}
                 schedulePromise={getSchedule()}

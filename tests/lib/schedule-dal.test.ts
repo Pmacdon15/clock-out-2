@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   protect: vi.fn(),
@@ -39,9 +39,11 @@ vi.mock("@/lib/db", () => ({
   dbGetApprovedTimeOffForPeriod: mocks.dbGetApprovedTimeOffForPeriod,
 }));
 
+import { verifyFeedToken } from "@/lib/calendar-feed";
 import {
   createScheduledShiftDal,
   deleteScheduledShiftDal,
+  getCalendarFeedPath,
   getSchedule,
   updateScheduledShiftDal,
 } from "@/lib/dal";
@@ -486,5 +488,30 @@ describe("without the scheduling plan feature", () => {
     expect(mocks.dbCreateScheduledShift).not.toHaveBeenCalled();
     expect(mocks.dbUpdateScheduledShift).not.toHaveBeenCalled();
     expect(mocks.dbDeleteScheduledShift).not.toHaveBeenCalled();
+  });
+});
+
+describe("getCalendarFeedPath", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("returns the member's signed feed path", async () => {
+    vi.stubEnv("CALENDAR_FEED_SECRET", "test-secret");
+    mocks.protect.mockResolvedValue(member);
+    const path = await getCalendarFeedPath();
+    expect(path).toMatch(/^\/api\/calendar\/[\w-]+\.[\w-]+\.ics$/);
+    const token = (path as string).slice("/api/calendar/".length, -4);
+    expect(verifyFeedToken(token)).toEqual({
+      orgId: "org_1",
+      userId: "user_1",
+    });
+  });
+
+  it("is null without an org or a signing secret", async () => {
+    vi.stubEnv("CALENDAR_FEED_SECRET", "");
+    vi.stubEnv("CLERK_SECRET_KEY", "");
+    mocks.protect.mockResolvedValue(member);
+    await expect(getCalendarFeedPath()).resolves.toBeNull();
+    mocks.protect.mockResolvedValue({ ...member, orgId: null });
+    await expect(getCalendarFeedPath()).resolves.toBeNull();
   });
 });
