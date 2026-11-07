@@ -44,12 +44,15 @@ import { loadPdfImage } from "@/lib/pdf-image";
 import { orgHasReportingFeature, sendWeeklyReports } from "@/lib/reports";
 import {
   buildEmployeeSummary,
+  buildEmployeeSummaryTable,
   buildExportRows,
   buildPeriodSections,
+  buildShiftDetailTable,
   CSV_MIME,
   type ExportFormat,
   type ExportGrouping,
   type ExportMeta,
+  type ExportRow,
   exportFileName,
   formatHours,
   formatPeriod,
@@ -438,6 +441,11 @@ export const exportTimesheetInputSchema = z.object({
       "Optional Clock Out month-week number (1 = days 1–7, 2 = days 8–14, 3 = days 15–21, 4 = day 22 to end of month). Omit when year + month are set to export the entire month.",
     ),
   timezone: timezoneField,
+});
+
+export const getTimesheetTablesInputSchema = exportTimesheetInputSchema.omit({
+  format: true,
+  group_by: true,
 });
 
 export const updateTimeEntryInputSchema = z.object({
@@ -2556,12 +2564,29 @@ export type GeneratedTimesheetExport = {
   employeeSummaries: ReturnType<typeof buildEmployeeSummary>;
 };
 
-export async function generateTimesheetExport(
+export type LoadedTimesheet = {
+  org: OrgContext;
+  timezone: string;
+  groupBy: ExportGrouping;
+  startStr: string;
+  endStr: string;
+  periodLabel: string;
+  employeeLabel: string;
+  memberParam: string;
+  rows: ExportRow[];
+};
+
+/**
+ * Resolves an export request (organization, period, member access) and loads
+ * its shift rows with overtime and pay applied. Shared by `export_timesheet`
+ * (files) and `get_timesheet_tables` (plain rows for Google Sheets and other
+ * spreadsheet tools), so both always agree on the numbers.
+ */
+export async function loadTimesheetRows(
   caller: McpCaller,
   input: z.infer<typeof exportTimesheetInputSchema>,
-  origin?: string,
 ): Promise<
-  | { ok: true; value: GeneratedTimesheetExport }
+  | { ok: true; value: LoadedTimesheet }
   | { ok: false; status: number; result: ToolResult }
 > {
   const orgRes = await resolveOrg(caller.userId, input.org_id);
@@ -2574,8 +2599,6 @@ export async function generateTimesheetExport(
   }
   const { org } = orgRes;
   const tz = validTimezone(input.timezone);
-  const exportFormat: ExportFormat =
-    input.format === "xlsx" || input.format === "csv" ? input.format : "pdf";
   const groupBy: ExportGrouping = input.group_by ?? "auto";
 
   let startDate: Date;
@@ -2725,6 +2748,46 @@ export async function generateTimesheetExport(
     overtimeSettings,
     (userId) => payRates.get(userId),
   );
+
+  return {
+    ok: true,
+    value: {
+      org,
+      timezone: tz,
+      groupBy,
+      startStr,
+      endStr,
+      periodLabel,
+      employeeLabel,
+      memberParam,
+      rows,
+    },
+  };
+}
+
+export async function generateTimesheetExport(
+  caller: McpCaller,
+  input: z.infer<typeof exportTimesheetInputSchema>,
+  origin?: string,
+): Promise<
+  | { ok: true; value: GeneratedTimesheetExport }
+  | { ok: false; status: number; result: ToolResult }
+> {
+  const loaded = await loadTimesheetRows(caller, input);
+  if (!loaded.ok) return loaded;
+  const {
+    org,
+    timezone: tz,
+    groupBy,
+    startStr,
+    endStr,
+    periodLabel,
+    employeeLabel,
+    memberParam,
+    rows,
+  } = loaded.value;
+  const exportFormat: ExportFormat =
+    input.format === "xlsx" || input.format === "csv" ? input.format : "pdf";
   const orgLogo = await loadPdfImage(org.orgImageUrl);
   const meta: ExportMeta = {
     employee: employeeLabel,
@@ -2825,6 +2888,71 @@ export async function generateTimesheetExport(
       downloadUrl,
       periodSections,
       employeeSummaries,
+    },
+  };
+}
+
+/**
+ * `get_timesheet_tables`: the timesheet as two plain tables (Shifts and
+ * Summary) for the AI to write into a spreadsheet through the user's own
+ * Google Sheets (or other) connector. No files are generated.
+ */
+export async function getTimesheetTablesTool(
+  caller: McpCaller,
+  input: z.infer<typeof getTimesheetTablesInputSchema>,
+): Promise<ToolResult> {
+  const loaded = await loadTimesheetRows(caller, input);
+  if (!loaded.ok) return loaded.result;
+  const {
+    org,
+    timezone,
+    startStr,
+    endStr,
+    periodLabel,
+    employeeLabel,
+    memberParam,
+    rows,
+  } = loaded.value;
+  const meta: ExportMeta = {
+    employee: employeeLabel,
+    startDate: startStr,
+    endDate: endStr,
+    orgName: org.orgName,
+  };
+  const formattedPeriod = formatPeriod(meta);
+  const shifts = buildShiftDetailTable(rows);
+  const summary = buildEmployeeSummaryTable(rows, meta);
+  const hours = Number(totalHours(rows).toFixed(2));
+  const overtimeHours = hasOvertime(rows)
+    ? Number(totalOvertime(rows).toFixed(2))
+    : null;
+  const grossPay = hasPay(rows)
+    ? Number(totalPay(rows).grossPay.toFixed(2))
+    : null;
+  const openShifts = rows.filter((r) => r.hours === null).length;
+  const spreadsheetTitle = `Clock Out timesheet - ${org.orgName} - ${employeeLabel} - ${formattedPeriod}`;
+
+  return {
+    summary: `Timesheet tables for ${employeeLabel} (${formattedPeriod}): ${rows.length} shift${rows.length === 1 ? "" : "s"}, ${formatHours(hours)} hrs${overtimeHours ? `, ${formatHours(overtimeHours)} hrs overtime` : ""}${openShifts ? ` (${openShifts} still open, with no hours yet)` : ""}. Write each table to its own tab ("${shifts.title}" and "${summary.title}"): the headers as row 1, then the rows. Hours are numbers; empty cells are null. Write values as raw input, not as formulas.`,
+    data: {
+      status: "ready",
+      organization: { org_id: org.orgId, name: org.orgName },
+      employee: employeeLabel,
+      member: memberParam,
+      period: {
+        label: periodLabel,
+        formatted: formattedPeriod,
+        start: startStr,
+        end: endStr,
+        timezone,
+      },
+      suggested_spreadsheet_title: spreadsheetTitle,
+      shifts_count: rows.length,
+      open_shifts: openShifts,
+      total_hours: hours,
+      ...(overtimeHours === null ? {} : { overtime_hours: overtimeHours }),
+      ...(grossPay === null ? {} : { estimated_gross_pay: grossPay }),
+      tables: [shifts, summary],
     },
   };
 }

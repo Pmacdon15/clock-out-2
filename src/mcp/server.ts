@@ -37,6 +37,8 @@ import {
   getClockStatusInputSchema,
   getLocationSettingsInputSchema,
   getLocationSettingsTool,
+  getTimesheetTablesInputSchema,
+  getTimesheetTablesTool,
   getWeeklyTimecardInputSchema,
   getWeeklyTimecardTool,
   inviteMemberInputSchema,
@@ -97,10 +99,13 @@ export const SERVER_INFO = {
 export const SERVER_OPTIONS = {
   serverInfo: SERVER_INFO,
   instructions: MCP_INSTRUCTIONS,
-  // The tool list never changes while a client is connected. Saying so keeps
+  // The tool and prompt lists never change while a client is connected. Saying so keeps
   // clients from holding a `subscriptions/listen` stream open for change
   // notifications on serverless functions.
-  capabilities: { tools: { listChanged: false } },
+  capabilities: {
+    tools: { listChanged: false },
+    prompts: { listChanged: false },
+  },
 };
 
 /** The verified caller from the request's auth, or null when there isn't one. */
@@ -341,6 +346,21 @@ export function registerClockOutTools(server: McpServer) {
     (args, ctx) =>
       run(server, ctx.http?.authInfo, (caller) =>
         exportTimesheetTool(caller, args),
+      ),
+  );
+
+  server.registerTool(
+    "get_timesheet_tables",
+    {
+      title: "Get timesheet tables for Google Sheets",
+      description:
+        "Returns a timesheet as two ready-to-write tables for a spreadsheet app such as Google Sheets: 'Shifts' (one row per shift: employee, date, day, clock in/out, unpaid and paid break hours, hours, plus overtime, pay and location when the org has them) and 'Summary' (one row per employee with a column per day, or per week for periods over 31 days, their totals, and an organization Total row). Each table has a title (the tab name), headers and rows; hours are numbers and empty cells are null. Takes the same period and member options as export_timesheet. Use it when the user wants their hours in a spreadsheet through another connector (e.g. Google Sheets): write each table to its own tab with headers in row 1, as raw values. For PDF, Excel or CSV files use export_timesheet instead.",
+      inputSchema: portable(getTimesheetTablesInputSchema),
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    (args, ctx) =>
+      run(server, ctx.http?.authInfo, (caller) =>
+        getTimesheetTablesTool(caller, args),
       ),
   );
 

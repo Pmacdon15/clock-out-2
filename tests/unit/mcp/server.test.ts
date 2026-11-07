@@ -139,6 +139,7 @@ import {
   exportTimesheetTool,
   getClockStatus,
   getLocationSettingsTool,
+  getTimesheetTablesTool,
   inviteMemberTool,
   listOrganizations,
   manageBreakSettingsTool,
@@ -182,6 +183,7 @@ describe("Clock Out MCP server", () => {
       "export_timesheet",
       "get_clock_status",
       "get_location_settings",
+      "get_timesheet_tables",
       "get_weekly_timecard",
       "invite_member",
       "list_members",
@@ -213,6 +215,13 @@ describe("Clock Out MCP server", () => {
     expect(SERVER_INFO.icons[0]?.src).toContain("clockout.patmac.ca/icon.svg");
   });
 
+  it("advertises fixed tool and prompt lists", () => {
+    expect(SERVER_OPTIONS.capabilities).toEqual({
+      tools: { listChanged: false },
+      prompts: { listChanged: false },
+    });
+  });
+
   it("marks read-only tools with readOnlyHint: true", () => {
     for (const name of [
       "list_organizations",
@@ -223,6 +232,7 @@ describe("Clock Out MCP server", () => {
       "list_time_entries",
       "get_weekly_timecard",
       "export_timesheet",
+      "get_timesheet_tables",
     ]) {
       expect(tools.get(name)?.annotations?.readOnlyHint, name).toBe(true);
     }
@@ -553,6 +563,141 @@ describe("Double / overlapping time prevention & cache invalidation", () => {
       "Record Type,Employee,Date,Day,Clock In,Clock Out,Hours,Daily Total,Period,Days Worked,Shifts,Avg Hours/Day",
     );
     expect(csv).toContain("Shift,Alex Smith,2026-10-26,Mon,");
+  });
+
+  it("returns Shifts and Summary tables for Google Sheets without building files", async () => {
+    mockDbGetOrgTimeEntries.mockResolvedValueOnce([
+      {
+        id: 1,
+        user_id: "user_worker",
+        org_id: "org_1",
+        clock_in: new Date("2026-10-26T15:00:00.000Z"),
+        clock_out: new Date("2026-10-26T23:00:00.000Z"),
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+      {
+        id: 2,
+        user_id: "user_admin",
+        org_id: "org_1",
+        clock_in: new Date("2026-10-27T15:00:00.000Z"),
+        clock_out: null,
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+    ]);
+
+    const res = await getTimesheetTablesTool(
+      { userId: "user_admin", client: "Claude" },
+      {
+        start_date: "2026-10-26",
+        end_date: "2026-10-27",
+        timezone: "America/Edmonton",
+      },
+    );
+
+    expect(res.isError).toBeUndefined();
+    expect(res.resource).toBeUndefined();
+    expect(res.resources).toBeUndefined();
+    expect(res.data.status).toBe("ready");
+    expect(res.data.member).toBe("all");
+    expect(res.data.shifts_count).toBe(2);
+    expect(res.data.open_shifts).toBe(1);
+    expect(res.data.total_hours).toBe(8);
+    expect(res.data.overtime_hours).toBeUndefined();
+    expect(res.data.estimated_gross_pay).toBeUndefined();
+    expect(res.data.suggested_spreadsheet_title).toBe(
+      "Clock Out timesheet - PatMac Org - Entire Organization - Oct 26, 2026 - Oct 27, 2026",
+    );
+    expect(res.summary).toContain("2 shifts, 8.00 hrs (1 still open");
+    expect(res.summary).toContain('"Shifts" and "Summary"');
+
+    const [shifts, summary] = res.data.tables as {
+      title: string;
+      headers: string[];
+      rows: unknown[][];
+    }[];
+    expect(shifts?.title).toBe("Shifts");
+    expect(shifts?.rows).toEqual([
+      ["Alex Smith", "2026-10-26", "Mon", "9:00 AM", "5:00 PM", 0, 0, 8],
+      [
+        "Patrick MacDonald",
+        "2026-10-27",
+        "Tue",
+        "9:00 AM",
+        "In progress",
+        0,
+        0,
+        null,
+      ],
+    ]);
+    expect(summary?.title).toBe("Summary");
+    expect(summary?.headers).toEqual([
+      "Employee",
+      "Mon Oct 26",
+      "Tue Oct 27",
+      "Total Hours",
+    ]);
+    expect(summary?.rows).toEqual([
+      ["Alex Smith", 8, null, 8],
+      ["Patrick MacDonald", null, 0, 0],
+      ["Total", 8, 0, 8],
+    ]);
+  });
+
+  it("includes overtime and pay totals in the Sheets tables when the org has them", async () => {
+    mockDbGetOrgTimeEntries.mockResolvedValueOnce([
+      {
+        id: 1,
+        user_id: "user_worker",
+        org_id: "org_1",
+        clock_in: new Date("2026-10-26T15:00:00.000Z"),
+        clock_out: new Date("2026-10-27T01:00:00.000Z"),
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+    ]);
+    mockDbGetOvertimeSettings.mockResolvedValueOnce({
+      org_id: "org_1",
+      daily_threshold_hours: 8,
+      weekly_threshold_hours: null,
+    });
+
+    const res = await getTimesheetTablesTool(
+      { userId: "user_admin", client: "Claude" },
+      { start_date: "2026-10-26", end_date: "2026-10-26" },
+    );
+
+    expect(res.data.total_hours).toBe(10);
+    expect(res.data.overtime_hours).toBe(2);
+    expect(res.summary).toContain("1 shift, 10.00 hrs, 2.00 hrs overtime.");
+    const [shifts] = res.data.tables as { headers: string[] }[];
+    expect(shifts?.headers).toContain("Overtime Hours");
+  });
+
+  it("forbids non-admins from getting Sheets tables for everyone", async () => {
+    mockGetUserOrgMemberships.mockResolvedValueOnce({
+      data: [
+        {
+          role: "org:member",
+          organization: {
+            id: "org_1",
+            name: "PatMac Org",
+            slug: "patmac-org",
+            membersCount: 2,
+          },
+        },
+      ],
+    });
+
+    const res = await getTimesheetTablesTool(
+      { userId: "user_worker", client: "Claude" },
+      { member: "all", start_date: "2026-10-26", end_date: "2026-10-28" },
+    );
+
+    expect(res.isError).toBe(true);
+    expect(res.data.status).toBe("forbidden");
+    expect(mockDbGetOrgTimeEntries).not.toHaveBeenCalled();
   });
 
   it("forbids non-admin members from exporting timesheets for other members or 'all'", async () => {
