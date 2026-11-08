@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => {
       getTimeOffAllowances: vi.fn(() => "allowances"),
       getTimeOffRequests: vi.fn(() => "time_off"),
     },
+    getShiftRequestsView: vi.fn(() => "shift_requests"),
     getOrgPayroll: vi.fn(),
     getOrgAlertSettings: vi.fn(() => "alert_settings"),
     getMyNotificationSettings: vi.fn(() => "notification_settings"),
@@ -42,6 +43,9 @@ vi.mock("@/lib/session", () => ({
   hasFeature: (feature: string) => Promise.resolve(mocks.features.has(feature)),
 }));
 vi.mock("@/lib/dal", () => mocks.dal);
+vi.mock("@/lib/shift-requests-dal", () => ({
+  getShiftRequestsView: mocks.getShiftRequestsView,
+}));
 vi.mock("@/lib/payroll-dal", () => ({ getOrgPayroll: mocks.getOrgPayroll }));
 vi.mock("@/lib/alerts-dal", () => ({
   getOrgAlertSettings: mocks.getOrgAlertSettings,
@@ -78,6 +82,9 @@ vi.mock("@/components/NotificationSettings", () => ({
 }));
 vi.mock("@/components/Schedule", () => ({
   default: mocks.capture("schedule"),
+}));
+vi.mock("@/components/ShiftRequests", () => ({
+  default: mocks.capture("shift-requests"),
 }));
 vi.mock("@/components/TimeOff", () => ({
   default: mocks.capture("time-off"),
@@ -232,6 +239,11 @@ describe("SchedulePage", () => {
       schedulePromise: "schedule",
       timeOffPromise: "time_off",
     });
+    // Swap and pickup requests sit under the schedule.
+    expect(await screen.findByTestId("shift-requests")).toBeVisible();
+    expect(latest("shift-requests")).toEqual({
+      viewPromise: "shift_requests",
+    });
   });
 
   it("offers an upgrade on plans without it", async () => {
@@ -240,6 +252,7 @@ describe("SchedulePage", () => {
       await screen.findByText(/Scheduling shifts is only available/),
     ).toBeVisible();
     expect(mocks.dal.getSchedule).not.toHaveBeenCalled();
+    expect(mocks.getShiftRequestsView).not.toHaveBeenCalled();
   });
 });
 
