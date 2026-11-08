@@ -24,6 +24,10 @@ import {
   registerClockOutApps,
   TIMECARD_APP,
 } from "@/mcp/apps";
+import {
+  auditTimesheetsInputSchema,
+  auditTimesheetsTool,
+} from "@/mcp/audit-tools";
 import { MCP_INSTRUCTIONS } from "@/mcp/instructions";
 import {
   manageNotificationPreferencesInputSchema,
@@ -516,6 +520,21 @@ export function registerClockOutTools(server: McpServer) {
     (args, ctx) =>
       run(server, ctx.http?.authInfo, (caller) =>
         runHoursReportTool(caller, args),
+      ),
+  );
+
+  server.registerTool(
+    "audit_timesheets",
+    {
+      title: "Audit timesheets for problems",
+      description:
+        "Admin-only ('org:admin') read-only audit of the organization's time entries between start_date and end_date (one member or everyone). Flags missed clock-outs (including shifts closed by the automatic clock-out), unusually long shifts, overlapping entries, missed or short meal breaks, punches far outside every work site's geofence, and entries entered or edited after the fact. Each finding has a type, severity, employee, entry_ids, date, description, and a suggested_fix that, when not null, is the exact input object for update_time_entry. Thresholds are optional parameters. Never applies fixes itself: show the findings and only call update_time_entry with a suggested_fix after the admin confirms it.",
+      inputSchema: portable(auditTimesheetsInputSchema),
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    (args, ctx) =>
+      run(server, ctx.http?.authInfo, (caller) =>
+        auditTimesheetsTool(caller, args),
       ),
   );
 
