@@ -139,13 +139,22 @@ export async function updateTimeEntryAction(
 }
 
 export async function sendCurrentWeekReportAction() {
-  const { userId, orgId, orgRole } = await auth.protect();
+  const { userId, orgId, orgRole, has } = await auth.protect();
   if (!userId || !orgId) {
     return { success: false, error: "Unauthorized" };
   }
   const isAdmin = orgRole === "org:admin";
   if (!isAdmin) {
     return { success: false, error: "Only admins can test reports" };
+  }
+  // Server actions can be called directly, so the plan check can't rely on
+  // the UI hiding the button.
+  if (!has({ feature: "reporting" })) {
+    return {
+      success: false,
+      error:
+        "Email reports are only available on paid plans. Upgrade your organization to unlock them.",
+    };
   }
 
   const endDate = new Date();

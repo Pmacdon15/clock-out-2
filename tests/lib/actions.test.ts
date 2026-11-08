@@ -238,11 +238,27 @@ describe("sendCurrentWeekReportAction", () => {
     expect(mocks.sendWeeklyReports).not.toHaveBeenCalled();
   });
 
+  it("rejects admins whose plan doesn't include reporting", async () => {
+    const has = vi.fn(() => false);
+    mocks.protect.mockResolvedValue({
+      userId: "user_1",
+      orgId: "org_1",
+      orgRole: "org:admin",
+      has,
+    });
+    await expect(sendCurrentWeekReportAction()).resolves.toMatchObject({
+      success: false,
+    });
+    expect(has).toHaveBeenCalledWith({ feature: "reporting" });
+    expect(mocks.sendWeeklyReports).not.toHaveBeenCalled();
+  });
+
   it("sends the last seven days of reports for the admin's org", async () => {
     mocks.protect.mockResolvedValue({
       userId: "user_1",
       orgId: "org_1",
       orgRole: "org:admin",
+      has: () => true,
     });
     await expect(sendCurrentWeekReportAction()).resolves.toEqual({
       success: true,
