@@ -15,6 +15,7 @@ import {
   manageScheduleInputSchema,
   manageTimeOffInputSchema,
 } from "@/mcp/admin-tools";
+import { auditTimesheetsInputSchema } from "@/mcp/audit-tools";
 import { manageNotificationPreferencesInputSchema } from "@/mcp/notification-tools";
 import { portable, toPortableJsonSchema } from "@/mcp/portable-schema";
 import {
@@ -70,6 +71,7 @@ function collectKeys(obj: unknown, found = new Set<string>()): Set<string> {
 
 describe("portable JSON schema", () => {
   const schemas = {
+    audit_timesheets: auditTimesheetsInputSchema,
     list_organizations: listOrganizationsInputSchema,
     list_members: listMembersInputSchema,
     who_is_working: whoIsWorkingInputSchema,

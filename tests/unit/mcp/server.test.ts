@@ -177,6 +177,7 @@ describe("Clock Out MCP server", () => {
   it("exposes all expected tools", () => {
     expect([...tools.keys()].sort()).toEqual([
       "add_time_entry",
+      "audit_timesheets",
       "clock_in",
       "clock_out",
       "delete_time_entry",
@@ -235,6 +236,7 @@ describe("Clock Out MCP server", () => {
       "export_timesheet",
       "get_timesheet_tables",
       "get_calendar_shifts",
+      "audit_timesheets",
     ]) {
       expect(tools.get(name)?.annotations?.readOnlyHint, name).toBe(true);
     }
