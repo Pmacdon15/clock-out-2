@@ -85,8 +85,10 @@ export default function CalendarSubscribe({
         </button>
       </div>
       <p className="mt-3 text-muted-foreground text-xs">
-        Changes can take a few hours to reach Google Calendar. Keep this link
-        private: anyone with it can see your shifts.
+        Changes can take a few hours to reach Google Calendar. On a phone,
+        Google Calendar can only subscribe from calendar.google.com on a
+        computer, so use “Add all to Google Calendar” above instead. Keep this
+        link private: anyone with it can see your shifts.
       </p>
     </Card>
   );
