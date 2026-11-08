@@ -22,7 +22,7 @@ export default function WelcomePage() {
         </p>
         <SignInButton>
           <button
-            className="rounded-xl bg-zinc-900 px-8 py-4 font-semibold text-lg text-zinc-50 transition-all hover:bg-zinc-800 active:scale-95 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+            className="rounded-xl bg-blue-600 px-8 py-4 font-semibold text-lg text-zinc-50 transition-all hover:bg-blue-700 active:scale-95 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
             type="button"
           >
             Get Started Now

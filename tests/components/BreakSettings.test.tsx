@@ -47,7 +47,7 @@ const save = () => screen.getByRole("button", { name: "Save Break Settings" });
 describe("BreakSettings", () => {
   it("defaults to not docking breaks and allows saving when nothing is stored", () => {
     renderBreakSettings();
-    expect(option(/Do Not Dock Breaks/).className).toContain("border-zinc-900");
+    expect(option(/Do Not Dock Breaks/).className).toContain("border-blue-600");
     expect(screen.queryByText("Current")).not.toBeInTheDocument();
     expect(save()).toBeEnabled();
   });

@@ -64,7 +64,7 @@ export function MemberToggles({
                 <span className="font-medium text-sm">{member.name}</span>
               </div>
               {isVisible && (
-                <div className="rounded-full bg-zinc-900 p-0.5 text-zinc-50 dark:bg-zinc-50 dark:text-zinc-900">
+                <div className="rounded-full bg-blue-600 p-0.5 text-zinc-50 dark:bg-zinc-50 dark:text-zinc-900">
                   <Check className="h-3 w-3" />
                 </div>
               )}

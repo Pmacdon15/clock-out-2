@@ -159,7 +159,7 @@ export function EntryItem({
             <X className="h-4 w-4" />
           </button>
           <button
-            className="rounded-lg bg-zinc-900 p-1.5 text-white transition-transform hover:scale-105 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-950"
+            className="rounded-lg bg-blue-600 p-1.5 text-white transition-transform hover:scale-105 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-950"
             disabled={updateMutation.isPending}
             onClick={handleUpdate}
             type="button"

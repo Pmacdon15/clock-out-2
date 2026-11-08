@@ -52,7 +52,7 @@ export default function RootLayout({
   return (
     <html className="h-full" lang="en">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} flex min-h-full flex-col bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-50`}
+        className={`${geistSans.variable} ${geistMono.variable} flex min-h-full flex-col bg-blue-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-50`}
       >
         <Providers>
           <ServiceWorkerRegistration />

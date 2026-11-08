@@ -92,7 +92,7 @@ describe("LocationSettings capture mode", () => {
   it("defaults to capture off and lets an admin save straight away", () => {
     renderPanel();
     expect(option(/Do Not Capture Location/).className).toContain(
-      "border-zinc-900",
+      "border-blue-600",
     );
     expect(screen.queryByText("Current")).not.toBeInTheDocument();
     expect(saveSettings()).toBeEnabled();

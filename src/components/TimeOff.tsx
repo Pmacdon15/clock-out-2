@@ -550,7 +550,7 @@ export default function TimeOff({
     <div className="space-y-6 pb-20">
       <Card className="p-6 sm:p-8">
         <div className="mb-6 flex items-start gap-3">
-          <div className="rounded-xl bg-zinc-900 p-2 text-white dark:bg-zinc-100 dark:text-black">
+          <div className="rounded-xl bg-blue-600 p-2 text-white dark:bg-zinc-100 dark:text-black">
             <Palmtree className="h-5 w-5" />
           </div>
           <div>

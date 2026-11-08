@@ -239,7 +239,7 @@ export default function BreakSettings({
               aria-pressed={paidLunch === option.paid}
               className={`flex items-center justify-between rounded-2xl border-2 p-4 text-left transition-all ${
                 paidLunch === option.paid
-                  ? "border-zinc-900 bg-zinc-50 dark:border-zinc-100 dark:bg-zinc-900"
+                  ? "border-blue-600 bg-blue-50 dark:border-zinc-100 dark:bg-zinc-900"
                   : "border-transparent bg-zinc-100/50 hover:bg-zinc-100 dark:bg-zinc-800/50 dark:hover:bg-zinc-800"
               }`}
               key={String(option.paid)}
@@ -283,7 +283,7 @@ export default function BreakSettings({
               <button
                 className={`flex w-full items-center justify-between rounded-2xl border-2 p-6 text-left transition-all ${
                   dockLunch === option.id
-                    ? "border-zinc-900 bg-zinc-50 dark:border-zinc-100 dark:bg-zinc-900"
+                    ? "border-blue-600 bg-blue-50 dark:border-zinc-100 dark:bg-zinc-900"
                     : "border-transparent bg-zinc-100/50 hover:bg-zinc-100 dark:bg-zinc-800/50 dark:hover:bg-zinc-800"
                 }`}
                 onClick={() => setDockLunch(option.id)}
@@ -291,7 +291,7 @@ export default function BreakSettings({
               >
                 <div className="flex items-center gap-4">
                   <div
-                    className={`rounded-xl p-2 ${dockLunch === option.id ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-black" : "bg-zinc-200 dark:bg-zinc-700"}`}
+                    className={`rounded-xl p-2 ${dockLunch === option.id ? "bg-blue-600 text-white dark:bg-zinc-100 dark:text-black" : "bg-zinc-200 dark:bg-zinc-700"}`}
                   >
                     <option.icon className="h-5 w-5" />
                   </div>
@@ -304,7 +304,7 @@ export default function BreakSettings({
                 </div>
                 <div className="flex items-center gap-2">
                   {dockLunch === option.id && (
-                    <div className="rounded-full bg-zinc-900 p-1 text-zinc-50 dark:bg-zinc-100 dark:text-zinc-900">
+                    <div className="rounded-full bg-blue-600 p-1 text-zinc-50 dark:bg-zinc-100 dark:text-zinc-900">
                       <Check className="h-4 w-4" />
                     </div>
                   )}

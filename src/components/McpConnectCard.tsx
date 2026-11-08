@@ -51,7 +51,7 @@ export default function McpConnectCard() {
           </code>
           <button
             aria-label="Copy MCP server URL"
-            className="inline-flex items-center justify-center gap-2 rounded-lg bg-zinc-900 px-4 py-2.5 font-medium text-sm text-zinc-50 transition-colors hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 font-medium text-sm text-zinc-50 transition-colors hover:bg-blue-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
             onClick={handleCopy}
             type="button"
           >

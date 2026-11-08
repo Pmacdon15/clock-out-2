@@ -23,7 +23,7 @@ export function Button({
 }) {
   const variants = {
     default:
-      "bg-zinc-900 text-zinc-50 hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200",
+      "bg-blue-600 text-zinc-50 hover:bg-blue-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200",
     outline:
       "border border-zinc-200 bg-white hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900 dark:hover:text-zinc-50",
     ghost:

@@ -53,7 +53,7 @@ describe("ReportingSettings", () => {
   it("defaults to weekly and allows saving when nothing is stored", () => {
     renderSettings();
     expect(option(/Weekly \(Fixed Dates\)/).className).toContain(
-      "border-zinc-900",
+      "border-blue-600",
     );
     expect(screen.queryByText("Current")).not.toBeInTheDocument();
     expect(save()).toBeEnabled();

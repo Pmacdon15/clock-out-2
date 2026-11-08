@@ -94,7 +94,7 @@ export default function InstallPrompt() {
       className="mb-6 flex flex-col items-start justify-between gap-3 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center dark:border-zinc-800 dark:bg-zinc-900"
     >
       <div className="flex items-start gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-zinc-900 text-zinc-50 dark:bg-zinc-50 dark:text-zinc-900">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-zinc-50 dark:bg-zinc-50 dark:text-zinc-900">
           <Download className="h-5 w-5" />
         </div>
         <div>
