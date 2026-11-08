@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ThemeToggle } from "./ThemeToggle";
 import { MailIcon } from "./ui/Icons";
 
 export default function Footer() {
@@ -43,6 +44,7 @@ export default function Footer() {
           </div>
 
           <div className="flex items-center gap-4">
+            <ThemeToggle />
             <a
               className="group flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-4 py-2 font-medium text-sm text-zinc-600 transition-all hover:border-zinc-300 hover:bg-white hover:text-zinc-900 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:border-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
               href="mailto:patrick@patmac.ca"

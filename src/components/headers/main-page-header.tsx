@@ -8,6 +8,7 @@ import { dark } from "@clerk/ui/themes";
 import Link from "next/link";
 
 import { Suspense } from "react";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 export default function MainPageHeader() {
   return (
@@ -25,6 +26,7 @@ export default function MainPageHeader() {
         >
           Plans
         </Link>
+        <ThemeToggle />
         <Suspense>
           <Show when="signed-in">
             <OrganizationSwitcher
