@@ -2,9 +2,10 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { type ClockOutView, clockOutAppHtml } from "@/mcp/apps-ui";
 
 /*
- * Clock Out's in-chat apps: a timecard grid for get_weekly_timecard and an
- * hours chart/table for run_hours_report, shown inside Claude, ChatGPT and
- * other hosts instead of a wall of text.
+ * Clock Out's in-chat apps: a timecard grid for get_weekly_timecard, an
+ * hours chart/table for run_hours_report and an anomalies card for
+ * audit_timesheets, shown inside Claude, ChatGPT and other hosts instead of a
+ * wall of text.
  *
  * Follows the MCP Apps extension (SEP-1865, `io.modelcontextprotocol/ui`):
  * each app is a `ui://` resource of type `text/html;profile=mcp-app`, linked
@@ -47,7 +48,22 @@ export const HOURS_REPORT_APP: ClockOutApp = {
   invoked: "Hours report ready",
 };
 
-export const CLOCK_OUT_APPS = [TIMECARD_APP, HOURS_REPORT_APP] as const;
+export const ANOMALIES_APP: ClockOutApp = {
+  name: "anomalies-app",
+  uri: "ui://clock-out/anomalies.html",
+  title: "Timesheet anomalies",
+  description:
+    "Interactive timesheet audit: findings by severity and type (missed clock-outs, long shifts, overlaps, missed meal breaks, far-away punches, after-the-fact edits), with each finding's suggested fix. Admins can apply a suggested fix after confirming it.",
+  view: "anomalies",
+  invoking: "Auditing timesheets…",
+  invoked: "Audit ready",
+};
+
+export const CLOCK_OUT_APPS = [
+  TIMECARD_APP,
+  HOURS_REPORT_APP,
+  ANOMALIES_APP,
+] as const;
 
 /** `_meta` for a tool whose results the app renders. */
 export function appToolMeta(app: ClockOutApp) {

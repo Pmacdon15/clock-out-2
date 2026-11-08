@@ -221,11 +221,16 @@ export async function auditTimesheetsTool(
       organization: { org_id: org.orgId, name: org.orgName },
       period: {
         label: periodLabel,
+        start_date: startStr,
+        end_date: endStr,
         start: startDate.toISOString(),
         end: endDate.toISOString(),
         timezone: tz,
       },
+      scope: auditedMember ? "member" : "all",
       member: auditedMember,
+      // What was asked for, so the in-chat app can re-run the same audit.
+      requested_checks: input.checks ?? [...AUDIT_CHECKS],
       entries_audited: entries.length,
       thresholds: result.thresholds,
       checks: result.checks,

@@ -15,6 +15,7 @@ const m = vi.hoisted(() => ({
   dbGetTimeEntryById: vi.fn(),
   dbUpdateTimeEntry: vi.fn(),
   dbGetBreakSettings: vi.fn(async () => undefined as unknown),
+  dbGetSites: vi.fn(async () => [] as unknown[]),
   dbGetOvertimeSettings: vi.fn(async () => undefined),
   dbGetTimeOffRequests: vi.fn(async () => [] as unknown[]),
   dbReviewTimeOffRequest: vi.fn(),
@@ -36,6 +37,7 @@ vi.mock("@/mcp/db", () => ({
   dbGetTimeEntryById: m.dbGetTimeEntryById,
   dbUpdateTimeEntry: m.dbUpdateTimeEntry,
   dbGetBreakSettings: m.dbGetBreakSettings,
+  dbGetSites: m.dbGetSites,
   dbGetOvertimeSettings: m.dbGetOvertimeSettings,
   dbGetTimeOffRequests: m.dbGetTimeOffRequests,
   dbFindOverlappingTimeEntries: vi.fn(async () => []),
@@ -49,7 +51,9 @@ vi.mock("@/lib/reports", () => ({
   orgHasReportingFeature: m.orgHasReportingFeature,
   sendWeeklyReports: m.sendWeeklyReports,
 }));
-vi.mock("@/lib/alerts-db", () => ({}));
+vi.mock("@/lib/alerts-db", () => ({
+  dbGetAlertSettings: vi.fn(async () => undefined),
+}));
 vi.mock("@/lib/schedule-notify", () => ({}));
 vi.mock("@/lib/notify", () => ({}));
 vi.mock("@/lib/utils-clerk", () => ({}));
@@ -63,6 +67,7 @@ import {
 } from "@modelcontextprotocol/server";
 import { JSDOM } from "jsdom";
 import {
+  ANOMALIES_APP,
   appToolMeta,
   CLOCK_OUT_APPS,
   HOURS_REPORT_APP,
@@ -185,7 +190,7 @@ beforeEach(() => {
 });
 
 describe("MCP Apps: tools/list and resources", () => {
-  it("links get_weekly_timecard and run_hours_report to their ui:// apps", async () => {
+  it("links get_weekly_timecard, run_hours_report and audit_timesheets to their ui:// apps", async () => {
     asRole("org:admin");
     const rpc = await connect("user_admin");
     const { tools } = (await rpc("tools/list")) as {
@@ -195,6 +200,7 @@ describe("MCP Apps: tools/list and resources", () => {
     for (const [name, app] of [
       ["get_weekly_timecard", TIMECARD_APP],
       ["run_hours_report", HOURS_REPORT_APP],
+      ["audit_timesheets", ANOMALIES_APP],
     ] as const) {
       const meta = byName.get(name)?._meta;
       expect(meta, name).toEqual(appToolMeta(app));
@@ -202,13 +208,13 @@ describe("MCP Apps: tools/list and resources", () => {
       expect(meta?.["openai/outputTemplate"]).toBe(app.uri);
       expect(meta?.["openai/widgetAccessible"]).toBe(true);
     }
-    // Only the two app tools carry a UI; every other tool stays plain.
+    // Only the three app tools carry a UI; every other tool stays plain.
     expect(
       tools
         .filter((t) => t._meta?.ui)
         .map((t) => t.name)
         .sort(),
-    ).toEqual(["get_weekly_timecard", "run_hours_report"]);
+    ).toEqual(["audit_timesheets", "get_weekly_timecard", "run_hours_report"]);
     // The tools the app calls stay visible to apps.
     for (const name of ["update_time_entry", "manage_time_off"]) {
       expect(byName.has(name), name).toBe(true);
@@ -224,6 +230,10 @@ describe("MCP Apps: tools/list and resources", () => {
     expect(resources.map((r) => r.uri).sort()).toEqual(
       CLOCK_OUT_APPS.map((a) => a.uri).sort(),
     );
+    expect(resources.map((r) => r.uri)).toContain(
+      "ui://clock-out/anomalies.html",
+    );
+    expect(ANOMALIES_APP.view).toBe("anomalies");
     for (const r of resources) {
       expect(r.uri.startsWith("ui://")).toBe(true);
       expect(r.mimeType).toBe(MCP_APP_MIME_TYPE);
@@ -276,7 +286,12 @@ describe("MCP Apps: tools/list and resources", () => {
   });
 
   it("documents the in-chat apps in the server instructions", () => {
-    expect(MCP_INSTRUCTIONS).toMatch(/Interactive Timecard & Hours Report/);
+    expect(MCP_INSTRUCTIONS).toMatch(
+      /Interactive Timecard, Hours Report & Timesheet Anomalies/,
+    );
+    expect(MCP_INSTRUCTIONS).toMatch(
+      /audit_timesheets shows a timesheet anomalies card/,
+    );
     expect(MCP_INSTRUCTIONS).toMatch(/update_time_entry/);
   });
 });
@@ -384,6 +399,62 @@ describe("MCP Apps: tools/call results", () => {
   });
 });
 
+describe("MCP Apps: audit_timesheets results", () => {
+  it("keeps the text fallback and adds what the anomalies card needs to re-run the audit", async () => {
+    asRole("org:admin");
+    const rpc = await connect("user_admin");
+    const res = (await rpc("tools/call", {
+      name: "audit_timesheets",
+      arguments: {
+        start_date: "2026-11-01",
+        end_date: "2026-11-07",
+        checks: ["long_shift", "missed_meal_break"],
+        timezone: "America/Regina",
+      },
+    })) as ToolCall;
+
+    expect(res.isError).toBeUndefined();
+    expect(res.content[0]?.type).toBe("text");
+    expect(res.content[0]?.text).toMatch(
+      /^(Found \d+ timesheet issues? for Acme from 2026-11-01 to 2026-11-07|No timesheet problems found for Acme from 2026-11-01 to 2026-11-07\.)/,
+    );
+    expect(JSON.parse(res.content[1]?.text ?? "")).toEqual(
+      res.structuredContent,
+    );
+    const sc = res.structuredContent as {
+      status: string;
+      period: Record<string, string>;
+      scope: string;
+      member: unknown;
+      requested_checks: string[];
+      findings: unknown[];
+      checks: { type: string; status: string }[];
+    };
+    expect(sc.status).toBe("ok");
+    expect(sc.period).toMatchObject({
+      label: "2026-11-01 to 2026-11-07",
+      start_date: "2026-11-01",
+      end_date: "2026-11-07",
+      timezone: "America/Regina",
+    });
+    expect(sc.scope).toBe("all");
+    expect(sc.member).toBeNull();
+    expect(sc.requested_checks).toEqual(["long_shift", "missed_meal_break"]);
+    expect(Array.isArray(sc.findings)).toBe(true);
+  });
+
+  it("a member can't run the audit the card is built on", async () => {
+    asRole("org:member");
+    const rpc = await connect("user_sam");
+    const res = (await rpc("tools/call", {
+      name: "audit_timesheets",
+      arguments: { start_date: "2026-11-01", end_date: "2026-11-07" },
+    })) as ToolCall;
+    expect(res.isError).toBe(true);
+    expect(res.structuredContent).toEqual({ status: "forbidden" });
+  });
+});
+
 describe("MCP Apps: role checks on the calls the app makes", () => {
   it("a member can't edit a shift through update_time_entry", async () => {
     asRole("org:member");
@@ -483,7 +554,7 @@ describe("MCP Apps: role checks on the calls the app makes", () => {
  * (window.openai), which are simpler to stub than a parent frame.
  */
 function mountApp(
-  view: "timecard" | "hours",
+  view: "timecard" | "hours" | "anomalies",
   toolOutput: Record<string, unknown>,
   callTool: (name: string, args: Record<string, unknown>) => Promise<unknown>,
 ) {
@@ -721,5 +792,240 @@ describe("MCP Apps: the hours report page", () => {
     expect(row?.textContent).toContain("12h 30m");
     expect(row?.textContent).toContain("13h 00m");
     expect(doc.querySelector(".tile span")?.textContent).toBe("Net hours");
+  });
+});
+
+function auditData(findings: Record<string, unknown>[]) {
+  const bySeverity: Record<string, number> = { high: 0, medium: 0, low: 0 };
+  for (const f of findings) {
+    const sev = f.severity as string;
+    bySeverity[sev] = (bySeverity[sev] ?? 0) + 1;
+  }
+  return {
+    status: "ok",
+    organization: { org_id: "org_1", name: "Acme" },
+    period: {
+      label: "2026-11-01 to 2026-11-07",
+      start_date: "2026-11-01",
+      end_date: "2026-11-07",
+      start: "2026-11-01T06:00:00.000Z",
+      end: "2026-11-08T05:59:59.999Z",
+      timezone: "America/Regina",
+    },
+    scope: "member",
+    member: { user_id: "user_sam", name: "Sam Lee" },
+    requested_checks: ["missed_clock_out", "missed_meal_break"],
+    entries_audited: 3,
+    thresholds: {
+      long_shift_hours: 12,
+      missed_clock_out_hours: 10,
+      meal_break_after_hours: 5,
+      meal_break_min_minutes: 30,
+      max_distance_meters: 250,
+      edit_grace_minutes: 15,
+      default_shift_hours: 8,
+    },
+    checks: [
+      { type: "missed_clock_out", status: "ran", note: "" },
+      { type: "long_shift", status: "skipped", note: "Not requested." },
+      { type: "missed_meal_break", status: "ran", note: "" },
+      {
+        type: "edited_after_the_fact",
+        status: "skipped",
+        note: "Not requested.",
+      },
+    ],
+    counts: {
+      total: findings.length,
+      by_type: {},
+      by_severity: bySeverity,
+    },
+    findings,
+    how_to_fix: "Apply a fix only after the admin confirms it.",
+  };
+}
+
+const missedClockOut = {
+  type: "missed_clock_out",
+  severity: "high",
+  employee: { user_id: "user_sam", name: "Sam <i>Lee</i>" },
+  entry_ids: [11],
+  date: "2026-11-03",
+  description: "Shift #11 has been open for 30 hours.",
+  suggested_fix: {
+    org_id: "org_1",
+    entry_id: 11,
+    clock_out: "2026-11-03 17:00",
+    timezone: "America/Regina",
+  },
+  fix_note: "Estimated from Sam's usual shift length; confirm the real time.",
+  details: {},
+};
+const missedMeal = {
+  type: "missed_meal_break",
+  severity: "low",
+  employee: { user_id: "user_sam", name: "Sam Lee" },
+  entry_ids: [12],
+  date: "2026-11-04",
+  description: "Shift #12 ran 8h with no meal break.",
+  suggested_fix: null,
+  fix_note: "Follow your meal-break policy.",
+  details: {},
+};
+
+describe("MCP Apps: the timesheet anomalies page", () => {
+  const button = (doc: Document, label: string) =>
+    [...doc.querySelectorAll("button")].find((b) =>
+      b.textContent?.startsWith(label),
+    ) as HTMLButtonElement | undefined;
+
+  it("shows the header, severity counts, findings and checks, escaping names", () => {
+    const win = mountApp(
+      "anomalies",
+      auditData([missedMeal, missedClockOut]),
+      vi.fn(),
+    );
+    const doc = win.document;
+    expect(doc.querySelector("h1")?.textContent).toBe(
+      "Timesheet anomalies · Sam Lee",
+    );
+    expect(doc.querySelector(".sub")?.textContent).toBe(
+      "Acme · 2026-11-01 to 2026-11-07 · America/Regina",
+    );
+    const tiles = [...doc.querySelectorAll(".tile")].map((t) => t.textContent);
+    expect(tiles).toEqual([
+      "2Findings",
+      "3Entries audited",
+      "1High",
+      "0Medium",
+      "1Low",
+    ]);
+    // High severity first, whatever order the server sent.
+    const rows = [...doc.querySelectorAll(".finding")];
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.querySelector(".sev")?.textContent).toBe("high");
+    expect(rows[0]?.textContent).toContain("Missed clock-out");
+    expect(rows[0]?.textContent).toContain("Sam <i>Lee</i>");
+    expect(rows[0]?.textContent).toContain("Entry #11");
+    expect(rows[0]?.textContent).toContain("2026-11-03");
+    expect(rows[0]?.textContent).toContain("open for 30 hours");
+    expect(doc.querySelector(".finding i")).toBeNull();
+    // A finding with no suggested fix shows its note and no button.
+    expect(rows[1]?.textContent).toContain("Follow your meal-break policy.");
+    expect(rows[1]?.querySelector("button")).toBeNull();
+    expect(rows[0]?.querySelector("button")?.textContent).toBe("Apply fix…");
+    // Which checks ran or were skipped, with their notes.
+    const checks = [...doc.querySelectorAll(".check")].map(
+      (c) => c.textContent,
+    );
+    expect(checks).toContain("Long shiftskippedNot requested.");
+    expect(checks).toContain("Missed clock-outran");
+  });
+
+  it("filters findings by severity and by type", () => {
+    const win = mountApp(
+      "anomalies",
+      auditData([missedClockOut, missedMeal]),
+      vi.fn(),
+    );
+    const doc = win.document;
+    button(doc, "Low (1)")?.click();
+    expect(doc.querySelectorAll(".finding")).toHaveLength(1);
+    expect(doc.querySelector(".finding .sev")?.textContent).toBe("low");
+    button(doc, "High (1)")?.click();
+    expect(doc.querySelector(".finding .sev")?.textContent).toBe("high");
+    button(doc, "All (2)")?.click();
+    const select = doc.querySelector("select") as HTMLSelectElement;
+    select.value = "missed_meal_break";
+    select.dispatchEvent(new win.Event("change"));
+    expect(doc.querySelectorAll(".finding")).toHaveLength(1);
+    expect(doc.querySelector(".finding")?.textContent).toContain(
+      "Missed meal break",
+    );
+  });
+
+  it("shows a clear empty state when nothing was found", () => {
+    const win = mountApp("anomalies", auditData([]), vi.fn());
+    const doc = win.document;
+    expect(doc.querySelector(".empty-state")?.textContent).toBe(
+      "No issues found2026-11-01 to 2026-11-07 · 3 entries audited",
+    );
+    expect(doc.querySelectorAll(".finding")).toHaveLength(0);
+    expect(doc.querySelectorAll(".check").length).toBeGreaterThan(0);
+  });
+
+  it("applies a suggested fix only after confirming, then re-runs the same audit", async () => {
+    const callTool = vi.fn(async (name: string) => {
+      if (name === "audit_timesheets") {
+        return { structuredContent: auditData([missedMeal]) };
+      }
+      return { content: [{ type: "text", text: "Updated entry #11." }] };
+    });
+    const win = mountApp("anomalies", auditData([missedClockOut]), callTool);
+    const doc = win.document;
+    await flush();
+    // Nothing is called just for showing the card.
+    expect(callTool).not.toHaveBeenCalled();
+
+    button(doc, "Apply fix")?.click();
+    expect(callTool).not.toHaveBeenCalled();
+    expect(doc.querySelector(".confirm")?.textContent).toContain(
+      "Clock out: 2026-11-03 17:00",
+    );
+    // Cancelling backs out without a call.
+    button(doc, "Cancel")?.click();
+    expect(doc.querySelector(".confirm")).toBeNull();
+    expect(callTool).not.toHaveBeenCalled();
+
+    button(doc, "Apply fix")?.click();
+    button(doc, "Confirm fix")?.click();
+    await flush();
+    await flush();
+    expect(callTool).toHaveBeenNthCalledWith(1, "update_time_entry", {
+      org_id: "org_1",
+      entry_id: 11,
+      clock_out: "2026-11-03 17:00",
+      timezone: "America/Regina",
+    });
+    expect(callTool).toHaveBeenNthCalledWith(2, "audit_timesheets", {
+      org_id: "org_1",
+      start_date: "2026-11-01",
+      end_date: "2026-11-07",
+      timezone: "America/Regina",
+      member: "user_sam",
+      checks: ["missed_clock_out", "missed_meal_break"],
+      long_shift_hours: 12,
+      missed_clock_out_hours: 10,
+      meal_break_after_hours: 5,
+      meal_break_min_minutes: 30,
+      max_distance_meters: 250,
+      edit_grace_minutes: 15,
+    });
+    expect(callTool).toHaveBeenCalledTimes(2);
+    // The card now shows the refreshed audit.
+    const rows = [...doc.querySelectorAll(".finding")];
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.textContent).toContain("Missed meal break");
+    expect(doc.querySelector(".status.ok")?.textContent).toBe(
+      "Updated entry #11.",
+    );
+  });
+
+  it("shows the server's refusal and keeps the finding when a fix is rejected", async () => {
+    const callTool = vi.fn(async () => ({
+      isError: true,
+      content: [{ type: "text", text: "Overlaps another shift." }],
+    }));
+    const win = mountApp("anomalies", auditData([missedClockOut]), callTool);
+    const doc = win.document;
+    button(doc, "Apply fix")?.click();
+    button(doc, "Confirm fix")?.click();
+    await flush();
+    await flush();
+    expect(callTool).toHaveBeenCalledTimes(1);
+    expect(doc.querySelector(".status.err")?.textContent).toBe(
+      "Overlaps another shift.",
+    );
+    expect(doc.querySelectorAll(".finding")).toHaveLength(1);
   });
 });
