@@ -86,6 +86,10 @@ Time Off (manage_time_off):
 - When filing time off from calendar events (e.g. Google Calendar), confirm the list with the user first, and pass external_ref as 'google-calendar:<calendar id>:<event id>' for each one. Status "already_imported" means that event was filed before, so nothing new was created; it is not an error.
 - Needs a plan with Time Off; if it returns status "time_off_not_enabled", tell the user their organization's plan needs the Time Off feature.
 
+Interactive Timecard & Hours Report (MCP Apps):
+- In chat apps that support MCP Apps (or the ChatGPT Apps SDK), get_weekly_timecard shows an interactive timecard grid and run_hours_report shows an hours chart and table right in the chat. Both tools still return the same text and JSON, so keep summarizing the key totals briefly; don't repeat every shift when the app is shown.
+- In the app, admins can edit a shift's times or skip_lunch flag (it calls update_time_entry) and approve or deny pending time off in the period (it calls manage_time_off). Members only see their own hours, with no edit or approve buttons. The server applies the same role checks to these calls as to yours.
+
 Overtime, Alerts & Other Settings (admins):
 - manage_overtime_settings: daily_threshold_hours / weekly_threshold_hours (null turns one off).
 - manage_pay_period_settings: anyone can 'get' the current pay period, its payday and the next ones (pass date for a past or future period); admins 'update' frequency ('weekly' / 'bi-weekly'), payday (any one payday, YYYY-MM-DD) and holdback_days (7 = one week). For hours in a pay period, take its start_date/end_date and pass them to run_hours_report or get_weekly_timecard. "When do I get paid?" or "what pay period is this?" → manage_pay_period_settings.
