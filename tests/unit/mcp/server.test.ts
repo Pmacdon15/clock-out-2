@@ -156,6 +156,7 @@ type Registered = {
     description?: string;
     inputSchema?: unknown;
     annotations?: Record<string, boolean>;
+    _meta?: Record<string, unknown>;
   };
 };
 
@@ -165,6 +166,7 @@ function registered() {
     registerTool: (name: string, config: Registered["config"]) => {
       tools.push({ name, config });
     },
+    registerResource: () => {},
     server: { getClientVersion: () => undefined },
   };
   registerClockOutTools(server as never);
@@ -221,6 +223,7 @@ describe("Clock Out MCP server", () => {
     expect(SERVER_OPTIONS.capabilities).toEqual({
       tools: { listChanged: false },
       prompts: { listChanged: false },
+      resources: { listChanged: false },
     });
   });
 
