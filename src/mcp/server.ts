@@ -18,6 +18,16 @@ import {
   manageTimeOffInputSchema,
   manageTimeOffTool,
 } from "@/mcp/admin-tools";
+import {
+  appToolMeta,
+  HOURS_REPORT_APP,
+  registerClockOutApps,
+  TIMECARD_APP,
+} from "@/mcp/apps";
+import {
+  auditTimesheetsInputSchema,
+  auditTimesheetsTool,
+} from "@/mcp/audit-tools";
 import { MCP_INSTRUCTIONS } from "@/mcp/instructions";
 import {
   manageNotificationPreferencesInputSchema,
@@ -126,6 +136,7 @@ export const SERVER_OPTIONS = {
   capabilities: {
     tools: { listChanged: false },
     prompts: { listChanged: false },
+    resources: { listChanged: false },
   },
 };
 
@@ -202,6 +213,10 @@ async function run(
 }
 
 export function registerClockOutTools(server: McpServer) {
+  // The in-chat timecard and hours report apps (`ui://` resources) that
+  // get_weekly_timecard and run_hours_report link to through `_meta`.
+  registerClockOutApps(server);
+
   server.registerTool(
     "list_organizations",
     {
@@ -345,9 +360,10 @@ export function registerClockOutTools(server: McpServer) {
     {
       title: "Get weekly timecard",
       description:
-        "Returns a structured weekly timecard showing who worked, how many hours they worked in total, days worked, and a day-by-day breakdown of every shift. Admins see all organization members by default (or can filter by a member); regular members see their own timecard. Supports week_of (YYYY-MM-DD), start_date/end_date, or Clock Out's month-week selector (year, month, week 1–4).",
+        "Returns a structured weekly timecard showing who worked, how many hours they worked in total, days worked, and a day-by-day breakdown of every shift. Admins see all organization members by default (or can filter by a member); regular members see their own timecard. Supports week_of (YYYY-MM-DD), start_date/end_date, or Clock Out's month-week selector (year, month, week 1–4). In chat apps that support MCP Apps, the result is also shown as an interactive timecard grid.",
       inputSchema: portable(getWeeklyTimecardInputSchema),
       annotations: { readOnlyHint: true, openWorldHint: false },
+      _meta: appToolMeta(TIMECARD_APP),
     },
     (args, ctx) =>
       run(server, ctx.http?.authInfo, (caller) =>
@@ -510,7 +526,7 @@ export function registerClockOutTools(server: McpServer) {
     {
       title: "Run an hours report for a date range",
       description:
-        "Admin-only ('org:admin') tool for organizations whose plan includes Reporting. Gets net hours worked (after lunch/break deductions) for one member or everyone between start_date and end_date, with daily breakdowns and shifts. Works with or without a reporting schedule. Returns the report to you by default; deliver: 'email_admins' or 'both' also emails it to the organization's admins.",
+        "Admin-only ('org:admin') tool for organizations whose plan includes Reporting. Gets net hours worked (after lunch/break deductions) for one member or everyone between start_date and end_date, with daily breakdowns and shifts. Works with or without a reporting schedule. Returns the report to you by default; deliver: 'email_admins' or 'both' also emails it to the organization's admins. In chat apps that support MCP Apps, the result is also shown as an interactive hours chart and table.",
       inputSchema: portable(runHoursReportInputSchema),
       annotations: {
         readOnlyHint: false,
@@ -518,10 +534,26 @@ export function registerClockOutTools(server: McpServer) {
         idempotentHint: false,
         openWorldHint: true,
       },
+      _meta: appToolMeta(HOURS_REPORT_APP),
     },
     (args, ctx) =>
       run(server, ctx.http?.authInfo, (caller) =>
         runHoursReportTool(caller, args),
+      ),
+  );
+
+  server.registerTool(
+    "audit_timesheets",
+    {
+      title: "Audit timesheets for problems",
+      description:
+        "Admin-only ('org:admin') read-only audit of the organization's time entries between start_date and end_date (one member or everyone). Flags missed clock-outs (including shifts closed by the automatic clock-out), unusually long shifts, overlapping entries, missed or short meal breaks, punches far outside every work site's geofence, and entries entered or edited after the fact. Each finding has a type, severity, employee, entry_ids, date, description, and a suggested_fix that, when not null, is the exact input object for update_time_entry. Thresholds are optional parameters. Never applies fixes itself: show the findings and only call update_time_entry with a suggested_fix after the admin confirms it.",
+      inputSchema: portable(auditTimesheetsInputSchema),
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    (args, ctx) =>
+      run(server, ctx.http?.authInfo, (caller) =>
+        auditTimesheetsTool(caller, args),
       ),
   );
 

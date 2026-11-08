@@ -156,6 +156,7 @@ type Registered = {
     description?: string;
     inputSchema?: unknown;
     annotations?: Record<string, boolean>;
+    _meta?: Record<string, unknown>;
   };
 };
 
@@ -165,6 +166,7 @@ function registered() {
     registerTool: (name: string, config: Registered["config"]) => {
       tools.push({ name, config });
     },
+    registerResource: () => {},
     server: { getClientVersion: () => undefined },
   };
   registerClockOutTools(server as never);
@@ -178,6 +180,7 @@ describe("Clock Out MCP server", () => {
     expect([...tools.keys()].sort()).toEqual([
       "add_time_entry",
       "approve_shift_request",
+      "audit_timesheets",
       "cancel_shift_request",
       "claim_shift",
       "clock_in",
@@ -229,6 +232,7 @@ describe("Clock Out MCP server", () => {
     expect(SERVER_OPTIONS.capabilities).toEqual({
       tools: { listChanged: false },
       prompts: { listChanged: false },
+      resources: { listChanged: false },
     });
   });
 
@@ -246,6 +250,7 @@ describe("Clock Out MCP server", () => {
       "get_calendar_shifts",
       "list_open_shifts",
       "list_pending_shift_requests",
+      "audit_timesheets",
     ]) {
       expect(tools.get(name)?.annotations?.readOnlyHint, name).toBe(true);
     }
