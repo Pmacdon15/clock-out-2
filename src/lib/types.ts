@@ -324,6 +324,53 @@ export type ScheduledShiftWithStatus = ScheduledShift & {
   minutes_late: number | null;
 };
 
+/**
+ * A member's request to hand a scheduled shift to a coworker:
+ * - `offer`: the owner posts it; any coworker (or `target_user_id`) claims it.
+ * - `pickup`: a member asks to take a coworker's shift; the owner agrees.
+ * - `swap`: the owner trades `shift_id` for the coworker's `swap_shift_id`.
+ * `claimed_by` is whoever takes `shift_id`. An admin approves (which moves
+ * the shift(s) in the schedule) or denies it.
+ */
+export type ShiftRequestType = "offer" | "pickup" | "swap";
+export type ShiftRequestStatus =
+  | "open"
+  | "pending_approval"
+  | "approved"
+  | "denied"
+  | "cancelled";
+
+export type ShiftRequest = {
+  id: number;
+  org_id: string;
+  request_type: ShiftRequestType;
+  shift_id: number;
+  swap_shift_id: number | null;
+  requested_by: string;
+  target_user_id: string | null;
+  claimed_by: string | null;
+  note: string | null;
+  status: ShiftRequestStatus;
+  claimed_at: Date | string | null;
+  reviewed_by: string | null;
+  reviewed_at: Date | string | null;
+  review_note: string | null;
+  cancelled_by: string | null;
+  created_at?: Date | string;
+  updated_at?: Date | string;
+};
+
+/** A request with the times and owners of the shift(s) it moves. */
+export type ShiftRequestDetail = ShiftRequest & {
+  shift_start: Date | string;
+  shift_end: Date | string;
+  shift_owner: string;
+  shift_note: string | null;
+  swap_shift_start: Date | string | null;
+  swap_shift_end: Date | string | null;
+  swap_shift_owner: string | null;
+};
+
 export type TimeOffType = "vacation" | "sick" | "unpaid";
 export type TimeOffStatus = "pending" | "approved" | "denied" | "cancelled";
 

@@ -286,3 +286,42 @@ CREATE TABLE IF NOT EXISTS pay_period_settings (
     holdback_days INTEGER NOT NULL DEFAULT 0,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- Shift swap and pickup requests between members, approved by an admin.
+--   offer:  the owner posts their shift; a coworker claims it.
+--   pickup: a member asks to take a coworker's shift; the owner agrees.
+--   swap:   the owner trades shift_id for the coworker's swap_shift_id;
+--           the coworker agrees.
+-- 'open' waits for the other member; 'pending_approval' waits for an admin.
+-- claimed_by is whoever takes shift_id (set at once for pickup and swap).
+-- Approving moves shift_id to claimed_by (and swap_shift_id to requested_by)
+-- in scheduled_shifts. Also created on first use by the app
+-- (ensureShiftRequestsTable in src/lib/shift-requests-db.ts).
+CREATE TABLE IF NOT EXISTS shift_requests (
+    id SERIAL PRIMARY KEY,
+    org_id TEXT NOT NULL,
+    request_type TEXT NOT NULL CHECK (request_type IN ('offer', 'pickup', 'swap')),
+    shift_id INTEGER NOT NULL REFERENCES scheduled_shifts(id) ON DELETE CASCADE,
+    swap_shift_id INTEGER REFERENCES scheduled_shifts(id) ON DELETE CASCADE,
+    requested_by TEXT NOT NULL,
+    target_user_id TEXT,
+    claimed_by TEXT,
+    note TEXT,
+    status TEXT NOT NULL DEFAULT 'open'
+        CHECK (status IN ('open', 'pending_approval', 'approved', 'denied', 'cancelled')),
+    claimed_at TIMESTAMP WITH TIME ZONE,
+    reviewed_by TEXT,
+    reviewed_at TIMESTAMP WITH TIME ZONE,
+    review_note TEXT,
+    cancelled_by TEXT,
+    CHECK ((request_type = 'swap') = (swap_shift_id IS NOT NULL)),
+    CHECK (swap_shift_id IS NULL OR swap_shift_id <> shift_id),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_shift_requests_org_status
+    ON shift_requests (org_id, status);
+-- A shift is in at most one live request at a time.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_shift_requests_one_active
+    ON shift_requests (shift_id)
+    WHERE status IN ('open', 'pending_approval');
