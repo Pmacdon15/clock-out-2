@@ -33,6 +33,15 @@ describe("calendar export", () => {
     });
     const named = shiftToCalendarEvent({ ...shift, note: null }, "Sam");
     expect(named.title).toBe("Sam: Shift · Clock Out");
+    expect(shiftToCalendarEvent(shift, undefined, "Acme Coffee").title).toBe(
+      "Shift · Acme Coffee",
+    );
+    expect(shiftToCalendarEvent(shift, "Sam", "Acme").title).toBe(
+      "Sam: Shift · Acme",
+    );
+    expect(shiftToCalendarEvent(shift, undefined, "  ").title).toBe(
+      "Shift · Clock Out",
+    );
     expect(named.description).toBe("Scheduled in Clock Out for Sam.");
   });
 

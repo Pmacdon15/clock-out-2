@@ -53,7 +53,7 @@ export async function GET(
     : [];
   const orgName = membership.organization?.name;
   const ics = buildIcsCalendar(
-    shifts.map((shift) => shiftToCalendarEvent(shift)),
+    shifts.map((shift) => shiftToCalendarEvent(shift, undefined, orgName)),
     now,
     orgName ? `Clock Out shifts · ${orgName}` : "Clock Out shifts",
   );

@@ -26,6 +26,7 @@ vi.mock("@/lib/google-calendar-actions", () => ({
 }));
 vi.mock("@clerk/nextjs", () => ({
   useUser: () => ({ user: { externalAccounts: [] } }),
+  useOrganization: () => ({ organization: { name: "Acme" } }),
 }));
 
 import Schedule, {
@@ -550,7 +551,7 @@ describe("Schedule", () => {
     fireEvent.click(screen.getByRole("button", { name: "Google Calendar" }));
     await waitFor(() => expect(open).toHaveBeenCalled());
     const url = new URL(open.mock.calls[0][0] as string);
-    expect(url.searchParams.get("text")).toBe("Alex: Shift · Clock Out");
+    expect(url.searchParams.get("text")).toBe("Alex: Shift · Acme");
     expect(url.searchParams.get("dates")).toBe(
       "20260105T090000Z/20260105T170000Z",
     );

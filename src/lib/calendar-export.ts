@@ -14,7 +14,9 @@ export type CalendarShiftEvent = {
   end: Date;
 };
 
-const DEFAULT_TITLE = "Shift · Clock Out";
+/** "Shift · Acme Coffee", or "Shift · Clock Out" when the org name is unknown. */
+export const shiftTitle = (orgName?: string | null, memberName?: string) =>
+  `${memberName ? `${memberName}: ` : ""}Shift · ${orgName?.trim() || "Clock Out"}`;
 
 /** A stable id per shift, so re-importing a shift updates it instead of duplicating it. */
 export const shiftEventUid = (shift: Pick<ScheduledShift, "id" | "org_id">) =>
@@ -23,10 +25,11 @@ export const shiftEventUid = (shift: Pick<ScheduledShift, "id" | "org_id">) =>
 export function shiftToCalendarEvent(
   shift: ScheduledShift,
   memberName?: string,
+  orgName?: string | null,
 ): CalendarShiftEvent {
   return {
     uid: shiftEventUid(shift),
-    title: memberName ? `${memberName}: ${DEFAULT_TITLE}` : DEFAULT_TITLE,
+    title: shiftTitle(orgName, memberName),
     description: [
       ...(shift.note ? [shift.note, ""] : []),
       memberName

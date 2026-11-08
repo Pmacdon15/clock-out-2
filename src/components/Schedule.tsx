@@ -1,5 +1,6 @@
 "use client";
 
+import { useOrganization } from "@clerk/nextjs";
 import { useMutation } from "@tanstack/react-query";
 import { format } from "date-fns";
 import {
@@ -262,7 +263,8 @@ function AddToCalendarLinks({
   shift: ScheduledShiftWithStatus;
   memberName?: string;
 }) {
-  const event = shiftToCalendarEvent(shift, memberName);
+  const { organization } = useOrganization();
+  const event = shiftToCalendarEvent(shift, memberName, organization?.name);
   const { add, pending } = useAddToGoogleCalendar();
   return (
     <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
