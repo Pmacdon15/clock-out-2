@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
-import type { CalendarShiftEvent } from "./calendar-export";
+import { clerkClient } from "@clerk/nextjs/server";
+import {
+  type CalendarShiftEvent,
+  shiftToCalendarEvent,
+} from "./calendar-export";
+import { GOOGLE_CALENDAR_SCOPE } from "./google-calendar-scope";
 import type { ScheduledShift } from "./types";
 
 /**
@@ -85,4 +90,58 @@ export async function writeGoogleCalendarEvent(
   });
   if (updated.ok) return { ok: true, outcome: "updated" };
   return { ok: false, failure: await failureFor(updated) };
+}
+
+/** The user's Google token, if they linked Google with calendar access. */
+export async function googleCalendarToken(
+  userId: string,
+): Promise<string | null> {
+  const client = await clerkClient();
+  const tokens = await client.users
+    .getUserOauthAccessToken(userId, "google")
+    .catch(() => null);
+  const token = tokens?.data.find((t) =>
+    t.scopes?.includes(GOOGLE_CALENDAR_SCOPE),
+  );
+  return token?.token ?? null;
+}
+
+/** Removes the shift's event; one that's already gone counts as removed. */
+export async function deleteGoogleCalendarEvent(
+  accessToken: string,
+  id: string,
+): Promise<boolean> {
+  const res = await fetch(`${EVENTS_URL}/${id}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  return res.ok || res.status === 404 || res.status === 410;
+}
+
+/**
+ * Keeps a member's Google Calendar in step when an admin adds, moves or
+ * cancels one of their shifts. Only for members who allowed calendar access
+ * (by tapping a Google Calendar button); does nothing for anyone else.
+ */
+export async function mirrorShiftToGoogleCalendar(
+  change: "added" | "changed" | "removed",
+  shift: ScheduledShift,
+) {
+  const token = await googleCalendarToken(shift.user_id);
+  if (!token) return;
+  const id = googleShiftEventId(shift);
+  if (change === "removed") {
+    if (!(await deleteGoogleCalendarEvent(token, id))) {
+      console.error("[Google Calendar] Couldn't remove a cancelled shift");
+    }
+    return;
+  }
+  const write = await writeGoogleCalendarEvent(
+    token,
+    shiftToCalendarEvent(shift),
+    id,
+  );
+  if (!write.ok) {
+    console.error("[Google Calendar] Couldn't update a shift:", write.failure);
+  }
 }

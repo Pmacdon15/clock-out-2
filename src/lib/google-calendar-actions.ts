@@ -5,10 +5,10 @@ import { shiftToCalendarEvent } from "./calendar-export";
 import { dbGetScheduledShiftById } from "./db";
 import {
   type GoogleCalendarFailure,
+  googleCalendarToken,
   googleShiftEventId,
   writeGoogleCalendarEvent,
 } from "./google-calendar";
-import { GOOGLE_CALENDAR_SCOPE } from "./google-calendar-scope";
 import { SCHEDULING_FEATURE, SCHEDULING_UPGRADE_REASON } from "./plan-features";
 import type { ScheduledShift } from "./types";
 
@@ -27,18 +27,6 @@ const FAILURE_MESSAGES: Record<GoogleCalendarFailure, string> = {
     "Google Calendar isn't set up for Clock Out yet. Ask your admin to turn on the Google Calendar API.",
   failed: "Google Calendar didn't accept the shift. Try again.",
 };
-
-/** The user's Google token, if they linked Google with calendar access. */
-async function googleCalendarToken(userId: string): Promise<string | null> {
-  const client = await clerkClient();
-  const tokens = await client.users
-    .getUserOauthAccessToken(userId, "google")
-    .catch(() => null);
-  const token = tokens?.data.find((t) =>
-    t.scopes?.includes(GOOGLE_CALENDAR_SCOPE),
-  );
-  return token?.token ?? null;
-}
 
 async function memberName(userId: string): Promise<string | undefined> {
   const client = await clerkClient();

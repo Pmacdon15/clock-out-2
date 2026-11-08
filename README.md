@@ -170,9 +170,11 @@ Only the `https://www.googleapis.com/auth/calendar.events` scope is requested, a
 1. **APIs & Services → Library →** enable the **Google Calendar API**.
 2. **OAuth consent screen → Data access →** add the `.../auth/calendar.events` scope. While the app is in _Testing_, only listed test users can grant it; publish (and complete Google's verification for this sensitive scope) for everyone else.
 
-No new env vars are needed. Until step 1 is done, the button shows "Google Calendar isn't set up for Clock Out yet" and opens the fallback link.
+No new env vars are needed. Until step 1 is done, the button shows "Google Calendar isn't set up for Clock Out yet" and opens the fallback link. Don't add the calendar scope to Clerk's Google connection settings: Clerk asks for it only from users who tap the button, so everyone else's sign-in is unchanged.
 
-The calendar subscription feed (Apple Calendar, Outlook, or Google on a computer) is unchanged. Google only supports subscribing by URL from calendar.google.com on a computer, which is why phones should use the buttons above.
+Once a member has allowed calendar access, shifts an admin adds, moves or cancels for them are mirrored to their Google Calendar automatically after the change is saved (`mirrorShiftToGoogleCalendar`). Members who never tapped the button are left alone.
+
+Apple Calendar and Outlook users can instead subscribe to a feed of their shifts, under "Use Apple Calendar or Outlook instead?" on the Schedule page. That adds a separate "Clock Out shifts" calendar, so it's no longer offered for Google. The feed URLs are signed with `CALENDAR_FEED_SECRET` (falls back to `CLERK_SECRET_KEY`).
 
 ## Deployment
 

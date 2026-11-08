@@ -613,7 +613,7 @@ describe("Schedule", () => {
     ).toBeNull();
   });
 
-  it("offers a calendar subscription when there is a feed", async () => {
+  it("offers Apple and Outlook subscriptions when there is a feed", async () => {
     renderWithClient(
       <Schedule
         calendarFeedPromise={resolved("/api/calendar/tok.ics")}
@@ -622,9 +622,7 @@ describe("Schedule", () => {
       />,
     );
     expect(
-      await screen.findByRole("heading", {
-        name: "Add my shifts to my calendar",
-      }),
+      await screen.findByText("Use Apple Calendar or Outlook instead?"),
     ).toBeVisible();
   });
 });

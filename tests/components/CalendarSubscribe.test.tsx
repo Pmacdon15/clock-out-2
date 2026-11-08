@@ -1,13 +1,7 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { renderWithClient, resolved } from "../utils";
-
-const mocks = vi.hoisted(() => ({
-  toast: { success: vi.fn(), error: vi.fn() },
-}));
-vi.mock("sonner", () => ({ toast: mocks.toast }));
-
 import CalendarSubscribe from "@/components/CalendarSubscribe";
+import { renderWithClient, resolved } from "../utils";
 
 const FEED = `${window.location.origin}/api/calendar/tok.ics`;
 
@@ -25,22 +19,28 @@ describe("CalendarSubscribe", () => {
     await waitFor(() => expect(container).toBeEmptyDOMElement());
   });
 
-  it("opens Google Calendar and Outlook subscriptions in a new tab", async () => {
+  it("is tucked away, and offers no Google subscription", async () => {
+    renderCard();
+    fireEvent.click(
+      await screen.findByText("Use Apple Calendar or Outlook instead?"),
+    );
+    expect(
+      screen.getByRole("button", { name: "Apple Calendar" }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Google Calendar" }),
+    ).toBeNull();
+  });
+
+  it("opens the Outlook subscription in a new tab", async () => {
     const open = vi.spyOn(window, "open").mockImplementation(() => null);
     renderCard();
     fireEvent.click(
-      await screen.findByRole("button", { name: "Google Calendar" }),
+      await screen.findByRole("button", { name: "Outlook", hidden: true }),
     );
-    const google = new URL(open.mock.calls[0][0] as string);
-    expect(google.origin).toBe("https://calendar.google.com");
-    expect(google.searchParams.get("cid")).toBe(
-      FEED.replace(/^https?:\/\//, "webcal://"),
-    );
-    expect(open.mock.calls[0][1]).toBe("_blank");
-
-    fireEvent.click(screen.getByRole("button", { name: "Outlook" }));
-    const outlook = new URL(open.mock.calls[1][0] as string);
+    const outlook = new URL(open.mock.calls[0][0] as string);
     expect(outlook.searchParams.get("url")).toBe(FEED);
+    expect(open.mock.calls[0][1]).toBe("_blank");
   });
 
   it("hands Apple Calendar a webcal link", async () => {
@@ -53,7 +53,10 @@ describe("CalendarSubscribe", () => {
     try {
       renderCard();
       fireEvent.click(
-        await screen.findByRole("button", { name: "Apple Calendar" }),
+        await screen.findByRole("button", {
+          name: "Apple Calendar",
+          hidden: true,
+        }),
       );
       expect(location.href).toBe(FEED.replace(/^https?:\/\//, "webcal://"));
     } finally {
@@ -62,25 +65,5 @@ describe("CalendarSubscribe", () => {
         value: original,
       });
     }
-  });
-
-  it("copies the feed link", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: { writeText },
-    });
-    renderCard();
-    fireEvent.click(await screen.findByRole("button", { name: "Copy link" }));
-    await waitFor(() =>
-      expect(mocks.toast.success).toHaveBeenCalledWith("Calendar link copied"),
-    );
-    expect(writeText).toHaveBeenCalledWith(FEED);
-
-    writeText.mockRejectedValueOnce(new Error("denied"));
-    fireEvent.click(screen.getByRole("button", { name: "Copy link" }));
-    await waitFor(() =>
-      expect(mocks.toast.error).toHaveBeenCalledWith("Couldn't copy the link"),
-    );
   });
 });

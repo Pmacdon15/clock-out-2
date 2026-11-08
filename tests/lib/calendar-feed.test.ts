@@ -63,9 +63,6 @@ describe("calendarSubscribeLinks", () => {
       "https://clockout.app/api/calendar/tok.ics",
     );
     expect(links.apple).toBe("webcal://clockout.app/api/calendar/tok.ics");
-    expect(new URL(links.google).searchParams.get("cid")).toBe(
-      "webcal://clockout.app/api/calendar/tok.ics",
-    );
     const outlook = new URL(links.outlook);
     expect(outlook.origin).toBe("https://outlook.live.com");
     expect(outlook.searchParams.get("url")).toBe(

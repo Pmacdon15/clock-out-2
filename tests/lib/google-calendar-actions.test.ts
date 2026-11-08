@@ -20,7 +20,8 @@ vi.mock("@clerk/nextjs/server", () => ({
 vi.mock("@/lib/db", () => ({
   dbGetScheduledShiftById: mocks.dbGetScheduledShiftById,
 }));
-vi.mock("@/lib/google-calendar", () => ({
+vi.mock("@/lib/google-calendar", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/google-calendar")>()),
   googleShiftEventId: (s: { id: number }) => `id${s.id}`,
   writeGoogleCalendarEvent: mocks.write,
 }));

@@ -1,8 +1,20 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+const clerk = vi.hoisted(() => ({ getToken: vi.fn() }));
+vi.mock("@clerk/nextjs/server", () => ({
+  clerkClient: vi.fn(async () => ({
+    users: { getUserOauthAccessToken: clerk.getToken },
+  })),
+}));
+
 import {
+  deleteGoogleCalendarEvent,
+  googleCalendarToken,
   googleShiftEventId,
+  mirrorShiftToGoogleCalendar,
   writeGoogleCalendarEvent,
 } from "@/lib/google-calendar";
+import { GOOGLE_CALENDAR_SCOPE } from "@/lib/google-calendar-scope";
 
 const event = {
   uid: "u",
@@ -96,5 +108,89 @@ describe("writeGoogleCalendarEvent", () => {
       ok: false,
       failure: "failed",
     });
+  });
+});
+
+const shift = {
+  id: 7,
+  org_id: "org_1",
+  user_id: "user_1",
+  shift_start: new Date("2026-01-05T09:00:00Z"),
+  shift_end: new Date("2026-01-05T17:00:00Z"),
+  note: null,
+  created_by: "admin_1",
+};
+const withCalendar = {
+  data: [{ token: "tok", scopes: ["email", GOOGLE_CALENDAR_SCOPE] }],
+};
+
+describe("googleCalendarToken", () => {
+  it("only returns a token that allows calendar access", async () => {
+    clerk.getToken.mockResolvedValueOnce(withCalendar);
+    await expect(googleCalendarToken("user_1")).resolves.toBe("tok");
+    expect(clerk.getToken).toHaveBeenCalledWith("user_1", "google");
+    clerk.getToken.mockResolvedValueOnce({
+      data: [{ token: "t", scopes: [] }],
+    });
+    await expect(googleCalendarToken("user_1")).resolves.toBeNull();
+    clerk.getToken.mockRejectedValueOnce(new Error("no account"));
+    await expect(googleCalendarToken("user_1")).resolves.toBeNull();
+  });
+});
+
+describe("deleteGoogleCalendarEvent", () => {
+  it("treats an event that's already gone as removed", async () => {
+    const fetch = stubFetch(res(200), res(410), res(404), res(500));
+    expect(await deleteGoogleCalendarEvent("tok", "abc")).toBe(true);
+    expect(await deleteGoogleCalendarEvent("tok", "abc")).toBe(true);
+    expect(await deleteGoogleCalendarEvent("tok", "abc")).toBe(true);
+    expect(await deleteGoogleCalendarEvent("tok", "abc")).toBe(false);
+    expect(fetch.mock.calls[0][0]).toBe(
+      "https://www.googleapis.com/calendar/v3/calendars/primary/events/abc",
+    );
+    expect(fetch.mock.calls[0][1].method).toBe("DELETE");
+  });
+});
+
+describe("mirrorShiftToGoogleCalendar", () => {
+  it("leaves members who never allowed calendar access alone", async () => {
+    clerk.getToken.mockResolvedValueOnce({ data: [] });
+    const fetch = stubFetch();
+    await mirrorShiftToGoogleCalendar("added", shift);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("adds or updates the event for a new or moved shift", async () => {
+    clerk.getToken.mockResolvedValue(withCalendar);
+    const fetch = stubFetch(res(200, "{}"), res(409), res(200, "{}"));
+    await mirrorShiftToGoogleCalendar("added", shift);
+    await mirrorShiftToGoogleCalendar("changed", shift);
+    expect(fetch.mock.calls.map((c) => c[1].method)).toEqual([
+      "POST",
+      "POST",
+      "PUT",
+    ]);
+    const body = JSON.parse(fetch.mock.calls[0][1].body);
+    expect(body.id).toBe(googleShiftEventId(shift));
+    expect(body.summary).toBe("Shift · Clock Out");
+  });
+
+  it("removes the event for a cancelled shift", async () => {
+    clerk.getToken.mockResolvedValue(withCalendar);
+    const fetch = stubFetch(res(200));
+    await mirrorShiftToGoogleCalendar("removed", shift);
+    expect(fetch.mock.calls[0][0]).toMatch(
+      new RegExp(`/events/${googleShiftEventId(shift)}$`),
+    );
+  });
+
+  it("logs a write or delete Google refused", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    clerk.getToken.mockResolvedValue(withCalendar);
+    stubFetch(res(500), res(500));
+    await mirrorShiftToGoogleCalendar("added", shift);
+    await mirrorShiftToGoogleCalendar("removed", shift);
+    expect(error).toHaveBeenCalledTimes(2);
+    error.mockRestore();
   });
 });
