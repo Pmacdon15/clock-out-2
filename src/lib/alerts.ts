@@ -187,7 +187,8 @@ export function isPushServiceUrl(value: string): boolean {
     return false;
   }
   if (url.protocol !== "https:") return false;
-  if (url.port !== "" && url.port !== "443") return false;
+  // URL drops the default port, so any port left is a non-443 one.
+  if (url.port !== "") return false;
   if (url.username || url.password) return false;
   const host = url.hostname.toLowerCase();
   return PUSH_SERVICE_HOSTS.some((allowed) =>

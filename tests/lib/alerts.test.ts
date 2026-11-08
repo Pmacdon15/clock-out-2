@@ -207,6 +207,7 @@ describe("isValidPushSubscription", () => {
     { ...good, endpoint: 5 },
     { ...good, endpoint: "http://insecure" },
     { ...good, endpoint: "https://attacker.example/x" },
+    { ...good, endpoint: "https://" },
     { ...good, endpoint: "https://169.254.169.254/latest" },
     { ...good, endpoint: "https://fcm.googleapis.com:8443/x" },
     { ...good, endpoint: "https://fcm.googleapis.com.attacker.example/x" },
