@@ -21,10 +21,27 @@ const TOKEN_V2 = "v2";
 /** Where a member's feed nonce is kept, in their Clerk private metadata. */
 export const FEED_NONCE_METADATA_KEY = "calendarFeedNonce";
 
+let warnedAboutFallback = false;
+
+/**
+ * The key feed URLs are signed with. Prefer CALENDAR_FEED_SECRET: falling
+ * back to CLERK_SECRET_KEY reuses the Clerk key for something unrelated, and
+ * rotating it would silently break every feed URL. The fallback stays so
+ * existing deployments' feeds keep working, but it is logged once per
+ * instance so it gets noticed.
+ */
 function feedSecret(): string | null {
-  return (
-    process.env.CALENDAR_FEED_SECRET || process.env.CLERK_SECRET_KEY || null
-  );
+  const dedicated = process.env.CALENDAR_FEED_SECRET;
+  if (dedicated) return dedicated;
+  const clerk = process.env.CLERK_SECRET_KEY;
+  if (!clerk) return null;
+  if (!warnedAboutFallback) {
+    warnedAboutFallback = true;
+    console.warn(
+      "Calendar feeds are signed with CLERK_SECRET_KEY because CALENDAR_FEED_SECRET isn't set. Set CALENDAR_FEED_SECRET so rotating the Clerk key doesn't break every feed URL (members will need to subscribe again once).",
+    );
+  }
+  return clerk;
 }
 
 const sign = (payload: string, secret: string) =>

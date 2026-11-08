@@ -71,11 +71,15 @@ describe("calendar feed tokens", () => {
     expect(verifyFeedToken(emptyUser)).toBeNull();
   });
 
-  it("falls back to the Clerk secret, and needs one of them", () => {
+  it("falls back to the Clerk secret, warning once, and needs one of them", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.stubEnv("CALENDAR_FEED_SECRET", "");
     vi.stubEnv("CLERK_SECRET_KEY", "sk_test");
     const token = createFeedToken("org_1", "user_1") as string;
     expect(verifyFeedToken(token)).not.toBeNull();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]?.[0]).toContain("CALENDAR_FEED_SECRET");
+    warn.mockRestore();
 
     vi.stubEnv("CLERK_SECRET_KEY", "");
     expect(createFeedToken("org_1", "user_1")).toBeNull();
