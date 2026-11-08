@@ -69,6 +69,7 @@ import { JSDOM } from "jsdom";
 import {
   ANOMALIES_APP,
   appToolMeta,
+  CLOCK_IN_APP,
   CLOCK_OUT_APPS,
   HOURS_REPORT_APP,
   MCP_APP_MIME_TYPE,
@@ -201,6 +202,7 @@ describe("MCP Apps: tools/list and resources", () => {
       ["get_weekly_timecard", TIMECARD_APP],
       ["run_hours_report", HOURS_REPORT_APP],
       ["audit_timesheets", ANOMALIES_APP],
+      ["clock_in", CLOCK_IN_APP],
     ] as const) {
       const meta = byName.get(name)?._meta;
       expect(meta, name).toEqual(appToolMeta(app));
@@ -208,13 +210,18 @@ describe("MCP Apps: tools/list and resources", () => {
       expect(meta?.["openai/outputTemplate"]).toBe(app.uri);
       expect(meta?.["openai/widgetAccessible"]).toBe(true);
     }
-    // Only the three app tools carry a UI; every other tool stays plain.
+    // Only the app tools carry a UI; every other tool stays plain.
     expect(
       tools
         .filter((t) => t._meta?.ui)
         .map((t) => t.name)
         .sort(),
-    ).toEqual(["audit_timesheets", "get_weekly_timecard", "run_hours_report"]);
+    ).toEqual([
+      "audit_timesheets",
+      "clock_in",
+      "get_weekly_timecard",
+      "run_hours_report",
+    ]);
     // The tools the app calls stay visible to apps.
     for (const name of ["update_time_entry", "manage_time_off"]) {
       expect(byName.has(name), name).toBe(true);
@@ -554,9 +561,10 @@ describe("MCP Apps: role checks on the calls the app makes", () => {
  * (window.openai), which are simpler to stub than a parent frame.
  */
 function mountApp(
-  view: "timecard" | "hours" | "anomalies",
+  view: "timecard" | "hours" | "anomalies" | "clock",
   toolOutput: Record<string, unknown>,
   callTool: (name: string, args: Record<string, unknown>) => Promise<unknown>,
+  geolocation?: unknown,
 ) {
   const dom = new JSDOM(clockOutAppHtml(view), {
     runScripts: "dangerously",
@@ -564,6 +572,12 @@ function mountApp(
       Object.assign(window, {
         openai: { toolOutput, theme: "dark", callTool },
       });
+      if (geolocation !== undefined) {
+        Object.defineProperty(window.navigator, "geolocation", {
+          value: geolocation,
+          configurable: true,
+        });
+      }
     },
   });
   return dom.window;
@@ -1066,5 +1080,125 @@ describe("MCP Apps: the timesheet anomalies page", () => {
       "Overlaps another shift.",
     );
     expect(doc.querySelectorAll(".finding")).toHaveLength(1);
+  });
+});
+
+describe("MCP Apps: the clock-in card", () => {
+  const needsLocation = {
+    status: "location_required",
+    reason: "Acme only allows clock-in at approved work sites.",
+    organization: { org_id: "org_1", name: "Acme" },
+    member: { user_id: "user_sam", name: "Sam <b>Lee</b>" },
+    device_location_retry: {
+      tool: "clock_in",
+      arguments: {
+        org_id: "org_1",
+        member: "user_sam",
+        timezone: "America/Regina",
+      },
+    },
+  };
+  const position = {
+    coords: { latitude: 45.4215, longitude: -75.6972, accuracy: 12 },
+  };
+
+  it("asks for the geolocation permission on its resource", () => {
+    expect(CLOCK_IN_APP.permissions).toEqual({ geolocation: {} });
+  });
+
+  it("clocks in with the device's location after the user taps Share", async () => {
+    const callTool = vi.fn(async () => ({
+      structuredContent: {
+        status: "clocked_in",
+        summary: "Clocked in Sam Lee at Acme at Warehouse.",
+        location: { siteName: "Warehouse", address: "1 Warehouse Rd" },
+      },
+    }));
+    const geolocation = {
+      getCurrentPosition: vi.fn((ok: (p: typeof position) => void) =>
+        ok(position),
+      ),
+    };
+    const win = mountApp("clock", needsLocation, callTool, geolocation);
+    const doc = win.document;
+    expect(doc.querySelector("h1")?.textContent).toBe(
+      "Clock in · Sam <b>Lee</b>",
+    );
+    expect(doc.querySelector("h1 b")).toBeNull();
+    expect(geolocation.getCurrentPosition).not.toHaveBeenCalled();
+
+    (doc.querySelector("button.primary") as HTMLButtonElement).click();
+    await flush();
+
+    expect(callTool).toHaveBeenCalledWith("clock_in", {
+      org_id: "org_1",
+      member: "user_sam",
+      timezone: "America/Regina",
+      latitude: 45.4215,
+      longitude: -75.6972,
+      accuracy: 12,
+    });
+    expect(doc.querySelector("h1")?.textContent).toBe("Clocked in");
+    expect(doc.body.textContent).toContain("Warehouse");
+  });
+
+  it("shows the geofence refusal and lets the user try again", async () => {
+    const callTool = vi.fn(async () => ({
+      isError: true,
+      structuredContent: {
+        ...needsLocation,
+        status: "geofence_rejected",
+        reason: "You are not at an approved work site.",
+        nearest_site: { name: "Warehouse", distanceMeters: 1520.4 },
+      },
+    }));
+    const geolocation = {
+      getCurrentPosition: (ok: (p: typeof position) => void) => ok(position),
+    };
+    const win = mountApp("clock", needsLocation, callTool, geolocation);
+    (win.document.querySelector("button.primary") as HTMLButtonElement).click();
+    await flush();
+    const text = win.document.body.textContent ?? "";
+    expect(text).toContain("You are not at an approved work site.");
+    expect(text).toContain("Nearest site: Warehouse (1520 m away)");
+    expect(win.document.querySelector("button.primary")?.textContent).toBe(
+      "Try again with my location",
+    );
+  });
+
+  it("explains a denied location permission without calling the tool", async () => {
+    const callTool = vi.fn();
+    const geolocation = {
+      getCurrentPosition: (_ok: unknown, fail: (e: { code: number }) => void) =>
+        fail({ code: 1 }),
+    };
+    const win = mountApp("clock", needsLocation, callTool, geolocation);
+    (win.document.querySelector("button.primary") as HTMLButtonElement).click();
+    await flush();
+    expect(win.document.querySelector(".status.err")?.textContent).toContain(
+      "Location permission was denied",
+    );
+    expect(callTool).not.toHaveBeenCalled();
+  });
+
+  it("falls back to a message when the host has no geolocation", async () => {
+    const callTool = vi.fn();
+    const win = mountApp("clock", needsLocation, callTool, null);
+    (win.document.querySelector("button.primary") as HTMLButtonElement).click();
+    await flush();
+    expect(win.document.querySelector(".status.err")?.textContent).toContain(
+      "can't share your location",
+    );
+    expect(callTool).not.toHaveBeenCalled();
+  });
+
+  it("shows a plain confirmation when clock-in needed no location", () => {
+    const win = mountApp(
+      "clock",
+      { status: "clocked_in", summary: "Clocked in Sam Lee at Acme." },
+      vi.fn(),
+    );
+    expect(win.document.querySelector("h1")?.textContent).toBe("Clocked in");
+    expect(win.document.querySelector("button.primary")).toBeNull();
   });
 });
