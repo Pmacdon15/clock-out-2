@@ -1077,6 +1077,24 @@ describe("late_arrival and no_show", () => {
     ]);
   });
 
+  it("skips scheduled shifts with unreadable times", () => {
+    const broken = scheduled({ shift_end: new Date("not a date") });
+    expect(only([], "no_show", { scheduledShifts: [broken] })).toEqual([]);
+  });
+
+  it("falls back to the user id for unknown members and orders same-day no-shows", () => {
+    const findings = only([], "no_show", {
+      scheduledShifts: [
+        scheduled({ user_id: "user_gone" }),
+        scheduled({ user_id: "user_sam" }),
+      ],
+    });
+    expect(findings.map((f) => f.employee.name)).toEqual([
+      "user_gone",
+      "Sam Lee",
+    ]);
+  });
+
   it("only runs the requested schedule check and counts it", () => {
     const shifts = [
       scheduled(),

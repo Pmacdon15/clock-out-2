@@ -630,14 +630,18 @@ export function auditTimesheets(input: AuditInput): AuditResult {
         minutesLate > thresholds.late_grace_minutes
       ) {
         const clockInMs = shift.actual_clock_in.getTime();
-        const entry = (input.scheduleEntries ?? input.entries).find(
-          (e) => e.user_id === shift.user_id && ms(e.clock_in) === clockInMs,
-        );
+        // The entry evaluateShifts matched (same member, same clock-in).
+        const entryIds = (input.scheduleEntries ?? input.entries)
+          .filter(
+            (e) => e.user_id === shift.user_id && ms(e.clock_in) === clockInMs,
+          )
+          .slice(0, 1)
+          .map((e) => e.id);
         findings.push({
           type: "late_arrival",
           severity: minutesLate >= 30 ? "medium" : "low",
           employee,
-          entry_ids: entry ? [entry.id] : [],
+          entry_ids: entryIds,
           scheduled_shift_id: shift.id,
           date,
           description: `${employee.name} clocked in at ${clock(clockInMs)}, ${minutesLate} min after the scheduled start of ${when} (shift #${shift.id}).`,
