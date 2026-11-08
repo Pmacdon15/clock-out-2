@@ -17,7 +17,7 @@ import {
   groupShiftRequestsFor,
   SHIFT_REQUEST_STATUS_LABELS,
   SHIFT_REQUEST_TYPE_LABELS,
-} from "@/lib/shift-requests";
+} from "@/lib/shift-request-utils";
 import type { ShiftRequestsView } from "@/lib/shift-requests-dal";
 import type { SerializableResult, ShiftRequestDetail } from "@/lib/types";
 import { Button, Card } from "./ui";
