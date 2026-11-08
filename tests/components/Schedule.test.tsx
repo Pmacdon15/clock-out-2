@@ -21,6 +21,9 @@ vi.mock("@/lib/actions", () => ({
   updateScheduledShiftAction: mocks.updateScheduledShiftAction,
 }));
 vi.mock("sonner", () => ({ toast: mocks.toast }));
+vi.mock("@/lib/calendar-feed-actions", () => ({
+  resetCalendarFeedAction: vi.fn(),
+}));
 vi.mock("@/lib/google-calendar-actions", () => ({
   addShiftsToGoogleCalendarAction: mocks.addShiftsToGoogleCalendarAction,
 }));

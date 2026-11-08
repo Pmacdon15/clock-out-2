@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   protect: vi.fn(),
+  getUser: vi.fn(async () => ({ privateMetadata: {} })),
+  updateUserMetadata: vi.fn(),
   fetchAllPages: vi.fn(),
   getProcessedMembers: vi.fn(),
   dbGetScheduledShifts: vi.fn(),
@@ -18,6 +20,10 @@ vi.mock("@clerk/nextjs/server", () => ({
   auth: { protect: mocks.protect },
   clerkClient: vi.fn(async () => ({
     organizations: { getOrganizationMembershipList: vi.fn() },
+    users: {
+      getUser: mocks.getUser,
+      updateUserMetadata: mocks.updateUserMetadata,
+    },
   })),
 }));
 vi.mock("@/lib/clerk-pagination", () => ({
@@ -45,6 +51,7 @@ import {
   deleteScheduledShiftDal,
   getCalendarFeedPath,
   getSchedule,
+  resetCalendarFeedPath,
   updateScheduledShiftDal,
 } from "@/lib/dal";
 
@@ -503,7 +510,54 @@ describe("getCalendarFeedPath", () => {
     expect(verifyFeedToken(token)).toEqual({
       orgId: "org_1",
       userId: "user_1",
+      nonce: null,
     });
+  });
+
+  it("signs the member's current nonce into the path", async () => {
+    vi.stubEnv("CALENDAR_FEED_SECRET", "test-secret");
+    mocks.protect.mockResolvedValue(member);
+    mocks.getUser.mockResolvedValueOnce({
+      privateMetadata: { calendarFeedNonce: "nonce_current" },
+    });
+    const path = (await getCalendarFeedPath()) as string;
+    const token = path.slice("/api/calendar/".length, -4);
+    expect(verifyFeedToken(token)?.nonce).toBe("nonce_current");
+  });
+
+  it("is null when the member can't be looked up", async () => {
+    vi.stubEnv("CALENDAR_FEED_SECRET", "test-secret");
+    mocks.protect.mockResolvedValue(member);
+    mocks.getUser.mockRejectedValueOnce(new Error("clerk down"));
+    await expect(getCalendarFeedPath()).resolves.toBeNull();
+  });
+});
+
+describe("resetCalendarFeedPath", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("stores a new nonce and returns a path signed with it", async () => {
+    vi.stubEnv("CALENDAR_FEED_SECRET", "test-secret");
+    mocks.protect.mockResolvedValue(member);
+    const path = (await resetCalendarFeedPath()) as string;
+    const [, metadata] = mocks.updateUserMetadata.mock.calls[0] as [
+      string,
+      { privateMetadata: { calendarFeedNonce: string } },
+    ];
+    expect(mocks.updateUserMetadata.mock.calls[0]?.[0]).toBe("user_1");
+    const token = path.slice("/api/calendar/".length, -4);
+    expect(verifyFeedToken(token)?.nonce).toBe(
+      metadata.privateMetadata.calendarFeedNonce,
+    );
+  });
+
+  it("is null without an org or a signing secret", async () => {
+    mocks.protect.mockResolvedValue({ ...member, orgId: null });
+    await expect(resetCalendarFeedPath()).resolves.toBeNull();
+    vi.stubEnv("CALENDAR_FEED_SECRET", "");
+    vi.stubEnv("CLERK_SECRET_KEY", "");
+    mocks.protect.mockResolvedValue(member);
+    await expect(resetCalendarFeedPath()).resolves.toBeNull();
   });
 
   it("is null without an org or a signing secret", async () => {

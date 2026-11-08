@@ -1,6 +1,7 @@
 "use client";
 
-import { use } from "react";
+import { use, useState, useTransition } from "react";
+import { resetCalendarFeedAction } from "@/lib/calendar-feed-actions";
 import { calendarSubscribeLinks } from "@/lib/calendar-feed-links";
 
 const buttonClass =
@@ -19,8 +20,30 @@ export default function CalendarSubscribe({
 }: {
   feedPathPromise: Promise<string | null>;
 }) {
-  const path = use(feedPathPromise);
+  const initialPath = use(feedPathPromise);
+  const [path, setPath] = useState(initialPath);
+  const [resetMessage, setResetMessage] = useState<string | null>(null);
+  const [isResetting, startReset] = useTransition();
   if (!path) return null;
+
+  const reset = () => {
+    if (
+      !window.confirm(
+        "Reset your calendar link? Calendars already subscribed to the old link will stop updating, and you'll need to subscribe again.",
+      )
+    ) {
+      return;
+    }
+    startReset(async () => {
+      const result = await resetCalendarFeedAction();
+      if (result.status === "ok") {
+        setPath(result.path);
+        setResetMessage("Link reset. Subscribe again with the new link.");
+      } else {
+        setResetMessage(result.error);
+      }
+    });
+  };
 
   return (
     <details className="px-1 text-sm">
@@ -29,7 +52,8 @@ export default function CalendarSubscribe({
       </summary>
       <p className="mt-2 mb-3 text-muted-foreground text-xs">
         These add a separate “Clock Out shifts” calendar that keeps itself up to
-        date. Keep it to yourself: anyone with the link can see your shifts.
+        date. Keep it to yourself: anyone with the link can see your shifts. If
+        it gets out, reset the link.
       </p>
       <div className="flex flex-wrap gap-2">
         <button
@@ -54,7 +78,20 @@ export default function CalendarSubscribe({
         >
           Outlook
         </button>
+        <button
+          className={buttonClass}
+          disabled={isResetting}
+          onClick={reset}
+          type="button"
+        >
+          {isResetting ? "Resetting…" : "Reset link"}
+        </button>
       </div>
+      {resetMessage && (
+        <p className="mt-2 text-muted-foreground text-xs" role="status">
+          {resetMessage}
+        </p>
+      )}
     </details>
   );
 }
