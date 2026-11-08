@@ -118,9 +118,10 @@ select { font: inherit; font-size: 13px; padding: 3px 6px; border-radius: 6px; b
 .finding .fix { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
 .confirm { width: 100%; margin-top: 4px; padding: 8px 10px; border-radius: 8px; background: var(--co-surface); border: 1px solid var(--co-border); }
 .confirm ul { margin: 4px 0 8px; padding-left: 18px; }
-.check { display: flex; flex-wrap: wrap; gap: 8px; padding: 5px 0; border-bottom: 1px dashed var(--co-border); }
+.check { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; padding: 6px 0; border-bottom: 1px dashed var(--co-border); }
 .check:last-child { border-bottom: 0; }
-.check .t { min-width: 170px; }
+.check .badge { justify-self: end; align-self: start; margin-left: 0; }
+.check .note { grid-column: 1 / -1; font-size: 12.5px; color: var(--co-muted); }
 `;
 
 const SCRIPT = `
@@ -464,7 +465,7 @@ const SCRIPT = `
         return h("div", { class: "check" }, [
           h("span", { class: "t" }, [typeLabel(c.type)]),
           h("span", { class: "badge" + (c.status === "ran" ? " live" : "") }, [c.status === "ran" ? "ran" : "skipped"]),
-          c.note ? h("span", { class: "muted grow" }, [c.note]) : null
+          c.note ? h("span", { class: "note" }, [c.note]) : null
         ]);
       }))
     ]);
