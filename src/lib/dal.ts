@@ -75,11 +75,6 @@ import {
 } from "./geo";
 import { reverseGeocode } from "./geoapify";
 import {
-  GoogleCalendarError,
-  getGoogleCalendarAccess,
-  syncShiftsToGoogleCalendar,
-} from "./google-calendar";
-import {
   isValidOvertimeThreshold,
   MAX_DAILY_OVERTIME_HOURS,
   MAX_WEEKLY_OVERTIME_HOURS,
@@ -1952,63 +1947,4 @@ export async function getCalendarFeedPath(): Promise<string | null> {
   if (!userId || !orgId) return null;
   const token = createFeedToken(orgId, userId);
   return token ? feedPath(token) : null;
-}
-
-/** How far ahead "Add my shifts to Google Calendar" reaches. */
-export const GOOGLE_SYNC_FUTURE_DAYS = 90;
-
-export type GoogleCalendarSyncResult =
-  | { ok: true; added: number; updated: number; removed: number }
-  | {
-      ok: false;
-      reason: string;
-      /** The member needs to connect Google, or allow calendar access. */
-      connect?: "not_connected" | "missing_scope";
-    };
-
-/**
- * Puts the signed-in member's upcoming shifts on their own primary Google
- * Calendar, and removes events for shifts that were cancelled.
- */
-export async function syncMyShiftsToGoogleCalendarDal(): Promise<GoogleCalendarSyncResult> {
-  const { userId, orgId, has } = await auth.protect();
-  if (!userId || !orgId) {
-    return { ok: false, reason: "Unauthorized or no organization selected" };
-  }
-  if (!has({ feature: SCHEDULING_FEATURE })) {
-    return { ok: false, reason: SCHEDULING_UPGRADE_REASON };
-  }
-  const access = await getGoogleCalendarAccess(userId);
-  if (access.status !== "ok") {
-    return {
-      ok: false,
-      reason: "Connect your Google account to add shifts to Google Calendar.",
-      connect: access.status,
-    };
-  }
-  const now = new Date();
-  const start = subDays(now, 1);
-  const end = addDays(now, GOOGLE_SYNC_FUTURE_DAYS);
-  try {
-    const shifts = await dbGetScheduledShifts(orgId, userId, start, end);
-    const counts = await syncShiftsToGoogleCalendar(
-      access.token,
-      orgId,
-      userId,
-      shifts,
-      start,
-      end,
-    );
-    return { ok: true, ...counts };
-  } catch (e) {
-    console.error("Error syncing shifts to Google Calendar: ", e);
-    if (e instanceof GoogleCalendarError && e.needsReconnect) {
-      return {
-        ok: false,
-        reason: "Google needs your permission again to add events.",
-        connect: "missing_scope",
-      };
-    }
-    return { ok: false, reason: "Couldn't update Google Calendar. Try again." };
-  }
 }

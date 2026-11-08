@@ -7,14 +7,8 @@
 export function calendarSubscribeLinks(feedUrl: string) {
   const webcal = feedUrl.replace(/^https?:\/\//, "webcal://");
   return {
+    google: `https://calendar.google.com/calendar/render?cid=${encodeURIComponent(webcal)}`,
     apple: webcal,
     outlook: `https://outlook.live.com/calendar/0/addfromweb?url=${encodeURIComponent(feedUrl)}&name=${encodeURIComponent("Clock Out shifts")}`,
   };
 }
-
-/**
- * The Google scope "Add my shifts to Google Calendar" asks for: add, change
- * and remove events, without access to the rest of the user's Google data.
- */
-export const GOOGLE_CALENDAR_SCOPE =
-  "https://www.googleapis.com/auth/calendar.events";

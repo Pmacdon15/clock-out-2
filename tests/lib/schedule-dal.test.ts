@@ -12,14 +12,6 @@ const mocks = vi.hoisted(() => ({
   dbGetOrgTimeEntries: vi.fn(),
   dbGetTimeEntries: vi.fn(),
   dbGetApprovedTimeOffForPeriod: vi.fn(),
-  getGoogleCalendarAccess: vi.fn(),
-  syncShiftsToGoogleCalendar: vi.fn(),
-}));
-
-vi.mock("@/lib/google-calendar", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/google-calendar")>()),
-  getGoogleCalendarAccess: mocks.getGoogleCalendarAccess,
-  syncShiftsToGoogleCalendar: mocks.syncShiftsToGoogleCalendar,
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({
@@ -53,10 +45,8 @@ import {
   deleteScheduledShiftDal,
   getCalendarFeedPath,
   getSchedule,
-  syncMyShiftsToGoogleCalendarDal,
   updateScheduledShiftDal,
 } from "@/lib/dal";
-import { GoogleCalendarError } from "@/lib/google-calendar";
 
 const member = {
   userId: "user_1",
@@ -523,76 +513,5 @@ describe("getCalendarFeedPath", () => {
     await expect(getCalendarFeedPath()).resolves.toBeNull();
     mocks.protect.mockResolvedValue({ ...member, orgId: null });
     await expect(getCalendarFeedPath()).resolves.toBeNull();
-  });
-});
-
-describe("syncMyShiftsToGoogleCalendarDal", () => {
-  beforeEach(() => {
-    mocks.protect.mockResolvedValue(member);
-    mocks.getGoogleCalendarAccess.mockResolvedValue({
-      status: "ok",
-      token: "tok",
-    });
-    mocks.dbGetScheduledShifts.mockResolvedValue([]);
-    mocks.syncShiftsToGoogleCalendar.mockResolvedValue({
-      added: 2,
-      updated: 1,
-      removed: 0,
-    });
-  });
-
-  it("syncs the member's own upcoming shifts", async () => {
-    await expect(syncMyShiftsToGoogleCalendarDal()).resolves.toEqual({
-      ok: true,
-      added: 2,
-      updated: 1,
-      removed: 0,
-    });
-    expect(mocks.dbGetScheduledShifts.mock.calls[0].slice(0, 2)).toEqual([
-      "org_1",
-      "user_1",
-    ]);
-    expect(mocks.syncShiftsToGoogleCalendar.mock.calls[0].slice(0, 3)).toEqual([
-      "tok",
-      "org_1",
-      "user_1",
-    ]);
-  });
-
-  it("asks the member to connect Google first", async () => {
-    mocks.getGoogleCalendarAccess.mockResolvedValue({
-      status: "missing_scope",
-    });
-    await expect(syncMyShiftsToGoogleCalendarDal()).resolves.toMatchObject({
-      ok: false,
-      connect: "missing_scope",
-    });
-    expect(mocks.syncShiftsToGoogleCalendar).not.toHaveBeenCalled();
-  });
-
-  it("needs an org and the scheduling feature", async () => {
-    mocks.protect.mockResolvedValue({ ...member, orgId: null });
-    expect((await syncMyShiftsToGoogleCalendarDal()).ok).toBe(false);
-    mocks.protect.mockResolvedValue({ ...member, has: () => false });
-    await expect(syncMyShiftsToGoogleCalendarDal()).resolves.toMatchObject({
-      ok: false,
-    });
-    expect(mocks.getGoogleCalendarAccess).not.toHaveBeenCalled();
-  });
-
-  it("asks to reconnect when Google refuses, and reports other errors", async () => {
-    const error = vi.spyOn(console, "error").mockImplementation(() => {});
-    mocks.syncShiftsToGoogleCalendar.mockRejectedValueOnce(
-      new GoogleCalendarError(401, "revoked"),
-    );
-    await expect(syncMyShiftsToGoogleCalendarDal()).resolves.toMatchObject({
-      ok: false,
-      connect: "missing_scope",
-    });
-    mocks.syncShiftsToGoogleCalendar.mockRejectedValueOnce(new Error("boom"));
-    const res = await syncMyShiftsToGoogleCalendarDal();
-    expect(res).toMatchObject({ ok: false });
-    expect("connect" in res && res.connect).toBeFalsy();
-    error.mockRestore();
   });
 });

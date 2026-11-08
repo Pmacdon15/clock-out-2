@@ -18,10 +18,8 @@ vi.mock("@/lib/actions", () => ({
   createScheduledShiftAction: mocks.createScheduledShiftAction,
   deleteScheduledShiftAction: mocks.deleteScheduledShiftAction,
   updateScheduledShiftAction: mocks.updateScheduledShiftAction,
-  syncMyShiftsToGoogleCalendarAction: vi.fn(),
 }));
 vi.mock("sonner", () => ({ toast: mocks.toast }));
-vi.mock("@clerk/nextjs", () => ({ useUser: () => ({ user: null }) }));
 
 import Schedule, {
   buildShiftTimes,
