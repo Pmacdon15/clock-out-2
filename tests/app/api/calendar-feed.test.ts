@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getMemberships: vi.fn(),
+  getUser: vi.fn(),
   dbGetScheduledShifts: vi.fn(),
   orgHasPlanFeature: vi.fn(),
 }));
@@ -9,6 +10,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@clerk/nextjs/server", () => ({
   clerkClient: vi.fn(async () => ({
     organizations: { getOrganizationMembershipList: mocks.getMemberships },
+    users: { getUser: mocks.getUser },
   })),
 }));
 vi.mock("@/lib/db", () => ({
@@ -36,6 +38,7 @@ describe("GET /api/calendar/[token]", () => {
   beforeEach(() => {
     vi.stubEnv("CALENDAR_FEED_SECRET", "test-secret");
     mocks.getMemberships.mockResolvedValue({ data: [membership] });
+    mocks.getUser.mockResolvedValue({ privateMetadata: {} });
     mocks.orgHasPlanFeature.mockResolvedValue(true);
     mocks.dbGetScheduledShifts.mockResolvedValue([
       {
@@ -73,6 +76,38 @@ describe("GET /api/calendar/[token]", () => {
       .calls[0] as [string, string, Date, Date];
     expect([orgId, userId]).toEqual(["org_1", "user_1"]);
     expect(end.getTime()).toBeGreaterThan(start.getTime());
+  });
+
+  it("keeps the URL out of search indexes and referrers", async () => {
+    const token = createFeedToken("org_1", "user_1") as string;
+    const res = await call(`${token}.ics`);
+    expect(res.headers.get("X-Robots-Tag")).toBe("noindex, nofollow");
+    expect(res.headers.get("Referrer-Policy")).toBe("no-referrer");
+  });
+
+  it("serves a v2 link with the member's current nonce", async () => {
+    mocks.getUser.mockResolvedValue({
+      privateMetadata: { calendarFeedNonce: "nonce_current" },
+    });
+    const token = createFeedToken("org_1", "user_1", "nonce_current") as string;
+    expect((await call(`${token}.ics`)).status).toBe(200);
+  });
+
+  it("revokes links made before the member reset theirs", async () => {
+    mocks.getUser.mockResolvedValue({
+      privateMetadata: { calendarFeedNonce: "nonce_current" },
+    });
+    const v1 = createFeedToken("org_1", "user_1") as string;
+    expect((await call(`${v1}.ics`)).status).toBe(404);
+    const old = createFeedToken("org_1", "user_1", "nonce_previous") as string;
+    expect((await call(`${old}.ics`)).status).toBe(404);
+    expect(mocks.dbGetScheduledShifts).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the member can't be looked up", async () => {
+    mocks.getUser.mockRejectedValue(new Error("clerk down"));
+    const token = createFeedToken("org_1", "user_1") as string;
+    expect((await call(`${token}.ics`)).status).toBe(404);
   });
 
   it("rejects a bad token", async () => {

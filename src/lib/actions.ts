@@ -145,13 +145,22 @@ export async function updateTimeEntryAction(
 }
 
 export async function sendCurrentWeekReportAction() {
-  const { userId, orgId, orgRole } = await auth.protect();
+  const { userId, orgId, orgRole, has } = await auth.protect();
   if (!userId || !orgId) {
     return { success: false, error: "Unauthorized" };
   }
   const isAdmin = orgRole === "org:admin";
   if (!isAdmin) {
     return { success: false, error: "Only admins can test reports" };
+  }
+  // Server actions can be called directly, so the plan check can't rely on
+  // the UI hiding the button.
+  if (!has({ feature: "reporting" })) {
+    return {
+      success: false,
+      error:
+        "Email reports are only available on paid plans. Upgrade your organization to unlock them.",
+    };
   }
   const limited = await checkRateLimit(TEST_REPORT_LIMIT, orgId);
   if (!limited.ok) {
@@ -423,8 +432,15 @@ export async function reverseGeocodeAction(
   latitude: number,
   longitude: number,
 ) {
+  // Each call spends Geoapify quota, so only the admins who manage work
+  // sites (the only UI that uses it) may call it, like searchAddressAction.
   const authUser = await auth.protect();
-  if (!authUser.userId || !authUser.orgId) {
+  if (
+    !authUser.userId ||
+    !authUser.orgId ||
+    authUser.orgRole !== "org:admin" ||
+    !authUser.has({ feature: "geofencing" })
+  ) {
     return { success: false as const, error: "Unauthorized" };
   }
   const limited = await checkRateLimit(GEOCODE_LIMIT, authUser.userId);

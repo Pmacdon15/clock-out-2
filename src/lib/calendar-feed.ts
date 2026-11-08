@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 /**
  * Calendar subscription feeds: each member gets a private URL serving their
@@ -10,8 +10,16 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 
 export const CALENDAR_FEED_PATH = "/api/calendar";
 
-/** Bump to invalidate every feed URL handed out so far. */
-const TOKEN_VERSION = "v1";
+/**
+ * Token formats. v1 tokens name the org and member only; v2 tokens add the
+ * member's feed nonce, which "Reset link" rotates to revoke old URLs. A v1
+ * token keeps working until its member first resets their link.
+ */
+const TOKEN_V1 = "v1";
+const TOKEN_V2 = "v2";
+
+/** Where a member's feed nonce is kept, in their Clerk private metadata. */
+export const FEED_NONCE_METADATA_KEY = "calendarFeedNonce";
 
 function feedSecret(): string | null {
   return (
@@ -24,20 +32,45 @@ const sign = (payload: string, secret: string) =>
     .update(payload)
     .digest("base64url");
 
-/** A token for one member's feed in one org, or null without a secret. */
-export function createFeedToken(orgId: string, userId: string): string | null {
+/** A fresh random feed nonce. */
+export const newFeedNonce = () => randomBytes(12).toString("base64url");
+
+/** A member's current feed nonce from their Clerk private metadata. */
+export function feedNonceFrom(
+  privateMetadata: Record<string, unknown> | null | undefined,
+): string | null {
+  const nonce = privateMetadata?.[FEED_NONCE_METADATA_KEY];
+  return typeof nonce === "string" && /^[\w-]{8,64}$/.test(nonce)
+    ? nonce
+    : null;
+}
+
+/**
+ * A token for one member's feed in one org, or null without a secret. With a
+ * nonce, the token only works while that nonce is the member's current one.
+ */
+export function createFeedToken(
+  orgId: string,
+  userId: string,
+  nonce: string | null = null,
+): string | null {
   const secret = feedSecret();
   if (!secret) return null;
-  const payload = Buffer.from(`${TOKEN_VERSION}:${orgId}:${userId}`).toString(
-    "base64url",
-  );
+  const raw = nonce
+    ? `${TOKEN_V2}:${orgId}:${userId}:${nonce}`
+    : `${TOKEN_V1}:${orgId}:${userId}`;
+  const payload = Buffer.from(raw).toString("base64url");
   return `${payload}.${sign(payload, secret)}`;
 }
 
-/** The org and member a feed token was made for, or null if it isn't valid. */
+/**
+ * The org, member and nonce (null for a v1 token) a feed token was made
+ * for, or null if it isn't valid. Callers must still check the nonce
+ * against the member's current one with {@link feedNonceMatches}.
+ */
 export function verifyFeedToken(
   token: string,
-): { orgId: string; userId: string } | null {
+): { orgId: string; userId: string; nonce: string | null } | null {
   const secret = feedSecret();
   if (!secret) return null;
   const [payload, signature, ...rest] = token.split(".");
@@ -50,11 +83,21 @@ export function verifyFeedToken(
   const [version, orgId, userId, ...extra] = Buffer.from(payload, "base64url")
     .toString()
     .split(":");
-  if (version !== TOKEN_VERSION || !orgId || !userId || extra.length > 0) {
-    return null;
+  if (!orgId || !userId) return null;
+  if (version === TOKEN_V1 && extra.length === 0) {
+    return { orgId, userId, nonce: null };
   }
-  return { orgId, userId };
+  if (version === TOKEN_V2 && extra.length === 1 && extra[0]) {
+    return { orgId, userId, nonce: extra[0] };
+  }
+  return null;
 }
+
+/** Whether a token's nonce is the member's current one (both null for v1). */
+export const feedNonceMatches = (
+  tokenNonce: string | null,
+  currentNonce: string | null,
+) => tokenNonce === currentNonce;
 
 /** The feed's path for a token; `.ics` helps apps recognise it. */
 export const feedPath = (token: string) => `${CALENDAR_FEED_PATH}/${token}.ics`;

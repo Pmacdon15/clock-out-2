@@ -162,7 +162,43 @@ export function isValidNotificationPreferences(
   ).every((key) => typeof record[key] === "boolean");
 }
 
-/** Push endpoints are always https URLs; anything else is refused. */
+/**
+ * Hosts of the browser push services. The server POSTs to a subscription's
+ * endpoint whenever it notifies that user, so an endpoint anywhere else
+ * would let a caller aim the server's requests at any host (SSRF).
+ * Entries starting with "." match that domain's subdomains.
+ */
+const PUSH_SERVICE_HOSTS = [
+  "fcm.googleapis.com",
+  "android.googleapis.com",
+  ".push.services.mozilla.com",
+  ".notify.windows.com",
+  "web.push.apple.com",
+  ".push.apple.com",
+] as const;
+
+/** Whether a URL is an https endpoint on a known browser push service. */
+export function isPushServiceUrl(value: string): boolean {
+  if (value.length > 2048) return false;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "https:") return false;
+  // URL drops the default port, so any port left is a non-443 one.
+  if (url.port !== "") return false;
+  if (url.username || url.password) return false;
+  const host = url.hostname.toLowerCase();
+  return PUSH_SERVICE_HOSTS.some((allowed) =>
+    allowed.startsWith(".")
+      ? host.endsWith(allowed) && host.length > allowed.length
+      : host === allowed,
+  );
+}
+
+/** Push endpoints must be https URLs on a known push service. */
 export function isValidPushSubscription(
   input: unknown,
 ): input is PushSubscriptionInput {
@@ -171,8 +207,9 @@ export function isValidPushSubscription(
     endpoint?: unknown;
     keys?: { p256dh?: unknown; auth?: unknown } | null;
   };
-  if (typeof endpoint !== "string" || endpoint.length > 2048) return false;
-  if (!endpoint.startsWith("https://")) return false;
+  if (typeof endpoint !== "string" || !isPushServiceUrl(endpoint)) {
+    return false;
+  }
   return (
     typeof keys?.p256dh === "string" &&
     keys.p256dh.length > 0 &&
@@ -183,12 +220,10 @@ export function isValidPushSubscription(
   );
 }
 
-const isOptionalHttpsUrl = (value: unknown) =>
+const isOptionalPushServiceUrl = (value: unknown) =>
   value === undefined ||
   value === null ||
-  (typeof value === "string" &&
-    value.length <= 2048 &&
-    value.startsWith("https://"));
+  (typeof value === "string" && isPushServiceUrl(value));
 
 /**
  * FCM registration tokens are opaque, but always URL-safe text of a bounded
@@ -203,8 +238,8 @@ export function isValidFcmToken(input: unknown): input is FcmTokenInput {
   return (
     typeof token === "string" &&
     /^[A-Za-z0-9_:-]{20,4096}$/.test(token) &&
-    isOptionalHttpsUrl(endpoint) &&
-    isOptionalHttpsUrl(replacedEndpoint)
+    isOptionalPushServiceUrl(endpoint) &&
+    isOptionalPushServiceUrl(replacedEndpoint)
   );
 }
 

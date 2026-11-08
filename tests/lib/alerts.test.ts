@@ -187,12 +187,18 @@ describe("notification preferences", () => {
 
 describe("isValidPushSubscription", () => {
   const good = {
-    endpoint: "https://push.example/abc",
+    endpoint: "https://fcm.googleapis.com/fcm/send/abc",
     keys: { p256dh: "key", auth: "auth" },
   };
 
-  it("accepts an https subscription with keys", () => {
-    expect(isValidPushSubscription(good)).toBe(true);
+  it.each([
+    "https://fcm.googleapis.com/fcm/send/abc",
+    "https://updates.push.services.mozilla.com/wpush/v2/abc",
+    "https://wns2-par02p.notify.windows.com/w/?token=abc",
+    "https://web.push.apple.com/abc",
+    "https://api.push.apple.com/abc",
+  ])("accepts a push service subscription with keys (%s)", (endpoint) => {
+    expect(isValidPushSubscription({ ...good, endpoint })).toBe(true);
   });
 
   it.each([
@@ -200,6 +206,13 @@ describe("isValidPushSubscription", () => {
     "x",
     { ...good, endpoint: 5 },
     { ...good, endpoint: "http://insecure" },
+    { ...good, endpoint: "https://attacker.example/x" },
+    { ...good, endpoint: "https://" },
+    { ...good, endpoint: "https://169.254.169.254/latest" },
+    { ...good, endpoint: "https://fcm.googleapis.com:8443/x" },
+    { ...good, endpoint: "https://fcm.googleapis.com.attacker.example/x" },
+    { ...good, endpoint: "https://evilpush.apple.com.example/x" },
+    { ...good, endpoint: "https://user@fcm.googleapis.com/x" },
     { ...good, endpoint: `https://${"a".repeat(2048)}` },
     { ...good, keys: null },
     { ...good, keys: { p256dh: "", auth: "a" } },
@@ -470,6 +483,12 @@ describe("isValidFcmToken", () => {
     expect(isValidFcmToken({ token: "short" })).toBe(false);
     expect(isValidFcmToken({ token: `${token} with spaces` })).toBe(false);
     expect(isValidFcmToken({ token, endpoint: "http://insecure" })).toBe(false);
+    expect(
+      isValidFcmToken({ token, endpoint: "https://attacker.example/x" }),
+    ).toBe(false);
+    expect(
+      isValidFcmToken({ token, replacedEndpoint: "https://10.0.0.1/x" }),
+    ).toBe(false);
     expect(isValidFcmToken({ token, endpoint: 7 })).toBe(false);
     expect(
       isValidFcmToken({

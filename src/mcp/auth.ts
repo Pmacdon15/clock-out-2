@@ -10,6 +10,24 @@ import type { AuthInfo } from "@modelcontextprotocol/server";
  * `{ acceptsToken: "oauth_token" }` so case-insensitive `Bearer` schemes work
  * and the verified Clerk `userId` is placed in `extra.userId`.
  */
+/**
+ * OAuth client IDs allowed to call Clock Out, from `MCP_ALLOWED_OAUTH_CLIENT_IDS`
+ * (comma or whitespace separated). Clerk only grants its built-in scopes, so
+ * a token's scopes can't tell a Clock Out connection apart from any other app
+ * signed in with this Clerk instance. Setting the allowlist limits the MCP
+ * server and the export endpoint to the clients you trust. Unset or empty
+ * keeps today's behaviour (every client Clerk registered is accepted).
+ */
+export function allowedOAuthClientIds(
+  raw = process.env.MCP_ALLOWED_OAUTH_CLIENT_IDS,
+): Set<string> | null {
+  const ids = (raw ?? "")
+    .split(/[\s,]+/)
+    .map((id) => id.trim())
+    .filter(Boolean);
+  return ids.length > 0 ? new Set(ids) : null;
+}
+
 export async function verifyMcpToken(
   req: Request,
   token: string | undefined,
@@ -36,6 +54,13 @@ async function verifyOAuthToken(
   }
   if (!auth.userId) {
     console.warn("MCP: an OAuth access token without a user was rejected");
+    return undefined;
+  }
+  const allowed = allowedOAuthClientIds();
+  if (allowed && (!auth.clientId || !allowed.has(auth.clientId))) {
+    console.warn(
+      `MCP: rejected an OAuth access token from client ${auth.clientId ?? "(none)"}, which isn't in MCP_ALLOWED_OAUTH_CLIENT_IDS`,
+    );
     return undefined;
   }
   return {

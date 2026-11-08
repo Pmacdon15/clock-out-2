@@ -15,7 +15,13 @@ import {
   isValidBreakLimit,
   validateBreak,
 } from "./break-utils";
-import { createFeedToken, feedPath } from "./calendar-feed";
+import {
+  createFeedToken,
+  FEED_NONCE_METADATA_KEY,
+  feedNonceFrom,
+  feedPath,
+  newFeedNonce,
+} from "./calendar-feed";
 import { fetchAllPages } from "./clerk-pagination";
 import {
   dbCancelTimeOffRequest,
@@ -1945,6 +1951,28 @@ export async function setTimeOffAllowanceDal(
 export async function getCalendarFeedPath(): Promise<string | null> {
   const { userId, orgId } = await auth.protect();
   if (!userId || !orgId) return null;
-  const token = createFeedToken(orgId, userId);
+  const client = await clerkClient();
+  const user = await client.users.getUser(userId).catch(() => null);
+  if (!user) return null;
+  const nonce = feedNonceFrom(
+    user.privateMetadata as Record<string, unknown> | undefined,
+  );
+  const token = createFeedToken(orgId, userId, nonce);
+  return token ? feedPath(token) : null;
+}
+
+/**
+ * Rotates the signed-in member's feed nonce, so every calendar feed URL
+ * they've shared or subscribed to stops working, and returns the new path.
+ */
+export async function resetCalendarFeedPath(): Promise<string | null> {
+  const { userId, orgId } = await auth.protect();
+  if (!userId || !orgId) return null;
+  const nonce = newFeedNonce();
+  const client = await clerkClient();
+  await client.users.updateUserMetadata(userId, {
+    privateMetadata: { [FEED_NONCE_METADATA_KEY]: nonce },
+  });
+  const token = createFeedToken(orgId, userId, nonce);
   return token ? feedPath(token) : null;
 }
