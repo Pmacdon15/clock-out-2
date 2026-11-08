@@ -920,6 +920,12 @@ describe("MCP Apps: the timesheet anomalies page", () => {
     );
     expect(checks).toContain("Long shiftskippedNot requested.");
     expect(checks).toContain("Missed clock-outran");
+    // Notes sit on their own line under the name and badge, not in a
+    // squeezed column beside them.
+    const notes = [...doc.querySelectorAll(".check > .note")].map(
+      (n) => n.textContent,
+    );
+    expect(notes).toEqual(["Not requested.", "Not requested."]);
   });
 
   it("filters findings by severity and by type", () => {
