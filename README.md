@@ -161,6 +161,19 @@ Clock Out leans on Clerk for more than sign-in. Everything a fresh Clerk instanc
 
 App-side, Clerk is wired in through `src/proxy.ts` (`clerkMiddleware`, protecting `/dashboard(.*)`) and `@clerk/nextjs` providers; no JWT templates or custom session claims are used — MCP token verification is done by Clerk's `authenticateRequest`, not by checking JWT claims in app code.
 
+## Adding shifts to Google Calendar
+
+On the Schedule page, **Google Calendar** (per shift) and **Add all to Google Calendar** (members' upcoming shifts) write the events straight to the user's primary Google Calendar through the Calendar API, using the Google token Clerk holds for their linked Google account. The first time, Clerk sends the user to Google to allow calendar access (or to link Google if they signed up with email); they come back to the Schedule page and the add finishes on its own. Adding a shift again updates its event instead of duplicating it. If the API call fails for any other reason, the old prefilled Google link opens as a fallback.
+
+Only the `https://www.googleapis.com/auth/calendar.events` scope is requested, and only from users who tap the button, so nothing changes for anyone else's sign-in. One-time setup in the Google Cloud project behind Clerk's Google connection (the custom credentials in Clerk → SSO connections → Google):
+
+1. **APIs & Services → Library →** enable the **Google Calendar API**.
+2. **OAuth consent screen → Data access →** add the `.../auth/calendar.events` scope. While the app is in _Testing_, only listed test users can grant it; publish (and complete Google's verification for this sensitive scope) for everyone else.
+
+No new env vars are needed. Until step 1 is done, the button shows "Google Calendar isn't set up for Clock Out yet" and opens the fallback link.
+
+The calendar subscription feed (Apple Calendar, Outlook, or Google on a computer) is unchanged. Google only supports subscribing by URL from calendar.google.com on a computer, which is why phones should use the buttons above.
+
 ## Deployment
 
 Deployed on Vercel. `vercel.json` registers a daily cron (`0 6 * * *`) hitting `/api/cron/weekly-report`, which sends any scheduled report emails that are due; the route requires the `CRON_SECRET` bearer token. A second daily cron (`0 19 * * *`, 12:00 p.m. MST) hits `/api/cron/payroll-rates` to pick up new CRA payroll rates. A third (`0 12 * * *`) hits `/api/cron/shift-alerts`, the safety net behind the exactly-timed alert jobs (see [How it runs](#how-it-runs-exactly-timed-no-polling)). Email goes out through Amazon SES using React Email templates.

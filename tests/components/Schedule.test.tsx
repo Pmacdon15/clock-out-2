@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   deleteScheduledShiftAction: vi.fn(),
   updateScheduledShiftAction: vi.fn(),
   toast: { success: vi.fn(), error: vi.fn() },
+  addShiftsToGoogleCalendarAction: vi.fn(),
 }));
 
 vi.mock("@/lib/actions", () => ({
@@ -20,6 +21,12 @@ vi.mock("@/lib/actions", () => ({
   updateScheduledShiftAction: mocks.updateScheduledShiftAction,
 }));
 vi.mock("sonner", () => ({ toast: mocks.toast }));
+vi.mock("@/lib/google-calendar-actions", () => ({
+  addShiftsToGoogleCalendarAction: mocks.addShiftsToGoogleCalendarAction,
+}));
+vi.mock("@clerk/nextjs", () => ({
+  useUser: () => ({ user: { externalAccounts: [] } }),
+}));
 
 import Schedule, {
   buildShiftTimes,
@@ -487,7 +494,12 @@ describe("Schedule", () => {
     expect(screen.queryByLabelText("Edit shift")).toBeNull();
   });
 
-  it("adds one upcoming shift to Google Calendar or Outlook", () => {
+  it("adds one upcoming shift to Google Calendar or Outlook", async () => {
+    mocks.addShiftsToGoogleCalendarAction.mockResolvedValue({
+      status: "ok",
+      added: 1,
+      updated: 0,
+    });
     const upcoming = shift("scheduled", { id: 501 });
     renderSchedule(
       [
@@ -503,34 +515,102 @@ describe("Schedule", () => {
     );
     // Only upcoming shifts get the button.
     expect(screen.getAllByLabelText("Add shift to calendar")).toHaveLength(1);
-    expect(screen.queryByRole("link", { name: "Google Calendar" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Google Calendar" }),
+    ).toBeNull();
 
     fireEvent.click(screen.getByLabelText("Add shift to calendar"));
-    const google = screen.getByRole("link", { name: "Google Calendar" });
-    const url = new URL(google.getAttribute("href") as string);
-    expect(url.searchParams.get("dates")).toBe(
-      "20260105T090000Z/20260105T170000Z",
+    fireEvent.click(screen.getByRole("button", { name: "Google Calendar" }));
+    await waitFor(() =>
+      expect(mocks.toast.success).toHaveBeenCalledWith(
+        "Added 1 shift to your Google Calendar",
+      ),
     );
-    expect(url.searchParams.get("text")).toBe("Shift · Clock Out");
-    expect(google).toHaveAttribute("target", "_blank");
+    expect(mocks.addShiftsToGoogleCalendarAction).toHaveBeenCalledWith([501]);
     const outlook = screen.getByRole("link", { name: "Outlook" });
     expect(outlook.getAttribute("href")).toContain(
       "https://outlook.live.com/calendar/0/deeplink/compose",
     );
 
     fireEvent.click(screen.getByLabelText("Add shift to calendar"));
-    expect(screen.queryByRole("link", { name: "Google Calendar" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Google Calendar" }),
+    ).toBeNull();
   });
 
-  it("puts the member's name on an admin's single-shift link", () => {
+  it("falls back to the prefilled Google link when the API fails", async () => {
+    mocks.addShiftsToGoogleCalendarAction.mockResolvedValue({
+      status: "error",
+      error: "Nope",
+      failure: "failed",
+    });
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
     renderSchedule([shift("scheduled", { user_id: "user_2" })]);
     fireEvent.click(screen.getByLabelText("Add shift to calendar"));
-    const href = screen
-      .getByRole("link", { name: "Google Calendar" })
-      .getAttribute("href") as string;
-    expect(new URL(href).searchParams.get("text")).toBe(
-      "Alex: Shift · Clock Out",
+    fireEvent.click(screen.getByRole("button", { name: "Google Calendar" }));
+    await waitFor(() => expect(open).toHaveBeenCalled());
+    const url = new URL(open.mock.calls[0][0] as string);
+    expect(url.searchParams.get("text")).toBe("Alex: Shift · Clock Out");
+    expect(url.searchParams.get("dates")).toBe(
+      "20260105T090000Z/20260105T170000Z",
     );
+    expect(mocks.toast.error).toHaveBeenCalledWith("Nope");
+    open.mockRestore();
+  });
+
+  it("shows a pending state while a shift is being added", async () => {
+    let finish: (v: unknown) => void = () => {};
+    mocks.addShiftsToGoogleCalendarAction.mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    renderSchedule([shift("scheduled")], false, false);
+    fireEvent.click(screen.getByLabelText("Add shift to calendar"));
+    fireEvent.click(screen.getByRole("button", { name: "Google Calendar" }));
+    expect(
+      await screen.findByRole("button", { name: "Adding…" }),
+    ).toBeDisabled();
+    finish({ status: "ok", added: 1, updated: 0 });
+    expect(
+      await screen.findByRole("button", { name: "Google Calendar" }),
+    ).toBeEnabled();
+  });
+
+  it("lets a member add every upcoming shift at once", async () => {
+    let finish: (v: unknown) => void = () => {};
+    mocks.addShiftsToGoogleCalendarAction.mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    renderSchedule(
+      [shift("scheduled", { id: 601 }), shift("scheduled", { id: 602 })],
+      false,
+      false,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Add all to Google Calendar" }),
+    );
+    expect(
+      await screen.findByRole("button", { name: "Adding…" }),
+    ).toBeDisabled();
+    expect(mocks.addShiftsToGoogleCalendarAction).toHaveBeenCalledWith([
+      601, 602,
+    ]);
+    finish({ status: "ok", added: 2, updated: 0 });
+    await waitFor(() =>
+      expect(mocks.toast.success).toHaveBeenCalledWith(
+        "Added 2 shifts to your Google Calendar",
+      ),
+    );
+  });
+
+  it("doesn't offer add-all to admins or when nothing is upcoming", () => {
+    renderSchedule([shift("scheduled")]);
+    expect(
+      screen.queryByRole("button", { name: "Add all to Google Calendar" }),
+    ).toBeNull();
   });
 
   it("offers a calendar subscription when there is a feed", async () => {

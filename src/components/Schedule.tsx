@@ -38,6 +38,10 @@ import type {
   ShiftStatus,
   TimeOffRequest,
 } from "@/lib/types";
+import {
+  GoogleCalendarResume,
+  useAddToGoogleCalendar,
+} from "./AddToGoogleCalendar";
 import CalendarSubscribe from "./CalendarSubscribe";
 import LocalTime from "./LocalTime";
 import { Button, Card } from "./ui";
@@ -259,16 +263,20 @@ function AddToCalendarLinks({
   memberName?: string;
 }) {
   const event = shiftToCalendarEvent(shift, memberName);
+  const { add, pending } = useAddToGoogleCalendar();
   return (
     <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
-      <a
-        className="rounded-lg border border-zinc-200 px-2.5 py-1 font-semibold hover:bg-zinc-100 dark:border-zinc-800 dark:hover:bg-zinc-800"
-        href={googleCalendarUrl(event)}
-        rel="noopener noreferrer"
-        target="_blank"
+      <button
+        className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 px-2.5 py-1 font-semibold hover:bg-zinc-100 disabled:opacity-60 dark:border-zinc-800 dark:hover:bg-zinc-800"
+        disabled={pending}
+        onClick={() =>
+          add([shift.id], { fallbackUrl: googleCalendarUrl(event) })
+        }
+        type="button"
       >
-        Google Calendar
-      </a>
+        {pending && <Loader2 className="h-3 w-3 animate-spin" />}
+        {pending ? "Adding…" : "Google Calendar"}
+      </button>
       <a
         className="rounded-lg border border-zinc-200 px-2.5 py-1 font-semibold hover:bg-zinc-100 dark:border-zinc-800 dark:hover:bg-zinc-800"
         href={outlookCalendarUrl(event)}
@@ -278,6 +286,27 @@ function AddToCalendarLinks({
         Outlook
       </a>
     </div>
+  );
+}
+
+/** One tap to put every upcoming shift on the member's Google Calendar. */
+function AddAllToGoogleCalendar({ shiftIds }: { shiftIds: number[] }) {
+  const { add, pending } = useAddToGoogleCalendar();
+  return (
+    <Button
+      className="mb-2 w-full sm:w-auto"
+      disabled={pending}
+      onClick={() => add(shiftIds)}
+      type="button"
+      variant="outline"
+    >
+      {pending ? (
+        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+      ) : (
+        <CalendarPlus className="mr-2 h-4 w-4" />
+      )}
+      {pending ? "Adding…" : "Add all to Google Calendar"}
+    </Button>
   );
 }
 
@@ -616,6 +645,7 @@ export default function Schedule({
 
   return (
     <div className="space-y-6 pb-20">
+      <GoogleCalendarResume />
       <Card className="p-6 sm:p-8">
         <div className="mb-6 flex items-start gap-3">
           <div className="rounded-xl bg-zinc-900 p-2 text-white dark:bg-zinc-100 dark:text-black">
@@ -668,6 +698,11 @@ export default function Schedule({
             </label>
           )}
         </div>
+        {!isAdmin && upcoming.length > 0 && (
+          <AddAllToGoogleCalendar
+            shiftIds={upcoming.map((shift) => shift.id)}
+          />
+        )}
         {renderList(upcoming, "No upcoming shifts.", true)}
       </Card>
 
