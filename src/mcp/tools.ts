@@ -1931,15 +1931,29 @@ export async function clockInTool(
   );
 
   if (!locationResolution.allowed) {
+    // The clock-in app (MCP Apps) shown with this result can read the
+    // device's location and call clock_in again with these arguments plus
+    // latitude/longitude/accuracy. The geofence is still checked here.
+    const retry = {
+      tool: "clock_in",
+      arguments: {
+        org_id: org.orgId,
+        member: target.userId,
+        ...(input.clock_in ? { clock_in: input.clock_in } : {}),
+        timezone: tz,
+      },
+    };
     return {
-      summary: `Cannot clock in: ${locationResolution.reason}`,
+      summary: `Cannot clock in: ${locationResolution.reason}${locationResolution.status === "location_required" ? " If the chat app shows a Clock in card, tap Share my location there." : ""}`,
       data: {
         status: locationResolution.status,
         reason: locationResolution.reason,
         organization: { org_id: org.orgId, name: org.orgName },
+        member: { user_id: target.userId, name: target.name },
         ...(locationResolution.nearestSite
           ? { nearest_site: locationResolution.nearestSite }
           : {}),
+        device_location_retry: retry,
       },
       isError: true,
     };
@@ -1969,11 +1983,14 @@ export async function clockInTool(
     ? `${punchLocation.siteName}${punchLocation.address ? ` (${punchLocation.address})` : ""}`
     : (punchLocation?.address ?? null);
 
+  const summary = `Clocked in ${target.name} at ${org.orgName}${locationLabel ? ` at ${locationLabel}` : ""} (${formatted.clock_in_local}).`;
   return {
-    summary: `Clocked in ${target.name} at ${org.orgName}${locationLabel ? ` at ${locationLabel}` : ""} (${formatted.clock_in_local}).`,
+    summary,
     data: {
       status: "clocked_in",
       organization: { org_id: org.orgId, name: org.orgName },
+      member: { user_id: target.userId, name: target.name },
+      summary,
       entry: formatted,
       location: punchLocation,
     },

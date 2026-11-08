@@ -2500,6 +2500,14 @@ describe("Clerk pagination in MCP tools", () => {
         expect(res.isError).toBe(true);
         expect(res.data.status).toBe("location_required");
         expect(res.summary).toContain("latitude and longitude are required");
+        expect(res.data.device_location_retry).toEqual({
+          tool: "clock_in",
+          arguments: {
+            org_id: "org_1",
+            member: "user_admin",
+            timezone: "America/Edmonton",
+          },
+        });
         expect(mockDbClockInAt).not.toHaveBeenCalled();
       },
     );

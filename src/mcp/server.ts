@@ -21,6 +21,7 @@ import {
 import {
   ANOMALIES_APP,
   appToolMeta,
+  CLOCK_IN_APP,
   HOURS_REPORT_APP,
   registerClockOutApps,
   TIMECARD_APP,
@@ -275,8 +276,9 @@ export function registerClockOutTools(server: McpServer) {
     {
       title: "Clock in",
       description:
-        "Starts a live shift for yourself, or (when called by an org admin) clocks in any organization member by name, email, or user_id. If the organization requires location capture, location (site name, street address, or latitude/longitude) must be provided. Rejects the request if the person is already clocked in, if location is required but omitted, if outside an approved site when geofencing is restricted (restricted organizations require the device's real latitude/longitude; a site name or address is not accepted as proof of location), or if a custom clock_in time overlaps with an existing shift, and invalidates the cache immediately.",
+        "Starts a live shift for yourself, or (when called by an org admin) clocks in any organization member by name, email, or user_id. If the organization requires location capture, location (site name, street address, or latitude/longitude) must be provided. Rejects the request if the person is already clocked in, if location is required but omitted, if outside an approved site when geofencing is restricted (restricted organizations require the device's real latitude/longitude; a site name or address is not accepted as proof of location; in chat apps that show the Clock in card, the user taps Share my location and the card sends the device's coordinates), or if a custom clock_in time overlaps with an existing shift, and invalidates the cache immediately.",
       inputSchema: portable(clockInInputSchema),
+      _meta: appToolMeta(CLOCK_IN_APP),
       annotations: {
         readOnlyHint: false,
         destructiveHint: false,
@@ -548,7 +550,7 @@ export function registerClockOutTools(server: McpServer) {
     {
       title: "Audit timesheets for problems",
       description:
-        "Admin-only ('org:admin') read-only audit of the organization's time entries between start_date and end_date (one member or everyone). Flags missed clock-outs (including shifts closed by the automatic clock-out), unusually long shifts, overlapping entries, missed or short meal breaks, punches far outside every work site's geofence, entries entered or edited after the fact, late arrivals (clocked in after a scheduled shift's start) and no-shows (a scheduled shift that ended with no clock-in; skipped without the Scheduling plan feature, and never flagged on a day of approved time off). Each finding has a type, severity, employee, entry_ids, scheduled_shift_id, date, description, and a suggested_fix that, when not null, is the exact input object for update_time_entry. Thresholds are optional parameters. Never applies fixes itself: show the findings and only call update_time_entry with a suggested_fix after the admin confirms it.",
+        "Admin-only ('org:admin') read-only audit of the organization's time entries between start_date and end_date (one member or everyone). Flags missed clock-outs (including shifts closed by the automatic clock-out), unusually long shifts, overlapping entries, missed or short meal breaks, punches far outside every work site's geofence, suspicious punch locations (exactly a site's stored coordinates, or 1 m accuracy or better), entries entered or edited after the fact, late arrivals (clocked in after a scheduled shift's start) and no-shows (a scheduled shift that ended with no clock-in; skipped without the Scheduling plan feature, and never flagged on a day of approved time off). Each finding has a type, severity, employee, entry_ids, scheduled_shift_id, date, description, and a suggested_fix that, when not null, is the exact input object for update_time_entry. Thresholds are optional parameters. Never applies fixes itself: show the findings and only call update_time_entry with a suggested_fix after the admin confirms it.",
       inputSchema: portable(auditTimesheetsInputSchema),
       annotations: { readOnlyHint: true, openWorldHint: false },
       _meta: appToolMeta(ANOMALIES_APP),
