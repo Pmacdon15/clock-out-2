@@ -106,6 +106,17 @@ export async function googleCalendarToken(
   return token?.token ?? null;
 }
 
+/** The org's name for event titles, or undefined if Clerk can't say. */
+export async function organizationName(
+  orgId: string,
+): Promise<string | undefined> {
+  const client = await clerkClient();
+  const org = await client.organizations
+    .getOrganization({ organizationId: orgId })
+    .catch(() => null);
+  return org?.name || undefined;
+}
+
 /** Removes the shift's event; one that's already gone counts as removed. */
 export async function deleteGoogleCalendarEvent(
   accessToken: string,
@@ -138,7 +149,11 @@ export async function mirrorShiftToGoogleCalendar(
   }
   const write = await writeGoogleCalendarEvent(
     token,
-    shiftToCalendarEvent(shift),
+    shiftToCalendarEvent(
+      shift,
+      undefined,
+      await organizationName(shift.org_id),
+    ),
     id,
   );
   if (!write.ok) {

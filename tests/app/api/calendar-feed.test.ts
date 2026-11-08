@@ -63,6 +63,7 @@ describe("GET /api/calendar/[token]", () => {
     );
     const body = await res.text();
     expect(body).toContain("X-WR-CALNAME:Clock Out shifts · Acme");
+    expect(body).toContain("SUMMARY:Shift · Acme");
     expect(body).toContain("UID:clockout-org_1-shift-7@clockout");
     expect(mocks.getMemberships).toHaveBeenCalledWith({
       organizationId: "org_1",

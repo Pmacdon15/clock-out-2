@@ -1,9 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const clerk = vi.hoisted(() => ({ getToken: vi.fn() }));
+const clerk = vi.hoisted(() => ({
+  getToken: vi.fn(),
+  getOrganization: vi.fn(async () => ({ name: "Acme" })),
+}));
 vi.mock("@clerk/nextjs/server", () => ({
   clerkClient: vi.fn(async () => ({
     users: { getUserOauthAccessToken: clerk.getToken },
+    organizations: { getOrganization: clerk.getOrganization },
   })),
 }));
 
@@ -172,7 +176,7 @@ describe("mirrorShiftToGoogleCalendar", () => {
     ]);
     const body = JSON.parse(fetch.mock.calls[0][1].body);
     expect(body.id).toBe(googleShiftEventId(shift));
-    expect(body.summary).toBe("Shift · Clock Out");
+    expect(body.summary).toBe("Shift · Acme");
   });
 
   it("removes the event for a cancelled shift", async () => {

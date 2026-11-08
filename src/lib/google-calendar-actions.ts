@@ -7,6 +7,7 @@ import {
   type GoogleCalendarFailure,
   googleCalendarToken,
   googleShiftEventId,
+  organizationName,
   writeGoogleCalendarEvent,
 } from "./google-calendar";
 import { SCHEDULING_FEATURE, SCHEDULING_UPGRADE_REASON } from "./plan-features";
@@ -69,6 +70,7 @@ export async function addShiftsToGoogleCalendarAction(
   const token = await googleCalendarToken(userId);
   if (!token) return { status: "connect" };
 
+  const orgName = await organizationName(orgId);
   const names = new Map<string, string | undefined>();
   let added = 0;
   let updated = 0;
@@ -78,7 +80,7 @@ export async function addShiftsToGoogleCalendarAction(
     }
     const write = await writeGoogleCalendarEvent(
       token,
-      shiftToCalendarEvent(shift, names.get(shift.user_id)),
+      shiftToCalendarEvent(shift, names.get(shift.user_id), orgName),
       googleShiftEventId(shift),
     ).catch(() => ({ ok: false as const, failure: "failed" as const }));
     if (!write.ok) {

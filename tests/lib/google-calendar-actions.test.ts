@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   protect: vi.fn(),
   getUserOauthAccessToken: vi.fn(),
   getUser: vi.fn(),
+  getOrganization: vi.fn(async () => ({ name: "Acme" })),
   dbGetScheduledShiftById: vi.fn(),
   write: vi.fn(),
 }));
@@ -15,6 +16,7 @@ vi.mock("@clerk/nextjs/server", () => ({
       getUserOauthAccessToken: mocks.getUserOauthAccessToken,
       getUser: mocks.getUser,
     },
+    organizations: { getOrganization: mocks.getOrganization },
   })),
 }));
 vi.mock("@/lib/db", () => ({
@@ -133,7 +135,7 @@ describe("addShiftsToGoogleCalendarAction", () => {
     expect(mocks.write).toHaveBeenCalledTimes(2);
     const [token, event, id] = mocks.write.mock.calls[0];
     expect(token).toBe("cal");
-    expect(event.title).toBe("Shift · Clock Out");
+    expect(event.title).toBe("Shift · Acme");
     expect(id).toBe("id1");
     expect(mocks.getUser).not.toHaveBeenCalled();
   });
@@ -149,9 +151,9 @@ describe("addShiftsToGoogleCalendarAction", () => {
     await addShiftsToGoogleCalendarAction([101, 102, 103]);
     const titles = mocks.write.mock.calls.map(([, event]) => event.title);
     expect(titles).toEqual([
-      "Alex: Shift · Clock Out",
-      "Alex: Shift · Clock Out",
-      "Shift · Clock Out",
+      "Alex: Shift · Acme",
+      "Alex: Shift · Acme",
+      "Shift · Acme",
     ]);
     expect(mocks.getUser).toHaveBeenCalledTimes(2);
   });
@@ -160,7 +162,7 @@ describe("addShiftsToGoogleCalendarAction", () => {
     session({ role: "org:admin" });
     mocks.getUser.mockRejectedValue(new Error("gone"));
     await addShiftsToGoogleCalendarAction([100]);
-    expect(mocks.write.mock.calls[0][1].title).toBe("Shift · Clock Out");
+    expect(mocks.write.mock.calls[0][1].title).toBe("Shift · Acme");
   });
 
   it("asks to reconnect when Google rejects the token", async () => {
@@ -184,6 +186,21 @@ describe("addShiftsToGoogleCalendarAction", () => {
       status: "error",
       error: "Google Calendar didn't accept the shift. Try again.",
       failure: "failed",
+    });
+  });
+
+  it("falls back to Clock Out when the org name can't be read", async () => {
+    session();
+    mocks.dbGetScheduledShiftById.mockResolvedValue(shift(1));
+    mocks.getUserOauthAccessToken.mockResolvedValue({
+      data: [{ token: "tok", scopes: [GOOGLE_CALENDAR_SCOPE] }],
+    });
+    mocks.write.mockResolvedValue({ ok: true, outcome: "added" });
+    mocks.getOrganization.mockRejectedValueOnce(new Error("clerk down"));
+    await addShiftsToGoogleCalendarAction([1]);
+    expect(mocks.write.mock.calls.at(-1)?.[1].title).toBe("Shift · Clock Out");
+    expect(mocks.getOrganization).toHaveBeenCalledWith({
+      organizationId: "org_1",
     });
   });
 });
