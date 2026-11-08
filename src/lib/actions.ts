@@ -35,6 +35,12 @@ import {
 import type { Coordinates } from "./geo";
 import { reverseGeocode, searchAddress } from "./geoapify";
 import { mirrorShiftToGoogleCalendar } from "./google-calendar";
+import {
+  checkRateLimit,
+  GEOCODE_LIMIT,
+  rateLimitedMessage,
+  TEST_REPORT_LIMIT,
+} from "./rate-limit";
 import { sendWeeklyReports } from "./reports";
 import { notifyScheduleChange } from "./schedule-notify";
 import type {
@@ -146,6 +152,13 @@ export async function sendCurrentWeekReportAction() {
   const isAdmin = orgRole === "org:admin";
   if (!isAdmin) {
     return { success: false, error: "Only admins can test reports" };
+  }
+  const limited = await checkRateLimit(TEST_REPORT_LIMIT, orgId);
+  if (!limited.ok) {
+    return {
+      success: false,
+      error: rateLimitedMessage(limited.retryAfterSeconds),
+    };
   }
 
   const endDate = new Date();
@@ -395,6 +408,13 @@ export async function searchAddressAction(query: string) {
   ) {
     return { success: false as const, error: "Unauthorized" };
   }
+  const limited = await checkRateLimit(GEOCODE_LIMIT, authUser.userId);
+  if (!limited.ok) {
+    return {
+      success: false as const,
+      error: rateLimitedMessage(limited.retryAfterSeconds),
+    };
+  }
   const results = await searchAddress(query);
   return { success: true as const, data: results };
 }
@@ -406,6 +426,13 @@ export async function reverseGeocodeAction(
   const authUser = await auth.protect();
   if (!authUser.userId || !authUser.orgId) {
     return { success: false as const, error: "Unauthorized" };
+  }
+  const limited = await checkRateLimit(GEOCODE_LIMIT, authUser.userId);
+  if (!limited.ok) {
+    return {
+      success: false as const,
+      error: rateLimitedMessage(limited.retryAfterSeconds),
+    };
   }
   const address = await reverseGeocode({ latitude, longitude });
   return { success: true as const, data: address };
