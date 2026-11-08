@@ -2,13 +2,13 @@
 import type { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { verifyWebhook, handleSubscriptionUpdate } = vi.hoisted(() => ({
+const { verifyWebhook, syncMembershipLimit } = vi.hoisted(() => ({
   verifyWebhook: vi.fn(),
-  handleSubscriptionUpdate: vi.fn(),
+  syncMembershipLimit: vi.fn(),
 }));
 
 vi.mock("@clerk/nextjs/webhooks", () => ({ verifyWebhook }));
-vi.mock("@/lib/webhooks/clerk", () => ({ handleSubscriptionUpdate }));
+vi.mock("@/lib/webhooks/clerk", () => ({ syncMembershipLimit }));
 
 import { POST } from "@/app/api/webhooks/clerk/route";
 
@@ -17,6 +17,7 @@ const request = new Request("https://example.test/api/webhooks/clerk", {
 }) as unknown as NextRequest;
 
 beforeEach(() => {
+  vi.clearAllMocks();
   vi.spyOn(console, "log").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
   vi.stubEnv("CLERK_WEBHOOK_SIGNING_SECRET", "whsec_test");
@@ -42,9 +43,18 @@ describe("POST /api/webhooks/clerk", () => {
     expect(console.error).toHaveBeenCalledWith("Error :", "bad signature");
   });
 
-  it("updates the org's plan when a subscription item becomes active", async () => {
+  it.each([
+    "subscriptionItem.active",
+    "subscriptionItem.canceled",
+    "subscriptionItem.ended",
+    "subscriptionItem.pastDue",
+    "subscriptionItem.abandoned",
+    "subscriptionItem.updated",
+    "subscription.updated",
+    "subscription.pastDue",
+  ])("re-syncs the org's member limit on %s", async (type) => {
     verifyWebhook.mockResolvedValue({
-      type: "subscriptionItem.active",
+      type,
       data: {
         plan: { slug: "small_business_plan" },
         payer: { organization_id: "org_1" },
@@ -53,31 +63,27 @@ describe("POST /api/webhooks/clerk", () => {
     const res = await POST(request);
     expect(res.status).toBe(200);
     await expect(res.text()).resolves.toBe("Webhook received");
-    expect(handleSubscriptionUpdate).toHaveBeenCalledWith(
-      "org_1",
-      "small_business_plan",
-    );
+    expect(syncMembershipLimit).toHaveBeenCalledWith("org_1");
   });
 
   it.each([
-    ["no plan", { payer: { organization_id: "org_1" } }],
     ["no payer org", { plan: { slug: "small_business_plan" }, payer: {} }],
     ["an empty payload", {}],
   ])("ignores subscription events with %s", async (_label, data) => {
     verifyWebhook.mockResolvedValue({ type: "subscriptionItem.active", data });
     const res = await POST(request);
     expect(res.status).toBe(200);
-    expect(handleSubscriptionUpdate).not.toHaveBeenCalled();
+    expect(syncMembershipLimit).not.toHaveBeenCalled();
   });
 
-  it("still acknowledges the webhook when handling fails", async () => {
+  it("answers 500 so Clerk retries when the sync fails", async () => {
     verifyWebhook.mockResolvedValue({
-      type: "subscriptionItem.active",
-      data: { plan: { slug: "x" }, payer: { organization_id: "org_1" } },
+      type: "subscriptionItem.ended",
+      data: { payer: { organization_id: "org_1" } },
     });
-    handleSubscriptionUpdate.mockRejectedValueOnce(new Error("clerk down"));
+    syncMembershipLimit.mockRejectedValueOnce(new Error("clerk down"));
     const res = await POST(request);
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(500);
     expect(console.error).toHaveBeenCalledWith(
       "Error handling webhook event:",
       expect.any(Error),

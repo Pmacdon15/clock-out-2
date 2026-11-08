@@ -208,7 +208,7 @@ export const clockInInputSchema = z.object({
     .string()
     .optional()
     .describe(
-      "Optional ISO 8601 or 'YYYY-MM-DD HH:mm' start time if clocking in as of a specific time. Defaults to right now.",
+      "Optional ISO 8601 or 'YYYY-MM-DD HH:mm' start time if clocking in as of a specific time. Defaults to right now. Never in the future; non-admins may only set a time within 10 minutes of now.",
     ),
   site: siteField,
   address: addressField,
@@ -225,7 +225,7 @@ export const clockOutInputSchema = z.object({
     .string()
     .optional()
     .describe(
-      "Optional ISO 8601 or 'YYYY-MM-DD HH:mm' end time if clocking out as of a specific time. Defaults to right now.",
+      "Optional ISO 8601 or 'YYYY-MM-DD HH:mm' end time if clocking out as of a specific time. Defaults to right now. Never in the future; non-admins may only set a time within 10 minutes of now.",
     ),
   site: siteField,
   address: addressField,
@@ -1032,6 +1032,28 @@ export function resolveMemberFromList(
     return { ok: true, member: selfMember };
   }
 
+  // Non-admins can only act on themselves, so they never need the roster.
+  // Resolve their own name or email to themselves and refuse anything else
+  // without listing candidates, so lookups can't be used to harvest
+  // coworkers' emails or user IDs.
+  if (!callerIsAdmin) {
+    const isSelf =
+      selfMember.email?.toLowerCase() === needle ||
+      selfMember.name.toLowerCase() === needle ||
+      selfMember.firstName?.toLowerCase() === needle ||
+      selfMember.lastName?.toLowerCase() === needle;
+    if (isSelf) return { ok: true, member: selfMember };
+    return {
+      ok: false,
+      result: {
+        summary:
+          "Only organization admins (org:admin) can view or manage other members' hours. Leave member empty to act on yourself.",
+        data: { status: "forbidden" },
+        isError: true,
+      },
+    };
+  }
+
   // Exact match by userId, email, or full name
   const exact = members.filter(
     (m) =>
@@ -1040,17 +1062,6 @@ export function resolveMemberFromList(
       m.name.toLowerCase() === needle,
   );
   if (exact.length === 1 && exact[0]) {
-    if (exact[0].userId !== callerUserId && !callerIsAdmin) {
-      return {
-        ok: false,
-        result: {
-          summary:
-            "Only organization admins (org:admin) can view or manage other members' hours.",
-          data: { status: "forbidden" },
-          isError: true,
-        },
-      };
-    }
     return { ok: true, member: exact[0] };
   }
 
@@ -1064,17 +1075,6 @@ export function resolveMemberFromList(
   );
 
   if (partial.length === 1 && partial[0]) {
-    if (partial[0].userId !== callerUserId && !callerIsAdmin) {
-      return {
-        ok: false,
-        result: {
-          summary:
-            "Only organization admins (org:admin) can view or manage other members' hours.",
-          data: { status: "forbidden" },
-          isError: true,
-        },
-      };
-    }
     return { ok: true, member: partial[0] };
   }
 
@@ -1209,6 +1209,51 @@ function formatEntryForResponse(
   };
 }
 
+/**
+ * How far a non-admin's custom clock_in / clock_out may sit from "now". In
+ * the web app only admins can change recorded times, so members get a small
+ * grace window for "I forgot to tap it a few minutes ago" and nothing more.
+ */
+export const MEMBER_PUNCH_GRACE_MS = 10 * 60 * 1000;
+/** Slack for clock skew before a time counts as being in the future. */
+const FUTURE_PUNCH_SLACK_MS = 60 * 1000;
+
+/**
+ * Returns an error result when a caller-supplied punch time breaks the time
+ * policy: no one may punch in the future, and non-admins may only nudge a
+ * punch within MEMBER_PUNCH_GRACE_MS of now.
+ */
+function checkCustomPunchTime(
+  kind: "clock_in" | "clock_out",
+  parsed: Date,
+  isAdmin: boolean,
+  tz: string,
+): ToolResult | null {
+  const now = Date.now();
+  const diff = parsed.getTime() - now;
+  const label = kind === "clock_in" ? "Clock-in" : "Clock-out";
+  if (diff > (isAdmin ? FUTURE_PUNCH_SLACK_MS : MEMBER_PUNCH_GRACE_MS)) {
+    return {
+      summary: `${label} time ${formatTimestampInTz(parsed, tz)} is in the future. Punches can only be recorded for times that have already happened.`,
+      data: { status: "future_time", [kind]: parsed.toISOString() },
+      isError: true,
+    };
+  }
+  if (!isAdmin && -diff > MEMBER_PUNCH_GRACE_MS) {
+    return {
+      summary: `Only an organization admin can record a ${kind === "clock_in" ? "clock-in" : "clock-out"} more than ${MEMBER_PUNCH_GRACE_MS / 60000} minutes in the past. Ask an admin to correct the time.`,
+      data: {
+        status: "forbidden",
+        reason: "custom_time_requires_admin",
+        [kind]: parsed.toISOString(),
+        grace_minutes: MEMBER_PUNCH_GRACE_MS / 60000,
+      },
+      isError: true,
+    };
+  }
+  return null;
+}
+
 export type McpLocationInput = {
   site?: string;
   address?: string;
@@ -1296,7 +1341,9 @@ export async function resolveMcpLocation(
     let siteName: string | null = matchedSite?.name ?? null;
     let address: string | null = input.address ?? matchedSite?.address ?? null;
 
-    if (input.site) {
+    // When clock-in is restricted, the matched geofence decides the site
+    // label; a caller-supplied name must not relabel the punch.
+    if (input.site && !(enforceGeofence && isRestricted(settings))) {
       const trimmedSite = input.site.trim();
       const matched = sites.find(
         (s) => s.name.toLowerCase() === trimmedSite.toLowerCase(),
@@ -1327,6 +1374,18 @@ export async function resolveMcpLocation(
         siteName,
         address: address ?? null,
       },
+    };
+  }
+
+  // A site name or street address is not proof of where the caller is: it
+  // resolves to the site's (or the geocoded) coordinates, so it would always
+  // pass the geofence. When clock-in is restricted, only device coordinates
+  // can satisfy the check, the same as the web app.
+  if (enforceGeofence && isRestricted(settings)) {
+    return {
+      allowed: false,
+      status: "location_required",
+      reason: `${orgName} only allows clock-in at approved work sites, so your device's current latitude and longitude are required. A site name or street address can't be used to verify where you are.`,
     };
   }
 
@@ -1838,6 +1897,13 @@ export async function clockInTool(
         isError: true,
       };
     }
+    const policyError = checkCustomPunchTime(
+      "clock_in",
+      parsed,
+      org.isAdmin,
+      tz,
+    );
+    if (policyError) return policyError;
     const overlaps = await dbFindOverlappingTimeEntries(
       target.userId,
       org.orgId,
@@ -1967,6 +2033,13 @@ export async function clockOutTool(
         isError: true,
       };
     }
+    const policyError = checkCustomPunchTime(
+      "clock_out",
+      parsed,
+      org.isAdmin,
+      tz,
+    );
+    if (policyError) return policyError;
     const overlaps = await dbFindOverlappingTimeEntries(
       target.userId,
       org.orgId,
@@ -2039,6 +2112,16 @@ export async function addTimeEntryTool(
   if (!orgRes.ok) return orgRes.result;
   const { org } = orgRes;
   const tz = validTimezone(input.timezone);
+
+  // Adding whole shifts after the fact is a timesheet edit, which only
+  // admins can make in the web app.
+  if (!org.isAdmin) {
+    return {
+      summary: `Only an organization admin can add time entries in ${org.orgName}. Use clock_in and clock_out to record your own shifts, or ask an admin to add the missed shift.`,
+      data: { status: "forbidden", reason: "admin_only" },
+      isError: true,
+    };
+  }
 
   const rawItems =
     input.entries && input.entries.length > 0
@@ -2124,6 +2207,15 @@ export async function addTimeEntryTool(
       return {
         summary: `Shift #${i + 1} (${target.name}): clock_out (${formatTimestampInTz(clockOut, tz)}) must be after clock_in (${formatTimestampInTz(clockIn, tz)}).`,
         data: { status: "invalid_time_range", index: i, item },
+        isError: true,
+      };
+    }
+
+    const latest = clockOut ?? clockIn;
+    if (latest.getTime() - Date.now() > FUTURE_PUNCH_SLACK_MS) {
+      return {
+        summary: `Shift #${i + 1} (${target.name}) ends in the future (${formatTimestampInTz(latest, tz)}). Only shifts that have already happened can be added; use the schedule for upcoming shifts.`,
+        data: { status: "future_time", index: i, item },
         isError: true,
       };
     }

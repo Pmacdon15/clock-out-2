@@ -238,11 +238,27 @@ describe("sendCurrentWeekReportAction", () => {
     expect(mocks.sendWeeklyReports).not.toHaveBeenCalled();
   });
 
+  it("rejects admins whose plan doesn't include reporting", async () => {
+    const has = vi.fn(() => false);
+    mocks.protect.mockResolvedValue({
+      userId: "user_1",
+      orgId: "org_1",
+      orgRole: "org:admin",
+      has,
+    });
+    await expect(sendCurrentWeekReportAction()).resolves.toMatchObject({
+      success: false,
+    });
+    expect(has).toHaveBeenCalledWith({ feature: "reporting" });
+    expect(mocks.sendWeeklyReports).not.toHaveBeenCalled();
+  });
+
   it("sends the last seven days of reports for the admin's org", async () => {
     mocks.protect.mockResolvedValue({
       userId: "user_1",
       orgId: "org_1",
       orgRole: "org:admin",
+      has: () => true,
     });
     await expect(sendCurrentWeekReportAction()).resolves.toEqual({
       success: true,
@@ -665,8 +681,31 @@ describe("reverseGeocodeAction", () => {
     });
   });
 
-  it("returns resolved address for authenticated members", async () => {
-    mocks.protect.mockResolvedValue({ userId: "u1", orgId: "o1" });
+  it.each([
+    ["members", "org:member", true],
+    ["admins without geofencing", "org:admin", false],
+  ])("rejects %s", async (_label, orgRole, geofencing) => {
+    mocks.reverseGeocode.mockClear();
+    mocks.protect.mockResolvedValue({
+      userId: "u1",
+      orgId: "o1",
+      orgRole,
+      has: () => geofencing,
+    });
+    await expect(reverseGeocodeAction(45.4215, -75.6972)).resolves.toEqual({
+      success: false,
+      error: "Unauthorized",
+    });
+    expect(mocks.reverseGeocode).not.toHaveBeenCalled();
+  });
+
+  it("returns resolved address for admins with geofencing", async () => {
+    mocks.protect.mockResolvedValue({
+      userId: "u1",
+      orgId: "o1",
+      orgRole: "org:admin",
+      has: (opts: { feature?: string }) => opts?.feature === "geofencing",
+    });
     mocks.reverseGeocode.mockResolvedValue("111 Albert St, Ottawa, ON");
 
     await expect(reverseGeocodeAction(45.4215, -75.6972)).resolves.toEqual({

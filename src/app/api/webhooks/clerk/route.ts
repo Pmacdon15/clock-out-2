@@ -1,45 +1,54 @@
 import type { WebhookEvent } from "@clerk/nextjs/server";
 import { verifyWebhook } from "@clerk/nextjs/webhooks";
 import type { NextRequest } from "next/server";
-import { handleSubscriptionUpdate } from "@/lib/webhooks/clerk";
+import { syncMembershipLimit } from "@/lib/webhooks/clerk";
+
+/** The organization a billing event is for, or null for a user's own billing. */
+function billingEventOrgId(data: unknown): string | null {
+  const d = data as {
+    payer?: { organization_id?: string | null } | null;
+  };
+  return d.payer?.organization_id ?? null;
+}
 
 export async function POST(req: NextRequest) {
+  let evt: WebhookEvent;
   try {
-    const evt = (await verifyWebhook(req, {
-      signingSecret: process.env.CLERK_WEBHOOK_SIGNING_SECRET, // Added ! to ensure TS it exists
+    evt = (await verifyWebhook(req, {
+      signingSecret: process.env.CLERK_WEBHOOK_SIGNING_SECRET,
     })) as WebhookEvent;
-
-    // Log the event type only: the payload carries payer emails and billing data.
-    console.log("Web Hook :", evt.type);
-
-    try {
-      switch (evt.type) {
-        case "subscriptionItem.active": {
-          const data = evt.data as {
-            plan?: { slug: string };
-            payer?: { organization_id: string };
-          };
-          const plan = data.plan?.slug;
-          const orgId = data.payer?.organization_id;
-
-          if (orgId && plan) {
-            console.log(`[Webhook] ${evt.type} for ${orgId} (plan ${plan})`);
-            await handleSubscriptionUpdate(orgId, plan);
-          }
-          break; // Break belongs inside the case, but outside the if/logic braces
-        }
-
-        default:
-          console.log(`Unhandled event type: ${evt.type}`);
-          break;
-      }
-    } catch (error) {
-      console.error("Error handling webhook event:", error);
-    }
-
-    return new Response("Webhook received", { status: 200 });
   } catch (err) {
     console.error("Error :", err instanceof Error ? err.message : err);
     return new Response("Unauthorized", { status: 401 });
   }
+
+  // Log the event type only: the payload carries payer emails and billing data.
+  console.log("Web Hook :", evt.type);
+
+  // Every subscription and subscription item event (active, canceled, ended,
+  // past due, updated, ...) recomputes the member cap from the org's live
+  // subscription, so cancellations and downgrades lower it too.
+  if (
+    evt.type.startsWith("subscription.") ||
+    evt.type.startsWith("subscriptionItem.")
+  ) {
+    const orgId = billingEventOrgId(evt.data);
+    if (!orgId) {
+      return new Response("Webhook received", { status: 200 });
+    }
+    try {
+      await syncMembershipLimit(orgId);
+    } catch (error) {
+      console.error("Error handling webhook event:", error);
+      // A non-2xx response makes Clerk retry, so a transient billing API
+      // error can't leave the org on a cap it no longer pays for.
+      return new Response("Couldn't sync the membership limit", {
+        status: 500,
+      });
+    }
+    return new Response("Webhook received", { status: 200 });
+  }
+
+  console.log(`Unhandled event type: ${evt.type}`);
+  return new Response("Webhook received", { status: 200 });
 }

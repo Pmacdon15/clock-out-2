@@ -64,7 +64,7 @@ const has = vi.fn(() => true);
 const admin = { userId: "u1", orgId: "org_1", orgRole: "org:admin", has };
 const member = { userId: "u1", orgId: "org_1", orgRole: "org:member", has };
 const sub = {
-  endpoint: "https://push.example/1",
+  endpoint: "https://fcm.googleapis.com/fcm/send/1",
   keys: { p256dh: "p", auth: "a" },
 };
 
@@ -293,14 +293,15 @@ describe("saveFcmTokenDal", () => {
     );
     await saveFcmTokenDal({
       token: reg.token,
-      replacedEndpoint: "https://legacy/1",
+      replacedEndpoint: "https://updates.push.services.mozilla.com/wpush/v2/1",
     });
     expect(mocks.dbSaveFcmToken).toHaveBeenLastCalledWith(
       "u1",
       {
         token: reg.token,
         endpoint: null,
-        replacedEndpoint: "https://legacy/1",
+        replacedEndpoint:
+          "https://updates.push.services.mozilla.com/wpush/v2/1",
       },
       null,
     );

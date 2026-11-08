@@ -145,6 +145,7 @@ import {
   manageBreakSettingsTool,
   manageBreaksTool,
   manageReportingSettingsTool,
+  resolveMemberFromList,
   runHoursReportTool,
   toggleBreakTool,
   updateTimeEntryTool,
@@ -2467,6 +2468,86 @@ describe("Clerk pagination in MCP tools", () => {
       expect(mockDbClockInAt).not.toHaveBeenCalled();
     });
 
+    it.each([
+      { site: "ware" },
+      { site: "Warehouse" },
+      { address: "1 Warehouse Rd, Ottawa, ON" },
+    ])(
+      "refuses a site name or address as proof of location when clock-in is restricted (%o)",
+      async (locationInput) => {
+        mockDbGetLocationSettings.mockResolvedValueOnce({
+          org_id: "org_1",
+          capture_mode: "required",
+          restrict_clock_in: true,
+        });
+        mockDbGetSites.mockResolvedValueOnce([
+          {
+            id: 1,
+            org_id: "org_1",
+            name: "Warehouse",
+            latitude: 45.4215,
+            longitude: -75.6972,
+            radius_meters: 100,
+            address: "1 Warehouse Rd, Ottawa, ON",
+          },
+        ]);
+
+        const res = await clockInTool(caller, {
+          ...locationInput,
+          timezone: "America/Edmonton",
+        });
+
+        expect(res.isError).toBe(true);
+        expect(res.data.status).toBe("location_required");
+        expect(res.summary).toContain("latitude and longitude are required");
+        expect(mockDbClockInAt).not.toHaveBeenCalled();
+      },
+    );
+
+    it("keeps the geofenced site name when restricted coordinates come with a different site label", async () => {
+      mockDbGetLocationSettings.mockResolvedValueOnce({
+        org_id: "org_1",
+        capture_mode: "required",
+        restrict_clock_in: true,
+      });
+      mockDbGetSites.mockResolvedValueOnce([
+        {
+          id: 1,
+          org_id: "org_1",
+          name: "Warehouse",
+          latitude: 45.4215,
+          longitude: -75.6972,
+          radius_meters: 100,
+          address: "1 Warehouse Rd, Ottawa, ON",
+        },
+      ]);
+      mockDbClockInAt.mockResolvedValueOnce({
+        id: 110,
+        user_id: "user_admin",
+        org_id: "org_1",
+        clock_in: new Date("2026-10-30T14:00:00.000Z"),
+        clock_out: null,
+        created_at: new Date(),
+        updated_at: new Date(),
+      });
+
+      const res = await clockInTool(caller, {
+        site: "Head Office",
+        latitude: 45.4215,
+        longitude: -75.6972,
+        accuracy: 5,
+        timezone: "America/Edmonton",
+      });
+
+      expect(res.isError).toBeUndefined();
+      expect(mockDbClockInAt).toHaveBeenCalledWith(
+        "user_admin",
+        "org_1",
+        undefined,
+        expect.objectContaining({ siteName: "Warehouse", accuracy: 5 }),
+      );
+    });
+
     it("returns organization location settings and sites via getLocationSettingsTool", async () => {
       mockDbGetLocationSettings.mockResolvedValueOnce({
         org_id: "org_1",
@@ -2524,5 +2605,232 @@ describe("Clerk pagination in MCP tools", () => {
       });
       expect(statusRes.summary).toContain("Downtown Hub (100 Bay St, Toronto)");
     });
+  });
+});
+
+describe("custom punch times and add_time_entry are limited for non-admins", () => {
+  const memberCaller = { userId: "user_worker", client: "Claude" };
+  const adminCaller = { userId: "user_admin", client: "Claude" };
+  const orgMembership = (role: string) => ({
+    data: [
+      {
+        role,
+        organization: {
+          id: "org_1",
+          name: "PatMac Org",
+          slug: "patmac-org",
+          membersCount: 2,
+        },
+      },
+    ],
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDbGetLocationSettings.mockResolvedValue({
+      org_id: "org_1",
+      capture_mode: "off",
+      restrict_clock_in: false,
+    });
+    mockDbFindOverlapping.mockResolvedValue([]);
+    mockGetUserOrgMemberships.mockResolvedValue(orgMembership("org:member"));
+    mockGetOrgMemberships.mockResolvedValue({
+      data: [
+        {
+          role: "org:admin",
+          publicUserData: {
+            userId: "user_admin",
+            firstName: "Patrick",
+            lastName: "MacDonald",
+            identifier: "patrick@patmac.ca",
+          },
+        },
+        {
+          role: "org:member",
+          publicUserData: {
+            userId: "user_worker",
+            firstName: "Alex",
+            lastName: "Smith",
+            identifier: "alex@patmac.ca",
+          },
+        },
+      ],
+    });
+  });
+
+  const minutesFromNow = (m: number) =>
+    new Date(Date.now() + m * 60_000).toISOString();
+
+  it("forbids a member from backdating clock_in beyond the grace window", async () => {
+    mockDbGetActiveEntry.mockResolvedValueOnce(null);
+
+    const res = await clockInTool(memberCaller, {
+      clock_in: minutesFromNow(-180),
+    });
+
+    expect(res.isError).toBe(true);
+    expect(res.data.status).toBe("forbidden");
+    expect(res.data.reason).toBe("custom_time_requires_admin");
+    expect(mockDbClockInAt).not.toHaveBeenCalled();
+  });
+
+  it("lets a member nudge clock_in by a few minutes", async () => {
+    mockDbGetActiveEntry.mockResolvedValueOnce(null);
+    mockDbClockInAt.mockResolvedValueOnce({
+      id: 201,
+      user_id: "user_worker",
+      org_id: "org_1",
+      clock_in: new Date(),
+      clock_out: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+
+    const res = await clockInTool(memberCaller, {
+      clock_in: minutesFromNow(-5),
+    });
+
+    expect(res.isError).toBeUndefined();
+    expect(mockDbClockInAt).toHaveBeenCalled();
+  });
+
+  it("forbids a member from extending clock_out into the future", async () => {
+    mockDbGetActiveEntry.mockResolvedValueOnce({
+      id: 202,
+      user_id: "user_worker",
+      org_id: "org_1",
+      clock_in: new Date(Date.now() - 4 * 3600_000),
+    });
+
+    const res = await clockOutTool(memberCaller, {
+      clock_out: minutesFromNow(240),
+    });
+
+    expect(res.isError).toBe(true);
+    expect(res.data.status).toBe("future_time");
+    expect(mockDbClockOutAt).not.toHaveBeenCalled();
+  });
+
+  it("forbids a member from backdating clock_out beyond the grace window", async () => {
+    mockDbGetActiveEntry.mockResolvedValueOnce({
+      id: 203,
+      user_id: "user_worker",
+      org_id: "org_1",
+      clock_in: new Date(Date.now() - 10 * 3600_000),
+    });
+
+    const res = await clockOutTool(memberCaller, {
+      clock_out: minutesFromNow(-120),
+    });
+
+    expect(res.isError).toBe(true);
+    expect(res.data.status).toBe("forbidden");
+    expect(mockDbClockOutAt).not.toHaveBeenCalled();
+  });
+
+  it("still lets an admin backdate clock_out but not into the future", async () => {
+    mockGetUserOrgMemberships.mockResolvedValue(orgMembership("org:admin"));
+    mockDbGetActiveEntry.mockResolvedValue({
+      id: 204,
+      user_id: "user_worker",
+      org_id: "org_1",
+      clock_in: new Date(Date.now() - 10 * 3600_000),
+    });
+    mockDbClockOutAt.mockResolvedValueOnce({
+      id: 204,
+      user_id: "user_worker",
+      org_id: "org_1",
+      clock_in: new Date(Date.now() - 10 * 3600_000),
+      clock_out: new Date(Date.now() - 2 * 3600_000),
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+
+    const ok = await clockOutTool(adminCaller, {
+      member: "Alex",
+      clock_out: minutesFromNow(-120),
+    });
+    expect(ok.isError).toBeUndefined();
+
+    const future = await clockOutTool(adminCaller, {
+      member: "Alex",
+      clock_out: minutesFromNow(60),
+    });
+    expect(future.isError).toBe(true);
+    expect(future.data.status).toBe("future_time");
+  });
+
+  it("forbids members from adding time entries, even for themselves", async () => {
+    const res = await addTimeEntryTool(memberCaller, {
+      entries: [{ date: "2026-11-01", hours_worked: 12 }],
+    });
+
+    expect(res.isError).toBe(true);
+    expect(res.data.status).toBe("forbidden");
+    expect(mockDbInsertTimeEntry).not.toHaveBeenCalled();
+  });
+
+  it("rejects admin add_time_entry for shifts in the future", async () => {
+    mockGetUserOrgMemberships.mockResolvedValue(orgMembership("org:admin"));
+
+    const res = await addTimeEntryTool(adminCaller, {
+      member: "Alex",
+      clock_in: minutesFromNow(60),
+      clock_out: minutesFromNow(120),
+    });
+
+    expect(res.isError).toBe(true);
+    expect(res.data.status).toBe("future_time");
+    expect(mockDbInsertTimeEntry).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolveMemberFromList never exposes the roster to non-admins", () => {
+  const members = [
+    {
+      userId: "user_admin",
+      name: "Patrick MacDonald",
+      firstName: "Patrick",
+      lastName: "MacDonald",
+      email: "patrick@patmac.ca",
+      role: "org:admin",
+      isAdmin: true,
+    },
+    {
+      userId: "user_worker",
+      name: "Alex Smith",
+      firstName: "Alex",
+      lastName: "Smith",
+      email: "alex@patmac.ca",
+      role: "org:member",
+      isAdmin: false,
+    },
+  ];
+
+  it.each(["@", "zzzz", "patrick", "user_admin", "patrick@patmac.ca"])(
+    "returns a bare forbidden for %s",
+    (needle) => {
+      const res = resolveMemberFromList(members, "user_worker", false, needle);
+      expect(res.ok).toBe(false);
+      if (res.ok) return;
+      expect(res.result.data).toEqual({ status: "forbidden" });
+      expect(res.result.summary).not.toContain("@patmac.ca");
+      expect(res.result.summary).not.toContain("user_admin");
+    },
+  );
+
+  it.each(["Alex", "alex smith", "alex@patmac.ca", "me", "user_worker"])(
+    "still resolves the member's own %s to themselves",
+    (needle) => {
+      const res = resolveMemberFromList(members, "user_worker", false, needle);
+      expect(res.ok && res.member.userId).toBe("user_worker");
+    },
+  );
+
+  it("still lists matches for admins", () => {
+    const res = resolveMemberFromList(members, "user_admin", true, "@");
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.result.data.status).toBe("ambiguous_member");
   });
 });

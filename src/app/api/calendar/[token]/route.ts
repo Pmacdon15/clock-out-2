@@ -1,7 +1,11 @@
 import { clerkClient } from "@clerk/nextjs/server";
 import { addDays, subDays } from "date-fns";
 import { buildIcsCalendar, shiftToCalendarEvent } from "@/lib/calendar-export";
-import { verifyFeedToken } from "@/lib/calendar-feed";
+import {
+  feedNonceFrom,
+  feedNonceMatches,
+  verifyFeedToken,
+} from "@/lib/calendar-feed";
 import { dbGetScheduledShifts } from "@/lib/db";
 import { orgHasPlanFeature, SCHEDULING_FEATURE } from "@/lib/plan-features";
 
@@ -12,7 +16,10 @@ const FEED_FUTURE_DAYS = 120;
 const notFound = () =>
   new Response("Calendar not found", {
     status: 404,
-    headers: { "Content-Type": "text/plain; charset=utf-8" },
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "X-Robots-Tag": "noindex, nofollow",
+    },
   });
 
 /**
@@ -30,6 +37,14 @@ export async function GET(
   if (!feed) return notFound();
 
   const client = await clerkClient();
+  // A reset link rotates the member's nonce, which revokes older URLs.
+  const user = await client.users.getUser(feed.userId).catch(() => null);
+  if (!user) return notFound();
+  const currentNonce = feedNonceFrom(
+    user.privateMetadata as Record<string, unknown> | undefined,
+  );
+  if (!feedNonceMatches(feed.nonce, currentNonce)) return notFound();
+
   const memberships = await client.organizations
     .getOrganizationMembershipList({
       organizationId: feed.orgId,
@@ -64,6 +79,10 @@ export async function GET(
       "Content-Type": "text/calendar; charset=utf-8",
       "Content-Disposition": 'inline; filename="clock-out-shifts.ics"',
       "Cache-Control": "private, max-age=300",
+      // The URL is the credential: keep it out of search indexes and
+      // Referer headers.
+      "X-Robots-Tag": "noindex, nofollow",
+      "Referrer-Policy": "no-referrer",
     },
   });
 }

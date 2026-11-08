@@ -2,7 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CALENDAR_FEED_PATH,
   createFeedToken,
+  feedNonceFrom,
+  feedNonceMatches,
   feedPath,
+  newFeedNonce,
   verifyFeedToken,
 } from "@/lib/calendar-feed";
 import { calendarSubscribeLinks } from "@/lib/calendar-feed-links";
@@ -20,8 +23,31 @@ describe("calendar feed tokens", () => {
     expect(verifyFeedToken(token)).toEqual({
       orgId: "org_1",
       userId: "user_1",
+      nonce: null,
     });
     expect(feedPath(token)).toBe(`${CALENDAR_FEED_PATH}/${token}.ics`);
+  });
+
+  it("carries a per-member nonce in v2 tokens", () => {
+    const nonce = newFeedNonce();
+    const token = createFeedToken("org_1", "user_1", nonce) as string;
+    const feed = verifyFeedToken(token);
+    expect(feed).toEqual({ orgId: "org_1", userId: "user_1", nonce });
+    expect(feedNonceMatches(feed?.nonce ?? null, nonce)).toBe(true);
+    expect(feedNonceMatches(feed?.nonce ?? null, newFeedNonce())).toBe(false);
+    // An old v1 link stops working once the member has a nonce.
+    expect(feedNonceMatches(null, nonce)).toBe(false);
+    expect(feedNonceMatches(null, null)).toBe(true);
+  });
+
+  it("reads only well-formed nonces from metadata", () => {
+    expect(feedNonceFrom({ calendarFeedNonce: "abcdefgh12" })).toBe(
+      "abcdefgh12",
+    );
+    expect(feedNonceFrom({ calendarFeedNonce: "short" })).toBeNull();
+    expect(feedNonceFrom({ calendarFeedNonce: "bad:nonce1" })).toBeNull();
+    expect(feedNonceFrom({ calendarFeedNonce: 5 })).toBeNull();
+    expect(feedNonceFrom(undefined)).toBeNull();
   });
 
   it("rejects tampered, malformed or foreign tokens", () => {
