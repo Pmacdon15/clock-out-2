@@ -24,12 +24,18 @@ export const AUDIT_CHECKS = [
   "overlapping_entries",
   "missed_meal_break",
   "punch_far_from_site",
+  "suspicious_location",
   "edited_after_the_fact",
   "late_arrival",
   "no_show",
 ] as const;
 
 export type AuditCheck = (typeof AUDIT_CHECKS)[number];
+
+/** Coordinates closer than this to a site's (about 1 cm) count as identical. */
+const EXACT_COORDINATE_EPSILON = 1e-7;
+/** Reported accuracy at or below this (metres) is implausible for a phone. */
+const MIN_PLAUSIBLE_ACCURACY_M = 1;
 
 export type AuditSeverity = "high" | "medium" | "low";
 
@@ -524,6 +530,67 @@ export function auditTimesheets(input: AuditInput): AuditResult {
         }
       }
 
+      /* ------------------------------------------ suspicious location -- */
+      // A browser can report any coordinates it likes (DevTools sensors, a
+      // mock-location app, or calling the server action directly), so the
+      // geofence can only deter casual misuse. These are the cheap tells of
+      // a typed-in location: a punch sitting exactly on a site's stored
+      // point, or a fix more precise than phone GPS ever is.
+      if (wanted.has("suspicious_location")) {
+        const punches = [
+          {
+            kind: "clock_in" as const,
+            latitude: s.entry.clock_in_latitude,
+            longitude: s.entry.clock_in_longitude,
+            accuracy: s.entry.clock_in_accuracy_m,
+          },
+          {
+            kind: "clock_out" as const,
+            latitude: s.entry.clock_out_latitude,
+            longitude: s.entry.clock_out_longitude,
+            accuracy: s.entry.clock_out_accuracy_m,
+          },
+        ];
+        for (const p of punches) {
+          if (p.latitude == null || p.longitude == null) continue;
+          const lat = Number(p.latitude);
+          const lon = Number(p.longitude);
+          const exactSite = (input.sites ?? []).find(
+            (site) =>
+              Math.abs(Number(site.latitude) - lat) <
+                EXACT_COORDINATE_EPSILON &&
+              Math.abs(Number(site.longitude) - lon) < EXACT_COORDINATE_EPSILON,
+          );
+          const accuracy = p.accuracy == null ? null : Number(p.accuracy);
+          const tooPrecise =
+            accuracy !== null && accuracy <= MIN_PLAUSIBLE_ACCURACY_M;
+          if (!exactSite && !tooPrecise) continue;
+          const label = p.kind === "clock_in" ? "Clock-in" : "Clock-out";
+          const reasons = [
+            exactSite
+              ? `is exactly ${exactSite.name}'s stored coordinates`
+              : null,
+            tooPrecise
+              ? `reports ${accuracy === 0 ? "0 m" : `${accuracy} m`} accuracy, more precise than a phone's GPS`
+              : null,
+          ].filter(Boolean);
+          push("suspicious_location", s, {
+            severity: exactSite && tooPrecise ? "medium" : "low",
+            description: `${label} location of shift #${s.entry.id} ${reasons.join(" and ")}, which suggests it was typed in or simulated rather than read from the device.`,
+            suggested_fix: null,
+            fix_note:
+              "This isn't proof of misuse (an admin or an older MCP client may have recorded the site's location), but confirm with the employee or a supervisor that they were on site.",
+            details: {
+              punch: p.kind,
+              latitude: lat,
+              longitude: lon,
+              accuracy_m: accuracy,
+              exact_site: exactSite?.name ?? null,
+            },
+          });
+        }
+      }
+
       /* ---------------------------------------- edited after the fact -- */
       if (wanted.has("edited_after_the_fact") && !autoClosed) {
         const created = ms(s.entry.created_at);
@@ -691,6 +758,13 @@ export function auditTimesheets(input: AuditInput): AuditResult {
         type,
         status: "skipped",
         note: "Scheduling isn't available for this organization, so clock-ins can't be compared with a schedule.",
+      };
+    }
+    if (type === "suspicious_location") {
+      return {
+        type,
+        status: "ran",
+        note: "Flags punches recorded exactly at a site's stored coordinates or with 1 m accuracy or better. Browser locations can be faked, so the geofence deters casual misuse but isn't tamper-proof.",
       };
     }
     if (type === "late_arrival") {

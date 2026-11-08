@@ -379,6 +379,11 @@ export default function LocationSettings({
             never blocked. Members must share their location while this is on,
             and the restriction only applies once at least one site exists.
           </span>
+          <span className="mt-2 block text-muted-foreground text-xs">
+            Locations come from each member's device, which can be faked, so
+            this deters casual misuse but isn't tamper-proof. The timesheet
+            audit flags punches that look typed in or simulated.
+          </span>
         </span>
       </label>
 
