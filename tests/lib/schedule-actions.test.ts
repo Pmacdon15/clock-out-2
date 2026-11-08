@@ -2,6 +2,7 @@ import { err, ok } from "neverthrow";
 import { describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  checkRateLimit: vi.fn(async () => ({ ok: true, remaining: 1 })),
   updateTag: vi.fn(),
   createScheduledShiftDal: vi.fn(),
   deleteScheduledShiftDal: vi.fn(),
@@ -21,6 +22,13 @@ vi.mock("@/lib/schedule-notify", () => ({
   notifyScheduleChange: mocks.notifyScheduleChange,
 }));
 
+vi.mock("@/lib/rate-limit", () => ({
+  checkRateLimit: mocks.checkRateLimit,
+  rateLimitedMessage: (s: number) => `Too many requests (${s}s).`,
+  GEOCODE_LIMIT: { name: "geocode" },
+  TEST_NOTIFICATION_LIMIT: { name: "test-notification" },
+  TEST_REPORT_LIMIT: { name: "test-report" },
+}));
 vi.mock("@/lib/alert-jobs", () => ({
   queueShiftAlertSync: vi.fn(),
   syncShiftReminderJob: mocks.syncShiftReminderJob,

@@ -216,7 +216,26 @@ export function callerLabel(req: Request) {
  * The MCP route: CORS, bearer auth, then the MCP handler with the verified
  * auth on `req.auth`, where mcp-handler reads it.
  */
-export function mcpRoute(handler: McpHandler, verifyToken: VerifyToken) {
+export type RateLimitCheck = (
+  userId: string,
+) => Promise<{ ok: true } | { ok: false; retryAfterSeconds: number }>;
+
+/** 429 with Retry-After, for a caller over its MCP request limit. */
+export function tooManyRequests(retryAfterSeconds: number) {
+  return Response.json(
+    {
+      error: "rate_limited",
+      error_description: `Too many requests. Try again in ${retryAfterSeconds} seconds.`,
+    },
+    { status: 429, headers: { "Retry-After": String(retryAfterSeconds) } },
+  );
+}
+
+export function mcpRoute(
+  handler: McpHandler,
+  verifyToken: VerifyToken,
+  rateLimit?: RateLimitCheck,
+) {
   return async function route(req: Request): Promise<Response> {
     if (req.method === "OPTIONS") return preflight(req);
 
@@ -242,6 +261,15 @@ export function mcpRoute(handler: McpHandler, verifyToken: VerifyToken) {
     }
     if (authInfo.expiresAt && authInfo.expiresAt < Date.now() / 1000) {
       return withCors(unauthorized(req, "The access token has expired."));
+    }
+
+    const userId = authInfo.extra?.userId;
+    if (rateLimit && typeof userId === "string") {
+      const limited = await rateLimit(userId);
+      if (!limited.ok) {
+        console.warn(`MCP: rate limited ${userId} (${callerLabel(req)})`);
+        return withCors(tooManyRequests(limited.retryAfterSeconds));
+      }
     }
 
     const { request, jsonOnly } = await negotiate(req);
