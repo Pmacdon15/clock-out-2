@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  checkRateLimit: vi.fn(async () => ({ ok: true, remaining: 1 })),
   protect: vi.fn(),
   currentUser: vi.fn(),
   dbDeletePushSubscription: vi.fn(),
@@ -22,6 +23,13 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@clerk/nextjs/server", () => ({
   auth: { protect: mocks.protect },
   currentUser: mocks.currentUser,
+}));
+vi.mock("@/lib/rate-limit", () => ({
+  checkRateLimit: mocks.checkRateLimit,
+  rateLimitedMessage: (s: number) => `Too many requests (${s}s).`,
+  GEOCODE_LIMIT: { name: "geocode" },
+  TEST_NOTIFICATION_LIMIT: { name: "test-notification" },
+  TEST_REPORT_LIMIT: { name: "test-report" },
 }));
 vi.mock("@/lib/alerts-db", () => ({
   dbDeletePushSubscription: mocks.dbDeletePushSubscription,
@@ -374,6 +382,18 @@ describe("push subscriptions", () => {
 });
 
 describe("sendTestNotificationDal", () => {
+  it("refuses when the caller is over the test notification limit", async () => {
+    mocks.checkRateLimit.mockResolvedValueOnce({
+      ok: false,
+      retryAfterSeconds: 120,
+    });
+    mocks.deliver.mockClear();
+    expect((await sendTestNotificationDal())._unsafeUnwrapErr()).toEqual({
+      reason: "Too many requests (120s).",
+    });
+    expect(mocks.deliver).not.toHaveBeenCalled();
+  });
+
   it("requires a user", async () => {
     mocks.protect.mockResolvedValueOnce({ userId: null });
     expect((await sendTestNotificationDal())._unsafeUnwrapErr()).toEqual({

@@ -28,6 +28,11 @@ import {
   isPushConfigured,
   isWebPushConfigured,
 } from "./notify";
+import {
+  checkRateLimit,
+  rateLimitedMessage,
+  TEST_NOTIFICATION_LIMIT,
+} from "./rate-limit";
 import type {
   AlertSettingsData,
   AlertSettingsInput,
@@ -257,6 +262,10 @@ export async function sendTestNotificationDal(): Promise<
   if (!userId) return err({ reason: "Unauthorized" });
   if (!has({ feature: NOTIFICATIONS_FEATURE })) {
     return err({ reason: UPGRADE_REASON });
+  }
+  const limited = await checkRateLimit(TEST_NOTIFICATION_LIMIT, userId);
+  if (!limited.ok) {
+    return err({ reason: rateLimitedMessage(limited.retryAfterSeconds) });
   }
   try {
     const user = await currentUser();

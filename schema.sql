@@ -325,3 +325,11 @@ CREATE INDEX IF NOT EXISTS idx_shift_requests_org_status
 CREATE UNIQUE INDEX IF NOT EXISTS idx_shift_requests_one_active
     ON shift_requests (shift_id)
     WHERE status IN ('open', 'pending_approval');
+
+-- Fixed-window rate limits for actions that spend third-party quota
+-- (src/lib/rate-limit.ts creates it on first use too).
+CREATE TABLE IF NOT EXISTS rate_limits (
+    key TEXT PRIMARY KEY,
+    window_start TIMESTAMP WITH TIME ZONE NOT NULL,
+    count INTEGER NOT NULL
+);

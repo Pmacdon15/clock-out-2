@@ -2,6 +2,7 @@ import { err, ok } from "neverthrow";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  checkRateLimit: vi.fn(async () => ({ ok: true, remaining: 1 })),
   protect: vi.fn(),
   updateTag: vi.fn(),
   clockIn: vi.fn(),
@@ -31,6 +32,13 @@ vi.mock("@clerk/nextjs/server", () => ({ auth: { protect: mocks.protect } }));
 vi.mock("next/cache", () => ({ updateTag: mocks.updateTag }));
 vi.mock("next/server", () => ({ after: vi.fn() }));
 vi.mock("@/lib/schedule-notify", () => ({ notifyScheduleChange: vi.fn() }));
+vi.mock("@/lib/rate-limit", () => ({
+  checkRateLimit: mocks.checkRateLimit,
+  rateLimitedMessage: (s: number) => `Too many requests (${s}s).`,
+  GEOCODE_LIMIT: { name: "geocode" },
+  TEST_NOTIFICATION_LIMIT: { name: "test-notification" },
+  TEST_REPORT_LIMIT: { name: "test-report" },
+}));
 vi.mock("@/lib/alert-jobs", () => ({
   queueShiftAlertSync: mocks.queueShiftAlertSync,
   syncShiftReminderJob: vi.fn(),
@@ -619,6 +627,57 @@ describe("site actions", () => {
     dalFn.mockResolvedValue(failure);
     await expect(action()).resolves.toEqual({ success: false, error: "nope" });
     expect(mocks.updateTag).not.toHaveBeenCalled();
+  });
+});
+
+describe("rate limited actions", () => {
+  const limited = { ok: false, retryAfterSeconds: 30 };
+  const admin = {
+    userId: "u1",
+    orgId: "o1",
+    orgRole: "org:admin",
+    has: () => true,
+  };
+
+  it("stops address search once the caller is over the geocode limit", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.checkRateLimit.mockResolvedValueOnce(limited);
+    mocks.searchAddress.mockClear();
+    await expect(searchAddressAction("111 Albert")).resolves.toEqual({
+      success: false,
+      error: "Too many requests (30s).",
+    });
+    expect(mocks.checkRateLimit).toHaveBeenLastCalledWith(
+      { name: "geocode" },
+      "u1",
+    );
+    expect(mocks.searchAddress).not.toHaveBeenCalled();
+  });
+
+  it("stops reverse geocoding once the caller is over the geocode limit", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.checkRateLimit.mockResolvedValueOnce(limited);
+    mocks.reverseGeocode.mockClear();
+    await expect(reverseGeocodeAction(45, -75)).resolves.toEqual({
+      success: false,
+      error: "Too many requests (30s).",
+    });
+    expect(mocks.reverseGeocode).not.toHaveBeenCalled();
+  });
+
+  it("stops test reports once the org is over its limit", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.checkRateLimit.mockResolvedValueOnce(limited);
+    mocks.sendWeeklyReports.mockClear();
+    await expect(sendCurrentWeekReportAction()).resolves.toEqual({
+      success: false,
+      error: "Too many requests (30s).",
+    });
+    expect(mocks.checkRateLimit).toHaveBeenLastCalledWith(
+      { name: "test-report" },
+      "o1",
+    );
+    expect(mocks.sendWeeklyReports).not.toHaveBeenCalled();
   });
 });
 
