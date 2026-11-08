@@ -5,7 +5,8 @@ import {
   isPaidBreakType,
 } from "./break-utils";
 import { findNearestSite, formatMeters, type SiteLike } from "./geo";
-import type { BreakSettingsData, TimeEntry } from "./types";
+import { evaluateShifts, LATE_GRACE_MINUTES } from "./schedule-utils";
+import type { BreakSettingsData, ScheduledShift, TimeEntry } from "./types";
 
 /*
  * Timesheet anomaly audit: pure detection rules over time entries that are
@@ -24,6 +25,8 @@ export const AUDIT_CHECKS = [
   "missed_meal_break",
   "punch_far_from_site",
   "edited_after_the_fact",
+  "late_arrival",
+  "no_show",
 ] as const;
 
 export type AuditCheck = (typeof AUDIT_CHECKS)[number];
@@ -48,6 +51,8 @@ export type AuditFinding = {
   /** Local date (YYYY-MM-DD, in the audit's timezone) of the first entry's clock-in. */
   date: string;
   description: string;
+  /** The scheduled shift this finding is about (late_arrival, no_show), else null. */
+  scheduled_shift_id: number | null;
   /** Exact `update_time_entry` input that would correct this, or null. */
   suggested_fix: UpdateTimeEntryFix | null;
   /** What to do instead (or check first) when there is no automatic fix. */
@@ -70,6 +75,8 @@ export type AuditThresholds = {
   edit_grace_minutes: number;
   /** Shift length used to estimate a missing clock-out when the employee has no history (hours). */
   default_shift_hours: number;
+  /** Clocking in up to this many minutes after a scheduled start still counts as on time. */
+  late_grace_minutes: number;
 };
 
 export const DEFAULT_AUDIT_THRESHOLDS: AuditThresholds = {
@@ -80,6 +87,7 @@ export const DEFAULT_AUDIT_THRESHOLDS: AuditThresholds = {
   max_distance_meters: 250,
   edit_grace_minutes: 15,
   default_shift_hours: 8,
+  late_grace_minutes: LATE_GRACE_MINUTES,
 };
 
 export type AuditCheckStatus = {
@@ -108,6 +116,27 @@ export type AuditInput = {
    * a missed clock-out, closed by the system.
    */
   autoClockOutHours?: number | null;
+  /**
+   * Scheduled shifts starting in the audited period, for late_arrival and
+   * no_show. Null (or left out) when the organization can't schedule, in
+   * which case those checks are reported as skipped.
+   */
+  scheduledShifts?: readonly ScheduledShift[] | null;
+  /**
+   * Time entries to match scheduled shifts against, when wider than
+   * `entries` (e.g. starting a day earlier, so an early clock-in before the
+   * period still counts). Defaults to `entries`.
+   */
+  scheduleEntries?: readonly TimeEntry[];
+  /**
+   * Approved time off (inclusive YYYY-MM-DD dates). A scheduled shift on a
+   * day the member had approved time off is not a no-show.
+   */
+  approvedTimeOff?: readonly {
+    user_id: string;
+    start_date: string;
+    end_date: string;
+  }[];
 };
 
 export type AuditResult = {
@@ -231,7 +260,10 @@ export function auditTimesheets(input: AuditInput): AuditResult {
     const push = (
       type: AuditCheck,
       shift: Shift,
-      rest: Omit<AuditFinding, "type" | "employee" | "date" | "entry_ids"> & {
+      rest: Omit<
+        AuditFinding,
+        "type" | "employee" | "date" | "entry_ids" | "scheduled_shift_id"
+      > & {
         entry_ids?: number[];
       },
     ) => {
@@ -240,6 +272,7 @@ export function auditTimesheets(input: AuditInput): AuditResult {
         employee,
         date: dateOf(shift),
         entry_ids: rest.entry_ids ?? [shift.entry.id],
+        scheduled_shift_id: null,
         severity: rest.severity,
         description: rest.description,
         suggested_fix: rest.suggested_fix,
@@ -539,11 +572,98 @@ export function auditTimesheets(input: AuditInput): AuditResult {
     });
   }
 
+  /* ------------------------------------ late arrivals and no-shows -- */
+  const scheduled = input.scheduledShifts ?? null;
+  if (scheduled && (wanted.has("late_arrival") || wanted.has("no_show"))) {
+    const evaluated = evaluateShifts(
+      [...scheduled],
+      [...(input.scheduleEntries ?? input.entries)],
+      new Date(input.nowMs),
+    );
+    const local = (t: number) => formatInTimeZone(t, tz, "yyyy-MM-dd HH:mm");
+    const clock = (t: number) => formatInTimeZone(t, tz, "HH:mm");
+    for (const shift of evaluated) {
+      const startMs = ms(shift.shift_start);
+      const endMs = ms(shift.shift_end);
+      if (startMs === null || endMs === null) continue;
+      const employee = {
+        user_id: shift.user_id,
+        name: input.employeeNames.get(shift.user_id) ?? shift.user_id,
+      };
+      const date = formatInTimeZone(startMs, tz, "yyyy-MM-dd");
+      const when = `${date} ${clock(startMs)}–${clock(endMs)}`;
+      const details = {
+        scheduled_start: iso(startMs),
+        scheduled_end: iso(endMs),
+        scheduled_start_local: local(startMs),
+        scheduled_end_local: local(endMs),
+        note: shift.note ?? null,
+      };
+
+      const onTimeOff = (input.approvedTimeOff ?? []).some(
+        (t) =>
+          t.user_id === shift.user_id &&
+          t.start_date <= date &&
+          t.end_date >= date,
+      );
+      if (wanted.has("no_show") && shift.status === "no_show" && !onTimeOff) {
+        findings.push({
+          type: "no_show",
+          severity: "high",
+          employee,
+          entry_ids: [],
+          scheduled_shift_id: shift.id,
+          date,
+          description: `${employee.name} was scheduled ${when} (shift #${shift.id}) but never clocked in.`,
+          suggested_fix: null,
+          fix_note:
+            "Check whether they had time off, swapped or dropped the shift, or worked without clocking in. If they worked it, add the hours with add_time_entry; if they missed it, follow your attendance policy (or remove the shift from the schedule with manage_schedule).",
+          details,
+        });
+        continue;
+      }
+
+      const minutesLate = shift.minutes_late ?? 0;
+      if (
+        wanted.has("late_arrival") &&
+        shift.actual_clock_in &&
+        minutesLate > thresholds.late_grace_minutes
+      ) {
+        const clockInMs = shift.actual_clock_in.getTime();
+        // The entry evaluateShifts matched (same member, same clock-in).
+        const entryIds = (input.scheduleEntries ?? input.entries)
+          .filter(
+            (e) => e.user_id === shift.user_id && ms(e.clock_in) === clockInMs,
+          )
+          .slice(0, 1)
+          .map((e) => e.id);
+        findings.push({
+          type: "late_arrival",
+          severity: minutesLate >= 30 ? "medium" : "low",
+          employee,
+          entry_ids: entryIds,
+          scheduled_shift_id: shift.id,
+          date,
+          description: `${employee.name} clocked in at ${clock(clockInMs)}, ${minutesLate} min after the scheduled start of ${when} (shift #${shift.id}).`,
+          suggested_fix: null,
+          fix_note:
+            "If they actually started on time and punched in late, correct the clock-in with update_time_entry; otherwise follow your attendance policy.",
+          details: {
+            ...details,
+            minutes_late: minutesLate,
+            actual_clock_in: iso(clockInMs),
+            actual_clock_in_local: local(clockInMs),
+          },
+        });
+      }
+    }
+  }
+
   findings.sort(
     (a, b) =>
       SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] ||
       a.date.localeCompare(b.date) ||
-      (a.entry_ids[0] as number) - (b.entry_ids[0] as number),
+      (a.entry_ids[0] ?? 0) - (b.entry_ids[0] ?? 0),
   );
 
   const by_type = Object.fromEntries(
@@ -564,6 +684,27 @@ export function auditTimesheets(input: AuditInput): AuditResult {
         type,
         status: "skipped",
         note: "The organization has no work sites, so punch locations can't be compared with a work location.",
+      };
+    }
+    if ((type === "late_arrival" || type === "no_show") && !scheduled) {
+      return {
+        type,
+        status: "skipped",
+        note: "Scheduling isn't available for this organization, so clock-ins can't be compared with a schedule.",
+      };
+    }
+    if (type === "late_arrival") {
+      return {
+        type,
+        status: "ran",
+        note: `Compared with the published schedule; clocking in up to ${thresholds.late_grace_minutes} min after the start counts as on time.`,
+      };
+    }
+    if (type === "no_show") {
+      return {
+        type,
+        status: "ran",
+        note: "Scheduled shifts that ended with no clock-in. Shifts still running or not started yet, and shifts on a day of approved time off, aren't flagged.",
       };
     }
     if (type === "edited_after_the_fact") {

@@ -7,7 +7,9 @@ import {
   type AuditFinding,
   auditTimesheets,
 } from "@/lib/audit-timesheets";
-import type { TimeEntry } from "@/lib/types";
+import { dbGetScheduledShifts, dbGetTimeOffRequests } from "@/lib/db";
+import { orgHasPlanFeature, SCHEDULING_FEATURE } from "@/lib/plan-features";
+import type { ScheduledShift, TimeEntry } from "@/lib/types";
 import {
   dbGetBreakSettings,
   dbGetOrgTimeEntries,
@@ -61,7 +63,7 @@ export const auditTimesheetsInputSchema = z.object({
     .array(z.enum(AUDIT_CHECKS))
     .optional()
     .describe(
-      "Only run these checks: 'missed_clock_out', 'long_shift', 'overlapping_entries', 'missed_meal_break', 'punch_far_from_site', 'edited_after_the_fact'. Defaults to all of them.",
+      "Only run these checks: 'missed_clock_out', 'long_shift', 'overlapping_entries', 'missed_meal_break', 'punch_far_from_site', 'edited_after_the_fact', 'late_arrival' (clocked in after a scheduled start), 'no_show' (scheduled shift with no clock-in). Defaults to all of them.",
     ),
   long_shift_hours: threshold(
     "Flag completed shifts longer than this many hours. Default 12.",
@@ -87,6 +89,10 @@ export const auditTimesheetsInputSchema = z.object({
     "Minutes between a punch and when it was saved before the entry counts as entered or edited after the fact. Default 15.",
     1440,
   ),
+  late_grace_minutes: threshold(
+    "Minutes after a scheduled shift's start a clock-in still counts as on time (late_arrival). Default 5.",
+    240,
+  ),
   timezone: z
     .string()
     .optional()
@@ -97,6 +103,18 @@ export const auditTimesheetsInputSchema = z.object({
 
 export type AuditTimesheetsInput = z.infer<typeof auditTimesheetsInputSchema>;
 
+/** "entry #1, #2", "scheduled shift #5", or both. */
+function refs(f: AuditFinding) {
+  const parts: string[] = [];
+  if (f.entry_ids.length > 0) {
+    parts.push(`entry ${f.entry_ids.map((id) => `#${id}`).join(", ")}`);
+  }
+  if (f.scheduled_shift_id !== null) {
+    parts.push(`scheduled shift #${f.scheduled_shift_id}`);
+  }
+  return parts.join(", ");
+}
+
 function summarize(findings: AuditFinding[], period: string, org: string) {
   if (findings.length === 0) {
     return `No timesheet problems found for ${org} from ${period}.`;
@@ -104,12 +122,61 @@ function summarize(findings: AuditFinding[], period: string, org: string) {
   const fixable = findings.filter((f) => f.suggested_fix).length;
   const lines = findings.map(
     (f, i) =>
-      `${i + 1}. [${f.severity}] ${f.type} — ${f.employee.name}, ${f.date} (entry ${f.entry_ids.map((id) => `#${id}`).join(", ")}): ${f.description}${f.suggested_fix ? ` Suggested fix (update_time_entry): ${JSON.stringify(f.suggested_fix)}.` : ""} ${f.fix_note}`,
+      `${i + 1}. [${f.severity}] ${f.type} — ${f.employee.name}, ${f.date} (${refs(f)}): ${f.description}${f.suggested_fix ? ` Suggested fix (update_time_entry): ${JSON.stringify(f.suggested_fix)}.` : ""} ${f.fix_note}`,
   );
   return [
     `Found ${findings.length} timesheet issue${findings.length === 1 ? "" : "s"} for ${org} from ${period} (${fixable} with a suggested update_time_entry fix). Confirm with the admin before applying any fix.`,
     ...lines,
   ].join("\n");
+}
+
+/**
+ * What late_arrival and no_show need: the period's scheduled shifts, the
+ * clock-ins from the day before (an early clock-in still counts for a shift
+ * starting at the top of the period) and approved time off. Null when the
+ * organization's plan has no scheduling, so those checks are skipped.
+ */
+async function loadSchedule(
+  orgId: string,
+  userId: string | null,
+  range: { startDate: Date; endDate: Date; startStr: string; endStr: string },
+): Promise<{
+  shifts: ScheduledShift[];
+  earlierEntries: TimeEntry[];
+  approvedTimeOff: { user_id: string; start_date: string; end_date: string }[];
+} | null> {
+  if (!(await orgHasPlanFeature(orgId, SCHEDULING_FEATURE))) return null;
+  const dayBefore = new Date(range.startDate.getTime() - 86_400_000);
+  const [shifts, earlier, timeOff] = await Promise.all([
+    // [start, end) on shift_start; end is inclusive here, so add 1 ms.
+    dbGetScheduledShifts(
+      orgId,
+      userId,
+      range.startDate,
+      new Date(range.endDate.getTime() + 1),
+    ),
+    (userId
+      ? dbGetTimeEntries(userId, orgId, dayBefore, range.startDate)
+      : dbGetOrgTimeEntries(orgId, dayBefore, range.startDate)
+    ).catch(() => [] as TimeEntry[]),
+    dbGetTimeOffRequests(orgId, userId, range.startStr).catch(() => []),
+  ]);
+  return {
+    shifts: shifts.filter((s) => s.org_id === orgId),
+    earlierEntries: earlier.filter((e) => e.org_id === orgId),
+    approvedTimeOff: timeOff
+      .filter(
+        (t) =>
+          t.org_id === orgId &&
+          t.status === "approved" &&
+          t.start_date <= range.endStr,
+      )
+      .map((t) => ({
+        user_id: t.user_id,
+        start_date: t.start_date,
+        end_date: t.end_date,
+      })),
+  };
 }
 
 export async function auditTimesheetsTool(
@@ -186,10 +253,21 @@ export async function auditTimesheetsTool(
   // Never audit another organization's rows, whatever the query returned.
   entries = entries.filter((e) => e.org_id === org.orgId);
 
-  const [breakSettings, sites, alertSettings] = await Promise.all([
+  const wantsSchedule = (input.checks ?? AUDIT_CHECKS).some(
+    (c) => c === "late_arrival" || c === "no_show",
+  );
+  const [breakSettings, sites, alertSettings, schedule] = await Promise.all([
     dbGetBreakSettings(org.orgId).catch(() => null),
     dbGetSites(org.orgId).catch(() => []),
     dbGetAlertSettings(org.orgId).catch(() => undefined),
+    wantsSchedule
+      ? loadSchedule(org.orgId, auditedMember?.user_id ?? null, {
+          startDate,
+          endDate,
+          startStr,
+          endStr,
+        })
+      : null,
   ]);
 
   const result = auditTimesheets({
@@ -204,10 +282,16 @@ export async function auditTimesheetsTool(
       meal_break_min_minutes: input.meal_break_min_minutes,
       max_distance_meters: input.max_distance_meters,
       edit_grace_minutes: input.edit_grace_minutes,
+      late_grace_minutes: input.late_grace_minutes,
     },
     checks: input.checks,
     sites: sites ?? [],
     breakSettings: breakSettings ?? null,
+    scheduledShifts: schedule?.shifts ?? null,
+    scheduleEntries: schedule
+      ? [...schedule.earlierEntries, ...entries]
+      : undefined,
+    approvedTimeOff: schedule?.approvedTimeOff,
     autoClockOutHours: alertSettings
       ? normalizeAlertSettings(alertSettings).auto_clock_out_hours
       : null,

@@ -18,6 +18,9 @@ const m = vi.hoisted(() => ({
   ),
   dbUpdateTimeEntry: vi.fn(),
   invalidateTimeEntryCache: vi.fn(),
+  dbGetScheduledShifts: vi.fn(async (..._args: unknown[]) => [] as unknown[]),
+  dbGetTimeOffRequests: vi.fn(async (..._args: unknown[]) => [] as unknown[]),
+  orgHasPlanFeature: vi.fn(async (..._args: unknown[]) => false),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({
@@ -40,7 +43,14 @@ vi.mock("@/mcp/db", () => ({
 vi.mock("@/lib/alerts-db", () => ({
   dbGetAlertSettings: m.dbGetAlertSettings,
 }));
-vi.mock("@/lib/db", () => ({}));
+vi.mock("@/lib/db", () => ({
+  dbGetScheduledShifts: m.dbGetScheduledShifts,
+  dbGetTimeOffRequests: m.dbGetTimeOffRequests,
+}));
+vi.mock("@/lib/plan-features", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/plan-features")>()),
+  orgHasPlanFeature: m.orgHasPlanFeature,
+}));
 vi.mock("@/lib/reports", () => ({}));
 vi.mock("@/lib/utils-clerk", () => ({}));
 vi.mock("@/lib/schedule-notify", () => ({}));
@@ -156,6 +166,9 @@ beforeEach(() => {
   m.dbGetSites.mockResolvedValue([]);
   m.dbGetAlertSettings.mockResolvedValue(undefined);
   m.dbFindOverlappingTimeEntries.mockResolvedValue([]);
+  m.orgHasPlanFeature.mockResolvedValue(false);
+  m.dbGetScheduledShifts.mockResolvedValue([]);
+  m.dbGetTimeOffRequests.mockResolvedValue([]);
 });
 
 describe("audit_timesheets tool", () => {
@@ -315,6 +328,159 @@ describe("audit_timesheets tool", () => {
     const res = await auditTimesheetsTool(admin, range);
     expect(res.data.status).toBe("ok");
     expect((res.data.findings as AuditFinding[]).length).toBe(1);
+  });
+});
+
+describe("audit_timesheets: late arrivals and no-shows", () => {
+  /** Alex was scheduled 09:00–17:00 MDT on Oct 5 (clocked in on time) and Oct 7 (never came). */
+  const shiftOct5 = {
+    id: 7,
+    org_id: "org_1",
+    user_id: "user_alex",
+    shift_start: new Date("2026-10-05T15:00:00.000Z"),
+    shift_end: new Date("2026-10-05T23:00:00.000Z"),
+    note: null,
+    created_by: "user_admin",
+  };
+  const shiftOct7 = {
+    ...shiftOct5,
+    id: 8,
+    shift_start: new Date("2026-10-07T15:00:00.000Z"),
+    shift_end: new Date("2026-10-07T23:00:00.000Z"),
+  };
+  beforeEach(() => {
+    // Only the Oct 5 shift: an open entry would cover later shifts too.
+    m.dbGetOrgTimeEntries.mockResolvedValue([usualEntry]);
+    m.dbGetTimeEntries.mockResolvedValue([usualEntry]);
+  });
+
+  const scheduleOnly = {
+    ...range,
+    timezone: "America/Edmonton",
+    checks: ["late_arrival", "no_show"] as ("late_arrival" | "no_show")[],
+  };
+
+  it("skips them without loading anything when the plan has no scheduling", async () => {
+    const res = await auditTimesheetsTool(admin, scheduleOnly);
+    expect(m.orgHasPlanFeature).toHaveBeenCalledWith("org_1", "scheduling");
+    expect(m.dbGetScheduledShifts).not.toHaveBeenCalled();
+    expect(res.data.findings).toEqual([]);
+    const checks = res.data.checks as { type: string; status: string }[];
+    expect(checks.find((c) => c.type === "no_show")?.status).toBe("skipped");
+  });
+
+  it("doesn't check the plan when neither check is requested", async () => {
+    await auditTimesheetsTool(admin, { ...range, checks: ["long_shift"] });
+    expect(m.orgHasPlanFeature).not.toHaveBeenCalled();
+  });
+
+  it("loads the period's schedule, the day before's clock-ins and approved time off", async () => {
+    m.orgHasPlanFeature.mockResolvedValue(true);
+    m.dbGetScheduledShifts.mockResolvedValue([
+      shiftOct5,
+      shiftOct7,
+      { ...shiftOct7, id: 9, org_id: "org_other" },
+    ]);
+    const res = await auditTimesheetsTool(admin, scheduleOnly);
+    expect(m.dbGetScheduledShifts).toHaveBeenCalledWith(
+      "org_1",
+      null,
+      new Date("2026-10-05T06:00:00.000Z"),
+      new Date("2026-10-10T06:00:00.000Z"),
+    );
+    expect(m.dbGetOrgTimeEntries).toHaveBeenCalledWith(
+      "org_1",
+      new Date("2026-10-04T06:00:00.000Z"),
+      new Date("2026-10-05T06:00:00.000Z"),
+    );
+    expect(m.dbGetTimeOffRequests).toHaveBeenCalledWith(
+      "org_1",
+      null,
+      "2026-10-05",
+    );
+    const findings = res.data.findings as AuditFinding[];
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      type: "no_show",
+      scheduled_shift_id: 8,
+      entry_ids: [],
+      employee: { user_id: "user_alex", name: "Alex Smith" },
+      date: "2026-10-07",
+    });
+    expect(res.summary).toContain(
+      "[high] no_show — Alex Smith, 2026-10-07 (scheduled shift #8):",
+    );
+  });
+
+  it("skips no-shows on approved time off and audits one member's schedule", async () => {
+    m.orgHasPlanFeature.mockResolvedValue(true);
+    m.dbGetScheduledShifts.mockResolvedValue([shiftOct7]);
+    m.dbGetTimeOffRequests.mockResolvedValue([
+      {
+        org_id: "org_1",
+        user_id: "user_alex",
+        status: "approved",
+        start_date: "2026-10-07",
+        end_date: "2026-10-07",
+      },
+    ]);
+    const res = await auditTimesheetsTool(admin, {
+      ...scheduleOnly,
+      member: "Alex",
+    });
+    expect(m.dbGetScheduledShifts).toHaveBeenCalledWith(
+      "org_1",
+      "user_alex",
+      expect.any(Date),
+      expect.any(Date),
+    );
+    expect(res.data.findings).toEqual([]);
+
+    // A pending request doesn't excuse it.
+    m.dbGetTimeOffRequests.mockResolvedValue([
+      {
+        org_id: "org_1",
+        user_id: "user_alex",
+        status: "pending",
+        start_date: "2026-10-07",
+        end_date: "2026-10-07",
+      },
+    ]);
+    const again = await auditTimesheetsTool(admin, scheduleOnly);
+    expect((again.data.findings as AuditFinding[]).map((f) => f.type)).toEqual([
+      "no_show",
+    ]);
+  });
+
+  it("flags a late arrival with its entry and passes late_grace_minutes through", async () => {
+    m.orgHasPlanFeature.mockResolvedValue(true);
+    m.dbGetScheduledShifts.mockResolvedValue([
+      { ...shiftOct5, shift_start: new Date("2026-10-05T14:30:00.000Z") },
+    ]);
+    const res = await auditTimesheetsTool(admin, {
+      ...scheduleOnly,
+      checks: ["late_arrival"],
+    });
+    const findings = res.data.findings as AuditFinding[];
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      type: "late_arrival",
+      severity: "medium",
+      entry_ids: [40],
+      scheduled_shift_id: 7,
+    });
+    expect(res.summary).toContain("(entry #40, scheduled shift #7)");
+
+    const lenient = await auditTimesheetsTool(admin, {
+      ...scheduleOnly,
+      checks: ["late_arrival"],
+      late_grace_minutes: 45,
+    });
+    expect(lenient.data.findings).toEqual([]);
+    expect(
+      (lenient.data.thresholds as { late_grace_minutes: number })
+        .late_grace_minutes,
+    ).toBe(45);
   });
 });
 

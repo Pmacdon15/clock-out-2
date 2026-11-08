@@ -6,7 +6,12 @@ import {
   DEFAULT_AUDIT_THRESHOLDS,
   resolveAuditThresholds,
 } from "@/lib/audit-timesheets";
-import type { SiteData, TimeEntry, TimeEntryBreak } from "@/lib/types";
+import type {
+  ScheduledShift,
+  SiteData,
+  TimeEntry,
+  TimeEntryBreak,
+} from "@/lib/types";
 
 const TZ = "America/Edmonton"; // UTC-6 (MDT) in early October 2026
 const NOW = Date.parse("2026-10-10T18:00:00.000Z");
@@ -892,5 +897,219 @@ describe("auditTimesheets — ordering, names and timezones", () => {
       updated_at: "2026-10-07T05:00:00.000Z",
     } as unknown as TimeEntry;
     expect(only([raw], "long_shift")).toHaveLength(1);
+  });
+});
+
+describe("late_arrival and no_show", () => {
+  let shiftId = 500;
+  /** A scheduled shift; 09:00–17:00 MDT on Oct 6 by default. */
+  function scheduled(overrides: Partial<ScheduledShift> = {}): ScheduledShift {
+    const start = new Date(overrides.shift_start ?? "2026-10-06T15:00:00.000Z");
+    return {
+      id: shiftId++,
+      org_id: "org_1",
+      user_id: "user_alex",
+      note: null,
+      created_by: "user_admin",
+      shift_end: new Date(start.getTime() + 8 * H),
+      ...overrides,
+      shift_start: start,
+    };
+  }
+
+  it("skips both checks when there is no schedule", () => {
+    const { checks, findings } = run([entry()], {
+      checks: ["late_arrival", "no_show"],
+    });
+    for (const type of ["late_arrival", "no_show"]) {
+      expect(checks.find((c) => c.type === type)).toMatchObject({
+        status: "skipped",
+        note: expect.stringMatching(/Scheduling isn't available/),
+      });
+    }
+    expect(findings).toEqual([]);
+  });
+
+  it("reports both checks as run with a schedule, even an empty one", () => {
+    const { checks } = run([], { scheduledShifts: [] });
+    expect(checks.find((c) => c.type === "late_arrival")).toMatchObject({
+      status: "ran",
+      note: expect.stringContaining("up to 5 min"),
+    });
+    expect(checks.find((c) => c.type === "no_show")?.status).toBe("ran");
+  });
+
+  it("flags a clock-in after the grace period, with the matched entry", () => {
+    const shift = scheduled();
+    const late = entry({ clock_in: new Date("2026-10-06T15:20:00.000Z") });
+    const [finding, ...rest] = only([late], "late_arrival", {
+      scheduledShifts: [shift],
+    });
+    expect(rest).toEqual([]);
+    expect(finding).toMatchObject({
+      type: "late_arrival",
+      severity: "low",
+      employee: { user_id: "user_alex", name: "Alex Smith" },
+      entry_ids: [late.id],
+      scheduled_shift_id: shift.id,
+      date: "2026-10-06",
+      suggested_fix: null,
+      details: { minutes_late: 20, scheduled_start_local: "2026-10-06 09:00" },
+    });
+    expect(finding?.description).toBe(
+      `Alex Smith clocked in at 09:20, 20 min after the scheduled start of 2026-10-06 09:00–17:00 (shift #${shift.id}).`,
+    );
+  });
+
+  it("is medium severity from 30 min late and follows late_grace_minutes", () => {
+    const shift = scheduled();
+    const late = entry({ clock_in: new Date("2026-10-06T15:45:00.000Z") });
+    expect(
+      only([late], "late_arrival", { scheduledShifts: [shift] })[0]?.severity,
+    ).toBe("medium");
+    expect(
+      only([late], "late_arrival", {
+        scheduledShifts: [shift],
+        thresholds: { late_grace_minutes: 60 },
+      }),
+    ).toEqual([]);
+  });
+
+  it("does not flag on-time, early, or within-grace clock-ins", () => {
+    const shifts = [
+      scheduled(),
+      scheduled({ shift_start: new Date("2026-10-07T15:00:00.000Z") }),
+      scheduled({ shift_start: new Date("2026-10-08T15:00:00.000Z") }),
+    ];
+    const entries = [
+      entry({ clock_in: new Date("2026-10-06T15:00:00.000Z") }),
+      entry({ clock_in: new Date("2026-10-07T14:30:00.000Z") }),
+      entry({ clock_in: new Date("2026-10-08T15:05:00.000Z") }),
+    ];
+    expect(
+      run(entries, {
+        scheduledShifts: shifts,
+        checks: ["late_arrival", "no_show"],
+      }).findings,
+    ).toEqual([]);
+  });
+
+  it("flags a finished shift with no clock-in as a high-severity no-show", () => {
+    const shift = scheduled({ note: "Front desk" });
+    const [finding] = only([], "no_show", { scheduledShifts: [shift] });
+    expect(finding).toMatchObject({
+      type: "no_show",
+      severity: "high",
+      entry_ids: [],
+      scheduled_shift_id: shift.id,
+      date: "2026-10-06",
+      suggested_fix: null,
+      details: { note: "Front desk" },
+    });
+    expect(finding?.description).toBe(
+      `Alex Smith was scheduled 2026-10-06 09:00–17:00 (shift #${shift.id}) but never clocked in.`,
+    );
+    expect(finding?.fix_note).toMatch(/add_time_entry/);
+  });
+
+  it("does not flag shifts still running or not started yet", () => {
+    const running = scheduled({
+      shift_start: new Date(NOW - 2 * H),
+      shift_end: new Date(NOW + 2 * H),
+    });
+    const future = scheduled({ shift_start: new Date(NOW + 24 * H) });
+    expect(run([], { scheduledShifts: [running, future] }).findings).toEqual(
+      [],
+    );
+  });
+
+  it("does not flag a no-show on a day of approved time off", () => {
+    const shift = scheduled();
+    const timeOff = (
+      start_date: string,
+      end_date: string,
+      user_id = "user_alex",
+    ) => [{ user_id, start_date, end_date }];
+    expect(
+      only([], "no_show", {
+        scheduledShifts: [shift],
+        approvedTimeOff: timeOff("2026-10-05", "2026-10-07"),
+      }),
+    ).toEqual([]);
+    // Someone else's time off, or other days, don't count.
+    expect(
+      only([], "no_show", {
+        scheduledShifts: [shift],
+        approvedTimeOff: [
+          ...timeOff("2026-10-06", "2026-10-06", "user_sam"),
+          ...timeOff("2026-10-07", "2026-10-08"),
+        ],
+      }),
+    ).toHaveLength(1);
+  });
+
+  it("matches clock-ins from scheduleEntries, e.g. the day before the period", () => {
+    const shift = scheduled({
+      shift_start: new Date("2026-10-06T06:00:00.000Z"),
+    });
+    const early = entry({ clock_in: new Date("2026-10-06T05:30:00.000Z") });
+    expect(only([], "no_show", { scheduledShifts: [shift] })).toHaveLength(1);
+    expect(
+      only([], "no_show", {
+        scheduledShifts: [shift],
+        scheduleEntries: [early],
+      }),
+    ).toEqual([]);
+  });
+
+  it("matches one clock-in to one shift, so the second back-to-back shift is a no-show", () => {
+    const first = scheduled();
+    const second = scheduled({
+      shift_start: new Date("2026-10-06T23:00:00.000Z"),
+      shift_end: new Date("2026-10-07T03:00:00.000Z"),
+    });
+    const findings = run([entry()], {
+      scheduledShifts: [first, second],
+      checks: ["late_arrival", "no_show"],
+    }).findings;
+    expect(findings.map((f) => [f.type, f.scheduled_shift_id])).toEqual([
+      ["no_show", second.id],
+    ]);
+  });
+
+  it("skips scheduled shifts with unreadable times", () => {
+    const broken = scheduled({ shift_end: new Date("not a date") });
+    expect(only([], "no_show", { scheduledShifts: [broken] })).toEqual([]);
+  });
+
+  it("falls back to the user id for unknown members and orders same-day no-shows", () => {
+    const findings = only([], "no_show", {
+      scheduledShifts: [
+        scheduled({ user_id: "user_gone" }),
+        scheduled({ user_id: "user_sam" }),
+      ],
+    });
+    expect(findings.map((f) => f.employee.name)).toEqual([
+      "user_gone",
+      "Sam Lee",
+    ]);
+  });
+
+  it("only runs the requested schedule check and counts it", () => {
+    const shifts = [
+      scheduled(),
+      scheduled({ shift_start: new Date("2026-10-07T15:00:00.000Z") }),
+    ];
+    const late = entry({ clock_in: new Date("2026-10-06T15:40:00.000Z") });
+    expect(
+      only([late], "late_arrival", { scheduledShifts: shifts }).map(
+        (f) => f.type,
+      ),
+    ).toEqual(["late_arrival"]);
+    const result = run([late], { scheduledShifts: shifts });
+    expect(result.counts.by_type.late_arrival).toBe(1);
+    expect(result.counts.by_type.no_show).toBe(1);
+    // No-shows (high) sort ahead of the late arrival (medium).
+    expect(result.findings.map((f) => f.type).slice(0, 1)).toEqual(["no_show"]);
   });
 });
