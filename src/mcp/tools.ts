@@ -1032,6 +1032,28 @@ export function resolveMemberFromList(
     return { ok: true, member: selfMember };
   }
 
+  // Non-admins can only act on themselves, so they never need the roster.
+  // Resolve their own name or email to themselves and refuse anything else
+  // without listing candidates, so lookups can't be used to harvest
+  // coworkers' emails or user IDs.
+  if (!callerIsAdmin) {
+    const isSelf =
+      selfMember.email?.toLowerCase() === needle ||
+      selfMember.name.toLowerCase() === needle ||
+      selfMember.firstName?.toLowerCase() === needle ||
+      selfMember.lastName?.toLowerCase() === needle;
+    if (isSelf) return { ok: true, member: selfMember };
+    return {
+      ok: false,
+      result: {
+        summary:
+          "Only organization admins (org:admin) can view or manage other members' hours. Leave member empty to act on yourself.",
+        data: { status: "forbidden" },
+        isError: true,
+      },
+    };
+  }
+
   // Exact match by userId, email, or full name
   const exact = members.filter(
     (m) =>
@@ -1040,17 +1062,6 @@ export function resolveMemberFromList(
       m.name.toLowerCase() === needle,
   );
   if (exact.length === 1 && exact[0]) {
-    if (exact[0].userId !== callerUserId && !callerIsAdmin) {
-      return {
-        ok: false,
-        result: {
-          summary:
-            "Only organization admins (org:admin) can view or manage other members' hours.",
-          data: { status: "forbidden" },
-          isError: true,
-        },
-      };
-    }
     return { ok: true, member: exact[0] };
   }
 
@@ -1064,17 +1075,6 @@ export function resolveMemberFromList(
   );
 
   if (partial.length === 1 && partial[0]) {
-    if (partial[0].userId !== callerUserId && !callerIsAdmin) {
-      return {
-        ok: false,
-        result: {
-          summary:
-            "Only organization admins (org:admin) can view or manage other members' hours.",
-          data: { status: "forbidden" },
-          isError: true,
-        },
-      };
-    }
     return { ok: true, member: partial[0] };
   }
 

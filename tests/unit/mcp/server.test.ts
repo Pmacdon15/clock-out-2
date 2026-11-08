@@ -145,6 +145,7 @@ import {
   manageBreakSettingsTool,
   manageBreaksTool,
   manageReportingSettingsTool,
+  resolveMemberFromList,
   runHoursReportTool,
   toggleBreakTool,
   updateTimeEntryTool,
@@ -2781,5 +2782,55 @@ describe("custom punch times and add_time_entry are limited for non-admins", () 
     expect(res.isError).toBe(true);
     expect(res.data.status).toBe("future_time");
     expect(mockDbInsertTimeEntry).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolveMemberFromList never exposes the roster to non-admins", () => {
+  const members = [
+    {
+      userId: "user_admin",
+      name: "Patrick MacDonald",
+      firstName: "Patrick",
+      lastName: "MacDonald",
+      email: "patrick@patmac.ca",
+      role: "org:admin",
+      isAdmin: true,
+    },
+    {
+      userId: "user_worker",
+      name: "Alex Smith",
+      firstName: "Alex",
+      lastName: "Smith",
+      email: "alex@patmac.ca",
+      role: "org:member",
+      isAdmin: false,
+    },
+  ];
+
+  it.each(["@", "zzzz", "patrick", "user_admin", "patrick@patmac.ca"])(
+    "returns a bare forbidden for %s",
+    (needle) => {
+      const res = resolveMemberFromList(members, "user_worker", false, needle);
+      expect(res.ok).toBe(false);
+      if (res.ok) return;
+      expect(res.result.data).toEqual({ status: "forbidden" });
+      expect(res.result.summary).not.toContain("@patmac.ca");
+      expect(res.result.summary).not.toContain("user_admin");
+    },
+  );
+
+  it.each(["Alex", "alex smith", "alex@patmac.ca", "me", "user_worker"])(
+    "still resolves the member's own %s to themselves",
+    (needle) => {
+      const res = resolveMemberFromList(members, "user_worker", false, needle);
+      expect(res.ok && res.member.userId).toBe("user_worker");
+    },
+  );
+
+  it("still lists matches for admins", () => {
+    const res = resolveMemberFromList(members, "user_admin", true, "@");
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.result.data.status).toBe("ambiguous_member");
   });
 });
