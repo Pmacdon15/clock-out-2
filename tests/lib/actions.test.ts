@@ -681,8 +681,31 @@ describe("reverseGeocodeAction", () => {
     });
   });
 
-  it("returns resolved address for authenticated members", async () => {
-    mocks.protect.mockResolvedValue({ userId: "u1", orgId: "o1" });
+  it.each([
+    ["members", "org:member", true],
+    ["admins without geofencing", "org:admin", false],
+  ])("rejects %s", async (_label, orgRole, geofencing) => {
+    mocks.reverseGeocode.mockClear();
+    mocks.protect.mockResolvedValue({
+      userId: "u1",
+      orgId: "o1",
+      orgRole,
+      has: () => geofencing,
+    });
+    await expect(reverseGeocodeAction(45.4215, -75.6972)).resolves.toEqual({
+      success: false,
+      error: "Unauthorized",
+    });
+    expect(mocks.reverseGeocode).not.toHaveBeenCalled();
+  });
+
+  it("returns resolved address for admins with geofencing", async () => {
+    mocks.protect.mockResolvedValue({
+      userId: "u1",
+      orgId: "o1",
+      orgRole: "org:admin",
+      has: (opts: { feature?: string }) => opts?.feature === "geofencing",
+    });
     mocks.reverseGeocode.mockResolvedValue("111 Albert St, Ottawa, ON");
 
     await expect(reverseGeocodeAction(45.4215, -75.6972)).resolves.toEqual({

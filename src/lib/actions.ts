@@ -412,8 +412,15 @@ export async function reverseGeocodeAction(
   latitude: number,
   longitude: number,
 ) {
+  // Each call spends Geoapify quota, so only the admins who manage work
+  // sites (the only UI that uses it) may call it, like searchAddressAction.
   const authUser = await auth.protect();
-  if (!authUser.userId || !authUser.orgId) {
+  if (
+    !authUser.userId ||
+    !authUser.orgId ||
+    authUser.orgRole !== "org:admin" ||
+    !authUser.has({ feature: "geofencing" })
+  ) {
     return { success: false as const, error: "Unauthorized" };
   }
   const address = await reverseGeocode({ latitude, longitude });
