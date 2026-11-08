@@ -1,5 +1,6 @@
 import { clerkClient } from "@clerk/nextjs/server";
 import type { AuthInfo } from "@modelcontextprotocol/server";
+import { mcpResourceUrl } from "@/mcp/http";
 
 /*
  * Verifies who is calling the Clock Out MCP server using Clerk OAuth tokens.
@@ -26,6 +27,42 @@ export function allowedOAuthClientIds(
     .map((id) => id.trim())
     .filter(Boolean);
   return ids.length > 0 ? new Set(ids) : null;
+}
+
+export type AudienceMode = "off" | "log" | "enforce";
+
+/**
+ * How strictly a token's audience (RFC 8707 `aud`) must name this MCP
+ * server, from `MCP_TOKEN_AUDIENCE`: "enforce" rejects a token whose
+ * audience is missing or different, "log" only warns (to see whether the
+ * clients' tokens carry it before enforcing), and anything else skips the
+ * check. Each check is one extra Clerk Backend API call.
+ */
+export function audienceMode(
+  raw = process.env.MCP_TOKEN_AUDIENCE,
+): AudienceMode {
+  const mode = raw?.trim().toLowerCase();
+  return mode === "enforce" || mode === "log" ? mode : "off";
+}
+
+/** Whether the token was issued for this server, per {@link audienceMode}. */
+async function audienceAllowed(
+  client: Awaited<ReturnType<typeof clerkClient>>,
+  req: Request,
+  token: string,
+): Promise<boolean> {
+  const mode = audienceMode();
+  if (mode === "off") return true;
+  const audience = mcpResourceUrl(req);
+  try {
+    await client.idPOAuthAccessToken.verify(token, { audience });
+    return true;
+  } catch (error) {
+    console.warn(
+      `MCP: OAuth access token audience isn't ${audience} (${error instanceof Error ? error.message : "verification failed"})${mode === "log" ? "; allowed because MCP_TOKEN_AUDIENCE=log" : ""}`,
+    );
+    return mode === "log";
+  }
 }
 
 export async function verifyMcpToken(
@@ -56,6 +93,7 @@ async function verifyOAuthToken(
     console.warn("MCP: an OAuth access token without a user was rejected");
     return undefined;
   }
+  if (!(await audienceAllowed(client, req, token))) return undefined;
   const allowed = allowedOAuthClientIds();
   if (allowed && (!auth.clientId || !allowed.has(auth.clientId))) {
     console.warn(

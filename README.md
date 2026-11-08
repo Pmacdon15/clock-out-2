@@ -68,6 +68,7 @@ bun run format           # biome format --write
 | `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`, `QSTASH_NEXT_SIGNING_KEY`                                                                      | Upstash QStash credentials for exactly-timed alert jobs (Production only). Optional `QSTASH_URL` for a regional QStash URL.                                            |
 | `VAPID_SUBJECT`                                                                                                                              | Optional contact for push services, e.g. `mailto:you@example.com`. Defaults to `NEXT_PUBLIC_APP_URL`.                                                                  |
 | `MCP_ALLOWED_OAUTH_CLIENT_IDS`                                                                                                               | Optional: comma-separated Clerk OAuth client IDs allowed to use the MCP server and `/api/export/timesheet`. Unset accepts any client registered on the Clerk instance. |
+| `MCP_TOKEN_AUDIENCE`                                                                                                                         | Optional: `log` or `enforce` to check that MCP OAuth tokens were issued for this server (RFC 8707 audience `https://<your-domain>/api/mcp`). Start with `log` to see whether your clients' tokens carry it. |
 
 ### Database
 
