@@ -21,6 +21,7 @@ import {
   reviewTimeOffRequestDal as dalReviewTimeOffRequest,
   setTimeOffAllowanceDal as dalSetTimeOffAllowance,
   startBreak as dalStartBreak,
+  syncMyShiftsToGoogleCalendarDal as dalSyncMyShiftsToGoogleCalendar,
   updateBreakDal as dalUpdateBreak,
   updateScheduledShiftDal as dalUpdateScheduledShift,
   updateSiteDal as dalUpdateSite,
@@ -34,6 +35,7 @@ import {
 } from "./dal";
 import type { Coordinates } from "./geo";
 import { reverseGeocode, searchAddress } from "./geoapify";
+import { mirrorShiftChange } from "./google-calendar";
 import { sendWeeklyReports } from "./reports";
 import { notifyScheduleChange } from "./schedule-notify";
 import type {
@@ -461,6 +463,7 @@ export async function createScheduledShiftAction(
       updateTag(`scheduled-shifts-${shift.org_id}`);
       after(() => notifyScheduleChange("added", shift, timezone));
       after(() => syncShiftReminderJob("added", shift).catch(logJobError));
+      after(() => mirrorShiftChange("added", shift).catch(logCalendarError));
       return { success: true as const, data: shift };
     },
     (err) => {
@@ -490,6 +493,7 @@ export async function updateScheduledShiftAction(
       updateTag(`scheduled-shifts-${shift.org_id}`);
       after(() => notifyScheduleChange("changed", shift, timezone));
       after(() => syncShiftReminderJob("changed", shift).catch(logJobError));
+      after(() => mirrorShiftChange("changed", shift).catch(logCalendarError));
       return { success: true as const, data: shift };
     },
     (err) => {
@@ -509,12 +513,22 @@ export async function deleteScheduledShiftAction(
       updateTag(`scheduled-shifts-${shift.org_id}`);
       after(() => notifyScheduleChange("removed", shift, timezone));
       after(() => syncShiftReminderJob("removed", shift).catch(logJobError));
+      after(() => mirrorShiftChange("removed", shift).catch(logCalendarError));
       return { success: true as const };
     },
     (err) => {
       return { success: false as const, error: err.reason };
     },
   );
+}
+
+function logCalendarError(error: unknown) {
+  console.error("[Google Calendar] Failed to update a shift event:", error);
+}
+
+/** Adds the signed-in member's shifts to their own Google Calendar. */
+export async function syncMyShiftsToGoogleCalendarAction() {
+  return await dalSyncMyShiftsToGoogleCalendar();
 }
 
 function logJobError(error: unknown) {

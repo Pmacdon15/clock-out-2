@@ -38,7 +38,7 @@ import type {
   ShiftStatus,
   TimeOffRequest,
 } from "@/lib/types";
-import CalendarSubscribe from "./CalendarSubscribe";
+import AddShiftsToCalendar from "./AddShiftsToCalendar";
 import LocalTime from "./LocalTime";
 import { Button, Card } from "./ui";
 
@@ -671,9 +671,7 @@ export default function Schedule({
         {renderList(upcoming, "No upcoming shifts.", true)}
       </Card>
 
-      {calendarFeedPromise && (
-        <CalendarSubscribe feedPathPromise={calendarFeedPromise} />
-      )}
+      <AddShiftsToCalendar feedPathPromise={calendarFeedPromise} />
 
       <Card className="p-6 sm:p-8">
         <h4 className="mb-2 font-bold text-lg">Past two weeks</h4>
