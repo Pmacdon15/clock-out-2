@@ -67,6 +67,9 @@
     "vitest": "^4.1.12"
   },
   "packageManager": "bun@1.4.4",
+  "overrides": {
+    "@react-email/render": "$@react-email/render"
+  },
   "ignoreScripts": [
     "sharp",
     "unrs-resolver"
