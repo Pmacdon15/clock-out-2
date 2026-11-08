@@ -3,16 +3,21 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const m = vi.hoisted(() => ({
   updateTag: vi.fn(),
+  refresh: vi.fn(),
   after: vi.fn((fn: () => unknown) => fn()),
   notifyShiftRequest: vi.fn(),
   mirrorReassignedShifts: vi.fn(),
   claimShiftRequestDal: vi.fn(),
+  createShiftRequestDal: vi.fn(),
   cancelShiftRequestDal: vi.fn(),
   approveShiftRequestDal: vi.fn(),
   denyShiftRequestDal: vi.fn(),
 }));
 
-vi.mock("next/cache", () => ({ updateTag: m.updateTag }));
+vi.mock("next/cache", () => ({
+  updateTag: m.updateTag,
+  refresh: m.refresh,
+}));
 vi.mock("next/server", () => ({ after: m.after }));
 vi.mock("@/lib/shift-request-notify", () => ({
   notifyShiftRequest: m.notifyShiftRequest,
@@ -20,6 +25,7 @@ vi.mock("@/lib/shift-request-notify", () => ({
 }));
 vi.mock("@/lib/shift-requests-dal", () => ({
   claimShiftRequestDal: m.claimShiftRequestDal,
+  createShiftRequestDal: m.createShiftRequestDal,
   cancelShiftRequestDal: m.cancelShiftRequestDal,
   approveShiftRequestDal: m.approveShiftRequestDal,
   denyShiftRequestDal: m.denyShiftRequestDal,
@@ -29,6 +35,7 @@ import {
   approveShiftRequestAction,
   cancelShiftRequestAction,
   claimShiftRequestAction,
+  createShiftRequestAction,
   denyShiftRequestAction,
 } from "@/lib/shift-request-actions";
 
@@ -42,6 +49,7 @@ const done = <T>(value: T) => ({
 });
 
 beforeEach(() => {
+  vi.clearAllMocks();
   m.after.mockImplementation((fn: () => unknown) => fn());
 });
 
@@ -54,6 +62,7 @@ describe("shift request actions", () => {
     dal.mockResolvedValueOnce(done(request));
     await expect(action(7, "UTC")).resolves.toEqual({ success: true });
     expect(dal).toHaveBeenCalledWith(7);
+    expect(m.refresh).toHaveBeenCalled();
     expect(m.notifyShiftRequest).toHaveBeenCalledWith(
       event,
       request,
@@ -90,7 +99,31 @@ describe("shift request actions", () => {
       error: "No",
     });
     expect(m.updateTag).not.toHaveBeenCalled();
+    expect(m.refresh).not.toHaveBeenCalled();
     expect(m.notifyShiftRequest).not.toHaveBeenCalled();
+  });
+
+  it("creates a request, refreshes the page and notifies", async () => {
+    const input = {
+      type: "swap" as const,
+      shiftId: 3,
+      swapShiftId: 4,
+      targetUserId: null,
+      note: null,
+    };
+    m.createShiftRequestDal.mockResolvedValueOnce(done(request));
+    await expect(createShiftRequestAction(input, "UTC")).resolves.toEqual({
+      success: true,
+    });
+    expect(m.createShiftRequestDal).toHaveBeenCalledWith(input);
+    expect(m.refresh).toHaveBeenCalled();
+    expect(m.notifyShiftRequest).toHaveBeenCalledWith(
+      "created",
+      request,
+      detail,
+      "amy",
+      "UTC",
+    );
   });
 
   it("skips the notice when the request can't be re-read", async () => {

@@ -2,8 +2,8 @@
 
 import { useMutation } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { ArrowLeftRight, Check, X } from "lucide-react";
-import { use } from "react";
+import { ArrowLeftRight, Check, Plus, X } from "lucide-react";
+import { use, useState } from "react";
 import { toast } from "sonner";
 import {
   approveShiftRequestAction,
@@ -20,6 +20,7 @@ import {
 } from "@/lib/shift-request-utils";
 import type { ShiftRequestsView } from "@/lib/shift-requests-dal";
 import type { SerializableResult, ShiftRequestDetail } from "@/lib/types";
+import NewShiftRequestForm from "./NewShiftRequestForm";
 import { Button, Card } from "./ui";
 
 interface ShiftRequestsProps {
@@ -185,10 +186,11 @@ function Section({
 /**
  * Shift swaps and pickups: shifts coworkers have posted, requests waiting
  * for your answer, your own requests, and (for admins) changes to approve.
- * New requests are made through the AI assistant (MCP).
+ * Members start new requests here or through the AI assistant (MCP).
  */
 export default function ShiftRequests({ viewPromise }: ShiftRequestsProps) {
   const result = use(viewPromise);
+  const [creating, setCreating] = useState(false);
   if (!result.ok) {
     return (
       <Card className="p-8 text-center text-red-500">
@@ -205,14 +207,38 @@ export default function ShiftRequests({ viewPromise }: ShiftRequestsProps) {
 
   return (
     <Card className="p-6 sm:p-8">
-      <div className="flex items-center gap-2">
-        <ArrowLeftRight className="h-5 w-5" />
-        <h3 className="font-bold text-xl tracking-tight">Shift swaps</h3>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <ArrowLeftRight className="h-5 w-5" />
+          <h3 className="font-bold text-xl tracking-tight">Shift swaps</h3>
+        </div>
+        <Button
+          aria-expanded={creating}
+          onClick={() => setCreating((open) => !open)}
+          size="sm"
+          variant={creating ? "ghost" : "outline"}
+        >
+          {creating ? (
+            "Close"
+          ) : (
+            <>
+              <Plus className="mr-1 h-4 w-4" />
+              New request
+            </>
+          )}
+        </Button>
       </div>
       <p className="mt-1 text-muted-foreground text-sm">
-        Ask your AI assistant to post, swap or pick up a shift. Changes reach
-        the schedule once a manager approves them.
+        Give away, swap or pick up a shift here or through your AI assistant.
+        Changes reach the schedule once a manager approves them.
       </p>
+      {creating && (
+        <NewShiftRequestForm
+          names={view.names}
+          shifts={view.shifts}
+          userId={view.userId}
+        />
+      )}
       {view.requests.length === 0 ? (
         <p className="py-4 text-muted-foreground text-sm">
           No open swaps or pickups right now.

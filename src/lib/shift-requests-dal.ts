@@ -1,10 +1,14 @@
 import { auth } from "@clerk/nextjs/server";
+import { addDays } from "date-fns";
 import { loadOrgMembers } from "./alerts-runner";
+import { dbGetScheduledShifts } from "./db";
 import { SCHEDULING_FEATURE, SCHEDULING_UPGRADE_REASON } from "./plan-features";
 import {
   type ApprovedShiftRequest,
+  type CreateShiftRequestInput,
   cancelShiftRequest,
   claimShiftRequest,
+  createShiftRequest,
   reviewShiftRequest,
   type ShiftRequestActor,
 } from "./shift-requests";
@@ -24,8 +28,24 @@ import type {
  * shift-requests.ts (shared with MCP); this only works out who is signed in.
  */
 
+/** An upcoming shift a member could offer, swap or ask to take. */
+export type TradeableShift = {
+  id: number;
+  user_id: string;
+  shift_start: Date;
+  shift_end: Date;
+};
+
+/** How far ahead the Schedule page offers shifts for new requests. */
+export const TRADEABLE_SHIFT_DAYS = 28;
+
 export type ShiftRequestsView = {
   requests: ShiftRequestDetail[];
+  /**
+   * Upcoming shifts in the org with no live request on them, for the
+   * new-request form. Only times and owners, no notes.
+   */
+  shifts: TradeableShift[];
   /** Display names by user id, for everyone in the requests. */
   names: Record<string, string>;
   userId: string;
@@ -56,18 +76,33 @@ export async function getShiftRequestsView(): Promise<
   if (!signedIn.ok) return { ok: false, error: { reason: signedIn.reason } };
   const { actor } = signedIn;
   try {
-    const [requests, members] = await Promise.all([
-      dbListShiftRequests(
-        actor.orgId,
-        ACTIVE_SHIFT_REQUEST_STATUSES,
-        new Date(),
-      ),
+    const now = new Date();
+    const [requests, members, scheduled] = await Promise.all([
+      dbListShiftRequests(actor.orgId, ACTIVE_SHIFT_REQUEST_STATUSES, now),
       loadOrgMembers(actor.orgId),
+      dbGetScheduledShifts(
+        actor.orgId,
+        null,
+        now,
+        addDays(now, TRADEABLE_SHIFT_DAYS),
+      ),
     ]);
+    const taken = new Set(
+      requests.flatMap((r) => [r.shift_id, r.swap_shift_id]),
+    );
+    const shifts = scheduled
+      .filter((s) => !taken.has(s.id))
+      .map(({ id, user_id, shift_start, shift_end }) => ({
+        id,
+        user_id,
+        shift_start,
+        shift_end,
+      }));
     return {
       ok: true,
       value: {
         requests,
+        shifts,
         names: Object.fromEntries(members.map((m) => [m.userId, m.name])),
         userId: actor.userId,
         isAdmin: actor.isAdmin,
@@ -115,6 +150,15 @@ async function change<T>(
 }
 
 const itself = (request: ShiftRequest) => request;
+
+/** Offers your shift, asks to swap it, or asks to take a coworker's. */
+export function createShiftRequestDal(input: CreateShiftRequestInput) {
+  return change(
+    "create the request",
+    (actor) => createShiftRequest(actor, input),
+    itself,
+  );
+}
 
 /** Claims an offered shift, or accepts a pickup or swap sent to you. */
 export function claimShiftRequestDal(id: number) {

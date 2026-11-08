@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   cancelShiftRequestAction: vi.fn(),
   approveShiftRequestAction: vi.fn(),
   denyShiftRequestAction: vi.fn(),
+  createShiftRequestAction: vi.fn(),
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
@@ -17,6 +18,7 @@ vi.mock("@/lib/shift-request-actions", () => ({
   cancelShiftRequestAction: mocks.cancelShiftRequestAction,
   approveShiftRequestAction: mocks.approveShiftRequestAction,
   denyShiftRequestAction: mocks.denyShiftRequestAction,
+  createShiftRequestAction: mocks.createShiftRequestAction,
 }));
 vi.mock("@/lib/db", () => ({}));
 vi.mock("@/lib/shift-requests-db", () => ({}));
@@ -60,7 +62,14 @@ function show(view: Partial<ShiftRequestsView>) {
     <ShiftRequests
       viewPromise={resolved({
         ok: true as const,
-        value: { requests: [], names, userId: "ben", isAdmin: false, ...view },
+        value: {
+          requests: [],
+          shifts: [],
+          names,
+          userId: "ben",
+          isAdmin: false,
+          ...view,
+        },
       })}
     />,
   );
@@ -82,7 +91,34 @@ describe("ShiftRequests", () => {
   it("explains how to make a request when there are none", () => {
     show({});
     expect(screen.getByText(/No open swaps or pickups/)).toBeVisible();
-    expect(screen.getByText(/Ask your AI assistant/)).toBeVisible();
+    expect(screen.getByText(/here or through your AI assistant/)).toBeVisible();
+  });
+
+  it("opens and closes the new-request form", () => {
+    show({
+      shifts: [
+        {
+          id: 3,
+          user_id: "ben",
+          shift_start: new Date("2030-01-06T09:00:00Z"),
+          shift_end: new Date("2030-01-06T17:00:00Z"),
+        },
+      ],
+    });
+    expect(
+      screen.queryByRole("form", { name: "New shift request" }),
+    ).toBeNull();
+    const toggle = screen.getByRole("button", { name: /New request/ });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+    expect(
+      screen.getByRole("form", { name: "New shift request" }),
+    ).toBeVisible();
+    expect(screen.getByLabelText("Your shift")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(
+      screen.queryByRole("form", { name: "New shift request" }),
+    ).toBeNull();
   });
 
   it("lets a member claim an offered shift", async () => {
@@ -157,7 +193,10 @@ describe("ShiftRequests", () => {
       requests: [request({ status: "pending_approval", claimed_by: "ben" })],
     });
     expect(screen.getByText("Waiting for approval")).toBeVisible();
-    expect(screen.queryByRole("button")).toBeNull();
+    // Only the card's "New request" button; the row itself has none.
+    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual([
+      "New request",
+    ]);
   });
 
   it("lets an admin approve or deny", async () => {

@@ -1,16 +1,18 @@
 "use server";
 
-import { updateTag } from "next/cache";
+import { refresh, updateTag } from "next/cache";
 import { after } from "next/server";
 import {
   mirrorReassignedShifts,
   notifyShiftRequest,
   type ShiftRequestEvent,
 } from "./shift-request-notify";
+import type { CreateShiftRequestInput } from "./shift-requests";
 import {
   approveShiftRequestDal,
   cancelShiftRequestDal,
   claimShiftRequestDal,
+  createShiftRequestDal,
   denyShiftRequestDal,
   type ShiftRequestChange,
 } from "./shift-requests-dal";
@@ -26,6 +28,8 @@ function respond<T>(
   timezone?: string | null,
 ): ActionResult {
   if (!result.ok) return { success: false, error: result.reason };
+  // Re-render the Schedule page so the card shows the change.
+  refresh();
   const { detail, actorId } = result;
   if (detail) {
     after(() =>
@@ -42,6 +46,18 @@ function respond<T>(
 }
 
 const itself = (request: ShiftRequest) => request;
+
+export async function createShiftRequestAction(
+  input: CreateShiftRequestInput,
+  timezone?: string | null,
+) {
+  return respond(
+    await createShiftRequestDal(input),
+    "created",
+    itself,
+    timezone,
+  );
+}
 
 export async function claimShiftRequestAction(
   id: number,
