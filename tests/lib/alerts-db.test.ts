@@ -198,6 +198,18 @@ describe("push subscriptions", () => {
     ]);
   });
 
+  it("only reassigns another user's endpoint when the keys match", async () => {
+    await primeTables();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    sql.mockResolvedValueOnce([]);
+    await expect(
+      adb.dbSavePushSubscription("u2", sub, "Safari"),
+    ).resolves.toBeNull();
+    expect(textOf(0)).toContain("WHERE push_subscriptions.user_id =");
+    expect(valuesOf(0).slice(-3)).toEqual(["u2", "p", "a"]);
+    expect(console.warn).toHaveBeenCalled();
+  });
+
   it("deletes only the caller's own device, on both channels", async () => {
     await primeTables();
     sql.mockResolvedValueOnce([]).mockResolvedValueOnce([{ id: 1 }]);
@@ -344,9 +356,12 @@ describe("FCM tokens", () => {
       "UA",
     ]);
     expect(textOf(1)).toContain("DELETE FROM push_subscriptions");
-    expect(valuesOf(1)).toEqual([["https://fcm/ep", "https://legacy/ep"]]);
+    expect(valuesOf(1)).toEqual([
+      "u1",
+      ["https://fcm/ep", "https://legacy/ep"],
+    ]);
     expect(textOf(2)).toContain("DELETE FROM fcm_tokens");
-    expect(valuesOf(2)).toEqual(["https://fcm/ep", token]);
+    expect(valuesOf(2)).toEqual(["u1", "https://fcm/ep", token]);
   });
 
   it("saves a token without an endpoint and touches nothing else", async () => {

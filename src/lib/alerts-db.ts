@@ -287,9 +287,22 @@ export async function dbSavePushSubscription(
 			p256dh = ${subscription.keys.p256dh},
 			auth = ${subscription.keys.auth},
 			user_agent = ${userAgent}
+		WHERE push_subscriptions.user_id = ${userId}
+			OR (
+				push_subscriptions.p256dh = ${subscription.keys.p256dh}
+				AND push_subscriptions.auth = ${subscription.keys.auth}
+			)
 		RETURNING *
 	`;
-  return saved as unknown as PushSubscriptionRow;
+  // Another user's endpoint is only moved to the caller when they also hold
+  // that subscription's keys (the same browser, e.g. a shared device). Knowing
+  // the endpoint URL alone isn't enough to redirect someone's alerts.
+  if (!saved) {
+    console.warn(
+      "Refused to reassign a push subscription owned by another user without matching keys",
+    );
+  }
+  return (saved ?? null) as unknown as PushSubscriptionRow | null;
 }
 
 /**
@@ -359,14 +372,18 @@ export async function dbSaveFcmToken(
   );
   if (legacy.length > 0) {
     await sql`
-			DELETE FROM push_subscriptions WHERE endpoint = ANY(${legacy})
+			DELETE FROM push_subscriptions
+			WHERE user_id = ${userId} AND endpoint = ANY(${legacy})
 		`;
   }
-  // A browser subscription maps to one live token: forget older ones.
+  // A browser subscription maps to one live token: forget the caller's
+  // older ones. Caller-supplied endpoints never touch other users' rows.
   if (endpoint) {
     await sql`
 			DELETE FROM fcm_tokens
-			WHERE endpoint = ${endpoint} AND token <> ${input.token}
+			WHERE user_id = ${userId}
+				AND endpoint = ${endpoint}
+				AND token <> ${input.token}
 		`;
   }
   return saved as unknown as FcmTokenRow;
