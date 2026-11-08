@@ -19,6 +19,7 @@ import {
   manageTimeOffTool,
 } from "@/mcp/admin-tools";
 import {
+  ANOMALIES_APP,
   appToolMeta,
   HOURS_REPORT_APP,
   registerClockOutApps,
@@ -550,6 +551,7 @@ export function registerClockOutTools(server: McpServer) {
         "Admin-only ('org:admin') read-only audit of the organization's time entries between start_date and end_date (one member or everyone). Flags missed clock-outs (including shifts closed by the automatic clock-out), unusually long shifts, overlapping entries, missed or short meal breaks, punches far outside every work site's geofence, and entries entered or edited after the fact. Each finding has a type, severity, employee, entry_ids, date, description, and a suggested_fix that, when not null, is the exact input object for update_time_entry. Thresholds are optional parameters. Never applies fixes itself: show the findings and only call update_time_entry with a suggested_fix after the admin confirms it.",
       inputSchema: portable(auditTimesheetsInputSchema),
       annotations: { readOnlyHint: true, openWorldHint: false },
+      _meta: appToolMeta(ANOMALIES_APP),
     },
     (args, ctx) =>
       run(server, ctx.http?.authInfo, (caller) =>

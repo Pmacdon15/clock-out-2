@@ -107,8 +107,9 @@ Time Off (manage_time_off):
 - When filing time off from calendar events (e.g. Google Calendar), confirm the list with the user first, and pass external_ref as 'google-calendar:<calendar id>:<event id>' for each one. Status "already_imported" means that event was filed before, so nothing new was created; it is not an error.
 - Needs a plan with Time Off; if it returns status "time_off_not_enabled", tell the user their organization's plan needs the Time Off feature.
 
-Interactive Timecard & Hours Report (MCP Apps):
-- In chat apps that support MCP Apps (or the ChatGPT Apps SDK), get_weekly_timecard shows an interactive timecard grid and run_hours_report shows an hours chart and table right in the chat. Both tools still return the same text and JSON, so keep summarizing the key totals briefly; don't repeat every shift when the app is shown.
+Interactive Timecard, Hours Report & Timesheet Anomalies (MCP Apps):
+- In chat apps that support MCP Apps (or the ChatGPT Apps SDK), get_weekly_timecard shows an interactive timecard grid, run_hours_report shows an hours chart and table, and audit_timesheets shows a timesheet anomalies card (findings by severity and type, the checks that ran, and each suggested fix) right in the chat. These tools still return the same text and JSON, so keep summarizing the key totals or findings briefly; don't repeat every shift or finding when the app is shown.
+- In the anomalies card, an admin can apply a finding's suggested_fix (it calls update_time_entry) only after confirming it in the card; the card then re-runs audit_timesheets for the same period to show what is left.
 - In the app, admins can edit a shift's times or skip_lunch flag (it calls update_time_entry) and approve or deny pending time off in the period (it calls manage_time_off). Members only see their own hours, with no edit or approve buttons. The server applies the same role checks to these calls as to yours.
 
 Overtime, Alerts & Other Settings (admins):

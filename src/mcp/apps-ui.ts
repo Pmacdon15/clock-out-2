@@ -3,15 +3,15 @@
  * Apps SDK). Each page is fully self-contained: inline CSS and JS, no network
  * requests, nothing loaded from outside. The page talks only to the host it is
  * embedded in, and every change it makes goes through the host as an ordinary
- * MCP `tools/call` (update_time_entry, manage_time_off, ...), so the server's
- * own sign-in and role checks decide what is allowed, exactly as when the
- * model calls those tools.
+ * MCP `tools/call` (update_time_entry, manage_time_off, audit_timesheets, ...),
+ * so the server's own sign-in and role checks decide what is allowed, exactly
+ * as when the model calls those tools.
  *
  * The client script below is plain ES2019 kept in a string; it must not use
  * template literals (backticks), since it lives inside one.
  */
 
-export type ClockOutView = "timecard" | "hours";
+export type ClockOutView = "timecard" | "hours" | "anomalies";
 
 const STYLES = `
 :root {
@@ -28,6 +28,9 @@ const STYLES = `
   --co-bar-off: #10b981;
   --co-danger: #b42318;
   --co-ok: #067647;
+  --co-sev-high: #b42318;
+  --co-sev-medium: #b54708;
+  --co-sev-low: #475467;
   --co-radius: 10px;
   --co-font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
@@ -36,12 +39,14 @@ const STYLES = `
     --co-bg: #16181b; --co-surface: #1f2226; --co-border: #2e3238;
     --co-text: #eceef1; --co-muted: #9aa4af; --co-accent: #60a5fa;
     --co-accent-text: #0b1220; --co-bar: #60a5fa; --co-danger: #f97066; --co-ok: #47cd89;
+    --co-sev-high: #f97066; --co-sev-medium: #fdb022; --co-sev-low: #98a2b3;
   }
 }
 :root[data-theme="dark"] {
   --co-bg: #16181b; --co-surface: #1f2226; --co-border: #2e3238;
   --co-text: #eceef1; --co-muted: #9aa4af; --co-accent: #60a5fa;
   --co-accent-text: #0b1220; --co-bar: #60a5fa; --co-danger: #f97066; --co-ok: #47cd89;
+  --co-sev-high: #f97066; --co-sev-medium: #fdb022; --co-sev-low: #98a2b3;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
@@ -96,15 +101,35 @@ label.inline { display: inline-flex; align-items: center; gap: 4px; font-size: 1
 .legend { display: flex; gap: 12px; font-size: 12px; color: var(--co-muted); margin-top: 6px; }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
 .empty-state { padding: 24px 0; text-align: center; color: var(--co-muted); }
+.sev { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; border: 1px solid currentColor; text-transform: capitalize; }
+.sev.high { color: var(--co-sev-high); }
+.sev.medium { color: var(--co-sev-medium); }
+.sev.low { color: var(--co-sev-low); }
+.tile.high b { color: var(--co-sev-high); }
+.tile.medium b { color: var(--co-sev-medium); }
+.tile.low b { color: var(--co-sev-low); }
+.filters { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 12px; }
+.filters button.on { border-color: var(--co-accent); color: var(--co-accent); }
+select { font: inherit; font-size: 13px; padding: 3px 6px; border-radius: 6px; border: 1px solid var(--co-border); background: var(--co-bg); color: inherit; }
+.finding { margin-top: 8px; border: 1px solid var(--co-border); border-radius: var(--co-radius); padding: 10px 12px; }
+.finding .top { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.finding .desc { margin-top: 6px; }
+.finding .note { margin-top: 4px; font-size: 12.5px; color: var(--co-muted); }
+.finding .fix { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+.confirm { width: 100%; margin-top: 4px; padding: 8px 10px; border-radius: 8px; background: var(--co-surface); border: 1px solid var(--co-border); }
+.confirm ul { margin: 4px 0 8px; padding-left: 18px; }
+.check { display: flex; flex-wrap: wrap; gap: 8px; padding: 5px 0; border-bottom: 1px dashed var(--co-border); }
+.check:last-child { border-bottom: 0; }
+.check .t { min-width: 170px; }
 `;
 
 const SCRIPT = `
 (function () {
   "use strict";
   var VIEW = document.documentElement.getAttribute("data-view");
-  var SOURCE_TOOL = VIEW === "hours" ? "run_hours_report" : "get_weekly_timecard";
+  var SOURCE_TOOL = VIEW === "hours" ? "run_hours_report" : VIEW === "anomalies" ? "audit_timesheets" : "get_weekly_timecard";
   var root = document.getElementById("app");
-  var state = { data: null, sel: null, editing: null, busy: false, msg: null, pending: null };
+  var state = { data: null, sel: null, editing: null, busy: false, msg: null, pending: null, sev: "all", type: "all", confirming: null };
 
   /* ---------- host bridge: MCP Apps (postMessage JSON-RPC) or OpenAI Apps SDK ---------- */
   var openai = window.openai || null;
@@ -244,23 +269,35 @@ const SCRIPT = `
     if (!data || typeof data !== "object") return;
     state.data = data;
     state.editing = null;
+    state.confirming = null;
     render();
-    if (isAdmin() && data.period && state.pending === null) loadPending();
+    if (VIEW !== "anomalies" && isAdmin() && data.period && state.pending === null) loadPending();
   }
   function showMessage(text, isErr) { state.msg = { text: text, err: Boolean(isErr) }; render(); }
 
   /* ---------- actions (all through the host -> MCP tools/call) ---------- */
-  function refresh() {
-    var d = state.data;
-    if (!d || !d.period) return Promise.resolve();
+  function refreshArgs(d) {
     var args = Object.assign({}, orgArg(), {
       start_date: d.period.start_date,
       end_date: d.period.end_date,
       timezone: d.period.timezone
     });
+    if (VIEW === "anomalies") {
+      // Re-run the same audit: same member, checks and thresholds.
+      args.member = d.member && d.member.user_id ? d.member.user_id : "all";
+      if (d.requested_checks && d.requested_checks.length) args.checks = d.requested_checks;
+      var t = d.thresholds || {};
+      THRESHOLD_KEYS.forEach(function (k) { if (typeof t[k] === "number") args[k] = t[k]; });
+      return args;
+    }
     var list = people(d);
     args.member = d.scope === "member" && list.length === 1 ? list[0].user_id : "all";
-    return callTool(SOURCE_TOOL, args).then(function (res) {
+    return args;
+  }
+  function refresh() {
+    var d = state.data;
+    if (!d || !d.period) return Promise.resolve();
+    return callTool(SOURCE_TOOL, refreshArgs(d)).then(function (res) {
       if (res && res.structuredContent && !res.isError) { state.data = res.structuredContent; }
     });
   }
@@ -272,8 +309,9 @@ const SCRIPT = `
     callTool(name, Object.assign({}, orgArg(), args)).then(function (res) {
       if (res && res.isError) throw new Error(resultText(res) || "Clock Out refused the change.");
       state.editing = null;
+      state.confirming = null;
       state.msg = { text: resultText(res) || okText, err: false };
-      return Promise.all([refresh(), isAdmin() ? loadPending() : null]);
+      return Promise.all([refresh(), VIEW !== "anomalies" && isAdmin() ? loadPending() : null]);
     }).catch(function (err) {
       state.msg = { text: (err && err.message) || "Something went wrong.", err: true };
     }).then(function () { state.busy = false; render(); });
@@ -307,6 +345,148 @@ const SCRIPT = `
       state.pending = reqs.filter(function (r) { return r.start_date <= end && ids[r.user_id]; });
       render();
     }).catch(function () { state.pending = []; render(); });
+  }
+
+  /* ---------- the timesheet anomalies card (audit_timesheets) ---------- */
+  var THRESHOLD_KEYS = ["long_shift_hours", "missed_clock_out_hours", "meal_break_after_hours", "meal_break_min_minutes", "max_distance_meters", "edit_grace_minutes"];
+  var SEVERITIES = ["high", "medium", "low"];
+  var TYPE_LABELS = {
+    missed_clock_out: "Missed clock-out",
+    long_shift: "Long shift",
+    overlapping_entries: "Overlapping entries",
+    missed_meal_break: "Missed meal break",
+    punch_far_from_site: "Punch far from site",
+    edited_after_the_fact: "Edited after the fact"
+  };
+  function typeLabel(t) { return TYPE_LABELS[t] || String(t || "").replace(/_/g, " "); }
+  function findingKey(f) { return f.type + ":" + (f.entry_ids || []).join(","); }
+  function sevRank(s) { var i = SEVERITIES.indexOf(s); return i < 0 ? 9 : i; }
+  function findings(d) { return (d && d.findings) || []; }
+  function auditCounts(d) {
+    var c = (d.counts && d.counts.by_severity) || {};
+    var out = {};
+    SEVERITIES.forEach(function (s) {
+      out[s] = typeof c[s] === "number" ? c[s] : findings(d).filter(function (f) { return f.severity === s; }).length;
+    });
+    return out;
+  }
+  function fixLines(fix) {
+    var lines = [];
+    if (fix.clock_in) lines.push("Clock in: " + fix.clock_in);
+    if (fix.clock_out) lines.push("Clock out: " + fix.clock_out);
+    if (typeof fix.skip_lunch === "boolean") lines.push(fix.skip_lunch ? "Mark as skipped lunch (no lunch deduction)" : "Clear the skipped-lunch flag (lunch deduction applies)");
+    if (fix.timezone) lines.push("Timezone: " + fix.timezone);
+    return lines;
+  }
+  function anomaliesHeader(d) {
+    var title = "Timesheet anomalies" + (d.member && d.member.name ? " · " + d.member.name : "");
+    var sub = [d.organization && d.organization.name, d.period && d.period.label, d.period && d.period.timezone].filter(Boolean).join(" · ");
+    var counts = auditCounts(d);
+    var total = d.counts && typeof d.counts.total === "number" ? d.counts.total : findings(d).length;
+    var items = [
+      h("div", { class: "tile" }, [h("b", null, [String(total)]), h("span", null, [total === 1 ? "Finding" : "Findings"])]),
+      h("div", { class: "tile" }, [h("b", null, [String(d.entries_audited || 0)]), h("span", null, ["Entries audited"])])
+    ].concat(SEVERITIES.map(function (s) {
+      return h("div", { class: "tile " + s }, [h("b", null, [String(counts[s])]), h("span", null, [s.charAt(0).toUpperCase() + s.slice(1)])]);
+    }));
+    return h("div", null, [h("h1", null, [title]), h("div", { class: "sub" }, [sub]), h("div", { class: "tiles" }, items)]);
+  }
+  function anomaliesFilters(d) {
+    var list = findings(d);
+    var counts = auditCounts(d);
+    var sevButtons = ["all"].concat(SEVERITIES).map(function (s) {
+      var n = s === "all" ? list.length : counts[s];
+      return h("button", {
+        class: state.sev === s ? "on" : null,
+        "aria-pressed": state.sev === s ? "true" : "false",
+        onclick: function () { state.sev = s; render(); }
+      }, [(s === "all" ? "All" : s.charAt(0).toUpperCase() + s.slice(1)) + " (" + n + ")"]);
+    });
+    var byType = {};
+    list.forEach(function (f) { byType[f.type] = (byType[f.type] || 0) + 1; });
+    var select = h("select", {
+      "aria-label": "Filter by type",
+      onchange: function (e) { state.type = e.target.value; render(); }
+    }, [h("option", { value: "all" }, ["All types"])].concat(Object.keys(byType).map(function (t) {
+      return h("option", { value: t }, [typeLabel(t) + " (" + byType[t] + ")"]);
+    })));
+    select.value = byType[state.type] ? state.type : "all";
+    return h("div", { class: "filters" }, sevButtons.concat([select]));
+  }
+  function findingRow(f) {
+    var key = findingKey(f);
+    var confirming = state.confirming === key;
+    var ids = (f.entry_ids || []).map(function (id) { return "#" + id; }).join(", ");
+    var node = h("div", { class: "finding" }, [
+      h("div", { class: "top" }, [
+        h("span", { class: "sev " + f.severity }, [f.severity]),
+        h("b", null, [typeLabel(f.type)]),
+        h("span", null, [(f.employee && f.employee.name) || "Unknown member"]),
+        h("span", { class: "muted" }, [f.date]),
+        ids ? h("span", { class: "muted" }, [(f.entry_ids.length === 1 ? "Entry " : "Entries ") + ids]) : null
+      ]),
+      h("div", { class: "desc" }, [f.description]),
+      f.fix_note ? h("div", { class: "note" }, [f.fix_note]) : null
+    ]);
+    if (!f.suggested_fix) return node;
+    var fixBox = h("div", { class: "fix" });
+    if (!confirming) {
+      fixBox.appendChild(h("button", {
+        disabled: state.busy,
+        onclick: function () { state.confirming = key; state.msg = null; render(); }
+      }, ["Apply fix…"]));
+    } else {
+      fixBox.appendChild(h("div", { class: "confirm", role: "group", "aria-label": "Confirm fix" }, [
+        h("div", null, ["Update entry #" + f.suggested_fix.entry_id + " for " + ((f.employee && f.employee.name) || "this member") + ":"]),
+        h("ul", null, fixLines(f.suggested_fix).map(function (l) { return h("li", null, [l]); })),
+        h("div", { class: "fix" }, [
+          h("button", { onclick: function () { state.confirming = null; render(); } }, ["Cancel"]),
+          h("button", {
+            class: "primary",
+            disabled: state.busy,
+            onclick: function () { run("update_time_entry", f.suggested_fix, "Fix applied."); }
+          }, ["Confirm fix"])
+        ])
+      ]));
+    }
+    node.appendChild(fixBox);
+    return node;
+  }
+  function checksSection(d) {
+    var checks = d.checks || [];
+    if (!checks.length) return null;
+    return h("div", null, [
+      h("h2", null, ["Checks"]),
+      h("div", { class: "panel" }, checks.map(function (c) {
+        return h("div", { class: "check" }, [
+          h("span", { class: "t" }, [typeLabel(c.type)]),
+          h("span", { class: "badge" + (c.status === "ran" ? " live" : "") }, [c.status === "ran" ? "ran" : "skipped"]),
+          c.note ? h("span", { class: "muted grow" }, [c.note]) : null
+        ]);
+      }))
+    ]);
+  }
+  function renderAnomalies(d) {
+    var list = findings(d);
+    var nodes = [anomaliesHeader(d)];
+    if (!list.length) {
+      nodes.push(h("div", { class: "empty-state" }, [
+        h("b", null, ["No issues found"]),
+        h("div", null, [(d.period && d.period.label ? d.period.label + " · " : "") + (d.entries_audited || 0) + " " + (d.entries_audited === 1 ? "entry" : "entries") + " audited"])
+      ]));
+    } else {
+      nodes.push(anomaliesFilters(d));
+      var shown = list.filter(function (f) {
+        return (state.sev === "all" || f.severity === state.sev) && (state.type === "all" || f.type === state.type);
+      }).map(function (f, i) { return { f: f, i: i }; }).sort(function (a, b) {
+        return sevRank(a.f.severity) - sevRank(b.f.severity) || a.i - b.i;
+      });
+      if (shown.length) nodes = nodes.concat(shown.map(function (x) { return findingRow(x.f); }));
+      else nodes.push(h("div", { class: "empty-state" }, ["No findings match these filters."]));
+      nodes.push(h("div", { class: "muted", style: "font-size:12px;margin-top:8px" }, ["Fixes are applied to Clock Out only after you confirm them, then the audit runs again."]));
+    }
+    nodes.push(checksSection(d));
+    return nodes;
   }
 
   /* ---------- rendering ---------- */
@@ -472,7 +652,8 @@ const SCRIPT = `
   function render() {
     var d = state.data;
     var nodes;
-    if (!d) nodes = [h("div", { class: "empty-state" }, ["Loading hours…"])];
+    if (!d) nodes = [h("div", { class: "empty-state" }, [VIEW === "anomalies" ? "Auditing timesheets…" : "Loading hours…"])];
+    else if (VIEW === "anomalies") nodes = d.period && Array.isArray(d.findings) ? renderAnomalies(d) : [h("div", { class: "empty-state" }, ["No audit results to show for this request."])];
     else if (!d.period || !people(d).length) nodes = [h("div", { class: "empty-state" }, ["No hours to show for this request."])];
     else nodes = [
       header(d), tiles(d),
@@ -496,6 +677,7 @@ const SCRIPT = `
 const TITLES: Record<ClockOutView, string> = {
   timecard: "Clock Out timecard",
   hours: "Clock Out hours report",
+  anomalies: "Clock Out timesheet anomalies",
 };
 
 /** The complete, self-contained HTML page for one of Clock Out's in-chat apps. */
