@@ -1296,7 +1296,9 @@ export async function resolveMcpLocation(
     let siteName: string | null = matchedSite?.name ?? null;
     let address: string | null = input.address ?? matchedSite?.address ?? null;
 
-    if (input.site) {
+    // When clock-in is restricted, the matched geofence decides the site
+    // label; a caller-supplied name must not relabel the punch.
+    if (input.site && !(enforceGeofence && isRestricted(settings))) {
       const trimmedSite = input.site.trim();
       const matched = sites.find(
         (s) => s.name.toLowerCase() === trimmedSite.toLowerCase(),
@@ -1327,6 +1329,18 @@ export async function resolveMcpLocation(
         siteName,
         address: address ?? null,
       },
+    };
+  }
+
+  // A site name or street address is not proof of where the caller is: it
+  // resolves to the site's (or the geocoded) coordinates, so it would always
+  // pass the geofence. When clock-in is restricted, only device coordinates
+  // can satisfy the check, the same as the web app.
+  if (enforceGeofence && isRestricted(settings)) {
+    return {
+      allowed: false,
+      status: "location_required",
+      reason: `${orgName} only allows clock-in at approved work sites, so your device's current latitude and longitude are required. A site name or street address can't be used to verify where you are.`,
     };
   }
 

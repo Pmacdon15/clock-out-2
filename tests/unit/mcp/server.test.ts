@@ -2467,6 +2467,86 @@ describe("Clerk pagination in MCP tools", () => {
       expect(mockDbClockInAt).not.toHaveBeenCalled();
     });
 
+    it.each([
+      { site: "ware" },
+      { site: "Warehouse" },
+      { address: "1 Warehouse Rd, Ottawa, ON" },
+    ])(
+      "refuses a site name or address as proof of location when clock-in is restricted (%o)",
+      async (locationInput) => {
+        mockDbGetLocationSettings.mockResolvedValueOnce({
+          org_id: "org_1",
+          capture_mode: "required",
+          restrict_clock_in: true,
+        });
+        mockDbGetSites.mockResolvedValueOnce([
+          {
+            id: 1,
+            org_id: "org_1",
+            name: "Warehouse",
+            latitude: 45.4215,
+            longitude: -75.6972,
+            radius_meters: 100,
+            address: "1 Warehouse Rd, Ottawa, ON",
+          },
+        ]);
+
+        const res = await clockInTool(caller, {
+          ...locationInput,
+          timezone: "America/Edmonton",
+        });
+
+        expect(res.isError).toBe(true);
+        expect(res.data.status).toBe("location_required");
+        expect(res.summary).toContain("latitude and longitude are required");
+        expect(mockDbClockInAt).not.toHaveBeenCalled();
+      },
+    );
+
+    it("keeps the geofenced site name when restricted coordinates come with a different site label", async () => {
+      mockDbGetLocationSettings.mockResolvedValueOnce({
+        org_id: "org_1",
+        capture_mode: "required",
+        restrict_clock_in: true,
+      });
+      mockDbGetSites.mockResolvedValueOnce([
+        {
+          id: 1,
+          org_id: "org_1",
+          name: "Warehouse",
+          latitude: 45.4215,
+          longitude: -75.6972,
+          radius_meters: 100,
+          address: "1 Warehouse Rd, Ottawa, ON",
+        },
+      ]);
+      mockDbClockInAt.mockResolvedValueOnce({
+        id: 110,
+        user_id: "user_admin",
+        org_id: "org_1",
+        clock_in: new Date("2026-10-30T14:00:00.000Z"),
+        clock_out: null,
+        created_at: new Date(),
+        updated_at: new Date(),
+      });
+
+      const res = await clockInTool(caller, {
+        site: "Head Office",
+        latitude: 45.4215,
+        longitude: -75.6972,
+        accuracy: 5,
+        timezone: "America/Edmonton",
+      });
+
+      expect(res.isError).toBeUndefined();
+      expect(mockDbClockInAt).toHaveBeenCalledWith(
+        "user_admin",
+        "org_1",
+        undefined,
+        expect.objectContaining({ siteName: "Warehouse", accuracy: 5 }),
+      );
+    });
+
     it("returns organization location settings and sites via getLocationSettingsTool", async () => {
       mockDbGetLocationSettings.mockResolvedValueOnce({
         org_id: "org_1",
