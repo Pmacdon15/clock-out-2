@@ -21,6 +21,10 @@ let rl: RateLimitModule;
 
 const limit = { name: "test", limit: 2, windowSeconds: 60 };
 
+/** The SQL text and values of the nth query. */
+const call = (n: number) => (sql.mock.calls[n] ?? []) as unknown[];
+const textOf = (n: number) => ((call(n)[0] ?? []) as string[]).join("?");
+
 beforeAll(async () => {
   vi.stubEnv("DATABASE_URL", "postgres://test");
   rl = await import("@/lib/rate-limit");
@@ -47,12 +51,10 @@ describe("checkRateLimit", () => {
       ok: true,
       remaining: 1,
     });
-    const create = (sql.mock.calls[0]?.[0] as string[]).join("?");
-    expect(create).toContain("CREATE TABLE IF NOT EXISTS rate_limits");
-    const upsert = sql.mock.calls[1];
-    expect((upsert?.[0] as string[]).join("?")).toContain("ON CONFLICT (key)");
-    expect(upsert?.slice(1, 2)).toEqual(["test:user_1"]);
-    expect(upsert).toContain(60);
+    expect(textOf(0)).toContain("CREATE TABLE IF NOT EXISTS rate_limits");
+    expect(textOf(1)).toContain("ON CONFLICT (key)");
+    expect(call(1).slice(1, 2)).toEqual(["test:user_1"]);
+    expect(call(1)).toContain(60);
 
     sql.mockResolvedValueOnce([
       { count: 2, window_start: "2026-11-08T12:00:00Z" },
@@ -118,9 +120,7 @@ describe("checkRateLimit", () => {
         { count: 1, window_start: "2026-11-08T12:00:00Z" },
       ]);
     await fresh.checkRateLimit(limit, "user_1");
-    expect((sql.mock.calls[1]?.[0] as string[]).join("?")).toContain(
-      "CREATE TABLE IF NOT EXISTS rate_limits",
-    );
+    expect(textOf(1)).toContain("CREATE TABLE IF NOT EXISTS rate_limits");
   });
 });
 
