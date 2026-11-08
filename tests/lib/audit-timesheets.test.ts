@@ -712,6 +712,90 @@ describe("punch_far_from_site", () => {
   });
 });
 
+describe("suspicious_location", () => {
+  const depot: SiteData = {
+    id: 1,
+    org_id: "org_1",
+    name: "Depot",
+    latitude: 51.0,
+    longitude: -114.0,
+    radius_meters: 150,
+  };
+  const sites = [depot];
+
+  it("flags a punch exactly on a site's stored point with perfect accuracy as medium", () => {
+    const e = entry({
+      clock_in_latitude: 51.0,
+      clock_in_longitude: -114.0,
+      clock_in_accuracy_m: 0,
+    });
+    const [f] = only([e], "suspicious_location", { sites });
+    expect(f).toMatchObject({
+      severity: "medium",
+      suggested_fix: null,
+      details: {
+        punch: "clock_in",
+        exact_site: "Depot",
+        accuracy_m: 0,
+      },
+    });
+    expect(f?.description).toContain("exactly Depot's stored coordinates");
+    expect(f?.description).toContain("0 m accuracy");
+  });
+
+  it("flags exact site coordinates alone, or implausible accuracy alone, as low", () => {
+    const exact = entry({
+      clock_out_latitude: "51.00000001" as unknown as number,
+      clock_out_longitude: -114.0,
+      clock_out_accuracy_m: 12,
+    });
+    const precise = entry({
+      clock_in_latitude: 51.0004,
+      clock_in_longitude: -114.0002,
+      clock_in_accuracy_m: 1,
+    });
+    const findings = only([exact, precise], "suspicious_location", { sites });
+    expect(findings.map((f) => f.severity)).toEqual(["low", "low"]);
+    const out = findings.find((f) => f.details.punch === "clock_out");
+    expect(out?.description).toMatch(/^Clock-out location/);
+    const preciseFinding = findings.find((f) => f.details.punch === "clock_in");
+    expect(preciseFinding?.description).toContain("1 m accuracy");
+    expect(preciseFinding?.details.exact_site).toBeNull();
+  });
+
+  it("checks accuracy even without work sites", () => {
+    const e = entry({
+      clock_in_latitude: 40,
+      clock_in_longitude: -100,
+      clock_in_accuracy_m: 0.5,
+    });
+    expect(only([e], "suspicious_location")).toHaveLength(1);
+  });
+
+  it("ignores ordinary device fixes and punches without coordinates", () => {
+    const normal = entry({
+      clock_in_latitude: 51.0003,
+      clock_in_longitude: -114.0001,
+      clock_in_accuracy_m: 8,
+    });
+    const noAccuracy = entry({
+      clock_in_latitude: 51.0003,
+      clock_in_longitude: -114.0001,
+    });
+    expect(
+      only([normal, noAccuracy, entry()], "suspicious_location", { sites }),
+    ).toEqual([]);
+  });
+
+  it("explains its limits in the checks list", () => {
+    const status = run([], { sites }).checks.find(
+      (c) => c.type === "suspicious_location",
+    );
+    expect(status).toMatchObject({ status: "ran" });
+    expect(status?.note).toContain("isn't tamper-proof");
+  });
+});
+
 describe("edited_after_the_fact", () => {
   it("flags an entry added manually after the shift", () => {
     const e = entry({

@@ -357,6 +357,7 @@ const SCRIPT = `
     overlapping_entries: "Overlapping entries",
     missed_meal_break: "Missed meal break",
     punch_far_from_site: "Punch far from site",
+    suspicious_location: "Suspicious location",
     edited_after_the_fact: "Edited after the fact",
     late_arrival: "Late arrival",
     no_show: "No-show"

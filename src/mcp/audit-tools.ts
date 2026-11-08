@@ -63,7 +63,7 @@ export const auditTimesheetsInputSchema = z.object({
     .array(z.enum(AUDIT_CHECKS))
     .optional()
     .describe(
-      "Only run these checks: 'missed_clock_out', 'long_shift', 'overlapping_entries', 'missed_meal_break', 'punch_far_from_site', 'edited_after_the_fact', 'late_arrival' (clocked in after a scheduled start), 'no_show' (scheduled shift with no clock-in). Defaults to all of them.",
+      "Only run these checks: 'missed_clock_out', 'long_shift', 'overlapping_entries', 'missed_meal_break', 'punch_far_from_site', 'suspicious_location' (punch exactly at a site's stored coordinates or with implausible accuracy), 'edited_after_the_fact', 'late_arrival' (clocked in after a scheduled start), 'no_show' (scheduled shift with no clock-in). Defaults to all of them.",
     ),
   long_shift_hours: threshold(
     "Flag completed shifts longer than this many hours. Default 12.",
