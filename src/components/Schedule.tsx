@@ -293,20 +293,26 @@ function AddToCalendarLinks({
 function AddAllToGoogleCalendar({ shiftIds }: { shiftIds: number[] }) {
   const { add, pending } = useAddToGoogleCalendar();
   return (
-    <Button
-      className="mb-2 w-full sm:w-auto"
-      disabled={pending}
-      onClick={() => add(shiftIds)}
-      type="button"
-      variant="outline"
-    >
-      {pending ? (
-        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-      ) : (
-        <CalendarPlus className="mr-2 h-4 w-4" />
-      )}
-      {pending ? "Adding…" : "Add all to Google Calendar"}
-    </Button>
+    <div className="mb-2">
+      <Button
+        className="w-full sm:w-auto"
+        disabled={pending}
+        onClick={() => add(shiftIds)}
+        type="button"
+        variant="outline"
+      >
+        {pending ? (
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+        ) : (
+          <CalendarPlus className="mr-2 h-4 w-4" />
+        )}
+        {pending ? "Adding…" : "Add all to Google Calendar"}
+      </Button>
+      <p className="mt-2 text-muted-foreground text-xs">
+        Adds them to your own Google Calendar. After that, new, moved and
+        cancelled shifts update there by themselves.
+      </p>
+    </div>
   );
 }
 
@@ -704,11 +710,12 @@ export default function Schedule({
           />
         )}
         {renderList(upcoming, "No upcoming shifts.", true)}
+        {calendarFeedPromise && (
+          <div className="mt-4 border-zinc-100 border-t pt-4 dark:border-zinc-800">
+            <CalendarSubscribe feedPathPromise={calendarFeedPromise} />
+          </div>
+        )}
       </Card>
-
-      {calendarFeedPromise && (
-        <CalendarSubscribe feedPathPromise={calendarFeedPromise} />
-      )}
 
       <Card className="p-6 sm:p-8">
         <h4 className="mb-2 font-bold text-lg">Past two weeks</h4>

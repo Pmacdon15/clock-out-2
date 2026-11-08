@@ -9,6 +9,11 @@ const mocks = vi.hoisted(() => ({
   after: vi.fn((fn: () => unknown) => fn()),
   notifyScheduleChange: vi.fn(),
   syncShiftReminderJob: vi.fn(() => Promise.resolve(true)),
+  mirrorShiftToGoogleCalendar: vi.fn(() => Promise.resolve()),
+}));
+
+vi.mock("@/lib/google-calendar", () => ({
+  mirrorShiftToGoogleCalendar: mocks.mirrorShiftToGoogleCalendar,
 }));
 
 vi.mock("next/server", () => ({ after: mocks.after }));
@@ -54,7 +59,8 @@ describe("createScheduledShiftAction", () => {
     ).resolves.toEqual({ success: true, data: shift });
     // The member is told after the response, in the admin's zone as a fallback.
     // The member is told, and the shift's reminder job is scheduled.
-    expect(mocks.after).toHaveBeenCalledTimes(2);
+    // …and their Google Calendar follows, if they turned it on.
+    expect(mocks.after).toHaveBeenCalledTimes(3);
     expect(mocks.notifyScheduleChange).toHaveBeenCalledWith(
       "added",
       shift,
@@ -163,5 +169,46 @@ describe("shift reminder scheduling", () => {
         boom,
       ),
     );
+  });
+});
+
+describe("Google Calendar mirroring", () => {
+  it("mirrors each shift change to the member's Google Calendar", async () => {
+    mocks.createScheduledShiftDal.mockResolvedValue(ok(shift));
+    mocks.updateScheduledShiftDal.mockResolvedValue(ok(shift));
+    mocks.deleteScheduledShiftDal.mockResolvedValue(ok(shift));
+    mocks.mirrorShiftToGoogleCalendar.mockClear();
+    await createScheduledShiftAction(
+      "user_1",
+      "2026-01-05T09:00:00Z",
+      "2026-01-05T17:00:00Z",
+    );
+    await updateScheduledShiftAction(
+      1,
+      "2026-01-05T09:00:00Z",
+      "2026-01-05T17:00:00Z",
+    );
+    await deleteScheduledShiftAction(1);
+    expect(mocks.mirrorShiftToGoogleCalendar.mock.calls).toEqual([
+      ["added", shift],
+      ["changed", shift],
+      ["removed", shift],
+    ]);
+  });
+
+  it("logs a failed mirror instead of failing the change", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.deleteScheduledShiftDal.mockResolvedValue(ok(shift));
+    mocks.mirrorShiftToGoogleCalendar.mockRejectedValueOnce(new Error("down"));
+    await expect(deleteScheduledShiftAction(1)).resolves.toEqual({
+      success: true,
+    });
+    await vi.waitFor(() =>
+      expect(error).toHaveBeenCalledWith(
+        "[Google Calendar] Failed to update a shift event:",
+        expect.any(Error),
+      ),
+    );
+    error.mockRestore();
   });
 });
