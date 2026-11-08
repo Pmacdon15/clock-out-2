@@ -11,7 +11,7 @@
  * template literals (backticks), since it lives inside one.
  */
 
-export type ClockOutView = "timecard" | "hours" | "anomalies";
+export type ClockOutView = "timecard" | "hours" | "anomalies" | "clock";
 
 const STYLES = `
 :root {
@@ -128,7 +128,7 @@ const SCRIPT = `
 (function () {
   "use strict";
   var VIEW = document.documentElement.getAttribute("data-view");
-  var SOURCE_TOOL = VIEW === "hours" ? "run_hours_report" : VIEW === "anomalies" ? "audit_timesheets" : "get_weekly_timecard";
+  var SOURCE_TOOL = VIEW === "hours" ? "run_hours_report" : VIEW === "anomalies" ? "audit_timesheets" : VIEW === "clock" ? "clock_in" : "get_weekly_timecard";
   var root = document.getElementById("app");
   var state = { data: null, sel: null, editing: null, busy: false, msg: null, pending: null, sev: "all", type: "all", confirming: null };
 
@@ -183,7 +183,7 @@ const SCRIPT = `
     }
     if (m.method === "ui/notifications/tool-result") {
       var p = m.params || {};
-      if (p.structuredContent) setData(p.structuredContent);
+      if (p.structuredContent) setData(p.structuredContent, p.isError);
       else if (p.isError) showMessage(resultText(p) || "The tool returned an error.", true);
     } else if (m.method === "ui/notifications/host-context-changed") {
       applyHostContext(m.params);
@@ -266,8 +266,9 @@ const SCRIPT = `
   function isAdmin() { return Boolean(state.data && state.data.viewer && state.data.viewer.is_admin); }
   function orgArg() { var o = state.data && state.data.organization; return o && o.org_id ? { org_id: o.org_id } : {}; }
 
-  function setData(data) {
+  function setData(data, isErr) {
     if (!data || typeof data !== "object") return;
+    if (VIEW === "clock") { state.data = data; state.msg = null; state.clockErr = Boolean(isErr || (data.status && data.status !== "clocked_in")); render(); return; }
     state.data = data;
     state.editing = null;
     state.confirming = null;
@@ -653,9 +654,70 @@ const SCRIPT = `
       }))
     ]);
   }
+  /* ---------- clock-in view: device location for restricted orgs ---------- */
+  function shareLocation() {
+    var d = state.data;
+    var retry = d && d.device_location_retry;
+    if (!retry || state.busy) return;
+    if (!navigator.geolocation || typeof navigator.geolocation.getCurrentPosition !== "function") {
+      showMessage("This chat app can't share your location. Clock in from the Clock Out app instead.", true);
+      return;
+    }
+    state.busy = true;
+    showMessage("Getting your location…", false);
+    navigator.geolocation.getCurrentPosition(function (pos) {
+      var args = Object.assign({}, retry.arguments, {
+        latitude: pos.coords.latitude,
+        longitude: pos.coords.longitude,
+        accuracy: pos.coords.accuracy
+      });
+      showMessage("Clocking in…", false);
+      callTool(retry.tool || "clock_in", args).then(function (res) {
+        state.busy = false;
+        var out = res && (res.structuredContent || res.structured_content);
+        if (out) setData(out, res.isError);
+        else showMessage(resultText(res) || "Clock in finished.", Boolean(res && res.isError));
+      }).catch(function (e) {
+        state.busy = false;
+        showMessage((e && e.message) || "Couldn't clock in.", true);
+      });
+    }, function (err) {
+      state.busy = false;
+      showMessage(err && err.code === 1
+        ? "Location permission was denied. Allow location for this chat app, or clock in from the Clock Out app."
+        : "Couldn't get your location. Try again.", true);
+    }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+  }
+  function renderClock(d) {
+    if (d.status === "clocked_in") {
+      var loc = d.location || {};
+      return [
+        h("h1", null, ["Clocked in"]),
+        h("div", { class: "sub" }, [d.summary || ""]),
+        loc.siteName ? h("div", { class: "tiles" }, [h("div", { class: "tile" }, [h("b", null, [loc.siteName]), h("span", null, [loc.address || "Work site"])])]) : null
+      ];
+    }
+    var canRetry = Boolean(d.device_location_retry);
+    return [
+      h("h1", null, ["Clock in" + (d.member && d.member.name ? " · " + d.member.name : "")]),
+      h("div", { class: "sub" }, [d.reason || "Your location is needed to clock in."]),
+      d.nearest_site ? h("div", { class: "sub" }, ["Nearest site: " + d.nearest_site.name + " (" + Math.round(d.nearest_site.distanceMeters) + " m away)"]) : null,
+      canRetry ? h("div", { class: "fix", style: "margin-top:12px" }, [
+        h("button", { class: "primary", disabled: state.busy, onclick: shareLocation }, [state.busy ? "Working…" : d.status === "geofence_rejected" ? "Try again with my location" : "Share my location"])
+      ]) : null,
+      canRetry ? h("div", { class: "muted", style: "font-size:12px;margin-top:8px" }, ["Your device's location is sent to Clock Out once, to check you're at a work site."]) : null
+    ];
+  }
+
   function render() {
     var d = state.data;
     var nodes;
+    if (VIEW === "clock") {
+      nodes = d ? renderClock(d) : [h("div", { class: "empty-state" }, ["Clocking in…"])];
+      if (state.msg) nodes.push(h("div", { class: "status " + (state.msg.err ? "err" : "ok"), role: "status" }, [state.msg.text]));
+      root.replaceChildren(h("main", null, nodes));
+      return;
+    }
     if (!d) nodes = [h("div", { class: "empty-state" }, [VIEW === "anomalies" ? "Auditing timesheets…" : "Loading hours…"])];
     else if (VIEW === "anomalies") nodes = d.period && Array.isArray(d.findings) ? renderAnomalies(d) : [h("div", { class: "empty-state" }, ["No audit results to show for this request."])];
     else if (!d.period || !people(d).length) nodes = [h("div", { class: "empty-state" }, ["No hours to show for this request."])];
@@ -682,6 +744,7 @@ const TITLES: Record<ClockOutView, string> = {
   timecard: "Clock Out timecard",
   hours: "Clock Out hours report",
   anomalies: "Clock Out timesheet anomalies",
+  clock: "Clock Out clock in",
 };
 
 /** The complete, self-contained HTML page for one of Clock Out's in-chat apps. */

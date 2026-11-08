@@ -21,6 +21,7 @@ import {
 import {
   ANOMALIES_APP,
   appToolMeta,
+  CLOCK_IN_APP,
   HOURS_REPORT_APP,
   registerClockOutApps,
   TIMECARD_APP,
@@ -275,8 +276,9 @@ export function registerClockOutTools(server: McpServer) {
     {
       title: "Clock in",
       description:
-        "Starts a live shift for yourself, or (when called by an org admin) clocks in any organization member by name, email, or user_id. If the organization requires location capture, location (site name, street address, or latitude/longitude) must be provided. Rejects the request if the person is already clocked in, if location is required but omitted, if outside an approved site when geofencing is restricted (restricted organizations require the device's real latitude/longitude; a site name or address is not accepted as proof of location), or if a custom clock_in time overlaps with an existing shift, and invalidates the cache immediately.",
+        "Starts a live shift for yourself, or (when called by an org admin) clocks in any organization member by name, email, or user_id. If the organization requires location capture, location (site name, street address, or latitude/longitude) must be provided. Rejects the request if the person is already clocked in, if location is required but omitted, if outside an approved site when geofencing is restricted (restricted organizations require the device's real latitude/longitude; a site name or address is not accepted as proof of location; in chat apps that show the Clock in card, the user taps Share my location and the card sends the device's coordinates), or if a custom clock_in time overlaps with an existing shift, and invalidates the cache immediately.",
       inputSchema: portable(clockInInputSchema),
+      _meta: appToolMeta(CLOCK_IN_APP),
       annotations: {
         readOnlyHint: false,
         destructiveHint: false,
