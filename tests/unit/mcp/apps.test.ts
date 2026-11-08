@@ -900,6 +900,13 @@ describe("MCP Apps: the timesheet anomalies page", () => {
       "0Medium",
       "1Low",
     ]);
+    // Two wide overview tiles, then the three severities: even rows on a phone.
+    expect(doc.querySelector(".tiles")?.className).toBe("tiles audit");
+    expect(
+      [...doc.querySelectorAll(".tile")].map((t) =>
+        t.classList.contains("wide"),
+      ),
+    ).toEqual([true, true, false, false, false]);
     // High severity first, whatever order the server sent.
     const rows = [...doc.querySelectorAll(".finding")];
     expect(rows).toHaveLength(2);

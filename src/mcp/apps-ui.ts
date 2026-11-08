@@ -108,6 +108,13 @@ label.inline { display: inline-flex; align-items: center; gap: 4px; font-size: 1
 .tile.high b { color: var(--co-sev-high); }
 .tile.medium b { color: var(--co-sev-medium); }
 .tile.low b { color: var(--co-sev-low); }
+.tiles.audit { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.tiles.audit .tile { min-width: 0; grid-column: span 2; }
+.tiles.audit .tile.wide { grid-column: span 3; }
+@media (min-width: 560px) {
+  .tiles.audit { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .tiles.audit .tile, .tiles.audit .tile.wide { grid-column: auto; }
+}
 .filters { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 12px; }
 .filters button.on { border-color: var(--co-accent); color: var(--co-accent); }
 select { font: inherit; font-size: 13px; padding: 3px 6px; border-radius: 6px; border: 1px solid var(--co-border); background: var(--co-bg); color: inherit; }
@@ -387,12 +394,12 @@ const SCRIPT = `
     var counts = auditCounts(d);
     var total = d.counts && typeof d.counts.total === "number" ? d.counts.total : findings(d).length;
     var items = [
-      h("div", { class: "tile" }, [h("b", null, [String(total)]), h("span", null, [total === 1 ? "Finding" : "Findings"])]),
-      h("div", { class: "tile" }, [h("b", null, [String(d.entries_audited || 0)]), h("span", null, ["Entries audited"])])
+      h("div", { class: "tile wide" }, [h("b", null, [String(total)]), h("span", null, [total === 1 ? "Finding" : "Findings"])]),
+      h("div", { class: "tile wide" }, [h("b", null, [String(d.entries_audited || 0)]), h("span", null, ["Entries audited"])])
     ].concat(SEVERITIES.map(function (s) {
       return h("div", { class: "tile " + s }, [h("b", null, [String(counts[s])]), h("span", null, [s.charAt(0).toUpperCase() + s.slice(1)])]);
     }));
-    return h("div", null, [h("h1", null, [title]), h("div", { class: "sub" }, [sub]), h("div", { class: "tiles" }, items)]);
+    return h("div", null, [h("h1", null, [title]), h("div", { class: "sub" }, [sub]), h("div", { class: "tiles audit" }, items)]);
   }
   function anomaliesFilters(d) {
     var list = findings(d);
