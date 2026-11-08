@@ -944,6 +944,39 @@ describe("MCP Apps: the timesheet anomalies page", () => {
     );
   });
 
+  it("shows late arrivals and no-shows with their scheduled shift", () => {
+    const noShow = {
+      type: "no_show",
+      severity: "high",
+      employee: { user_id: "user_sam", name: "Sam Lee" },
+      entry_ids: [],
+      scheduled_shift_id: 8,
+      date: "2026-11-05",
+      description:
+        "Sam Lee was scheduled 2026-11-05 09:00–17:00 but never clocked in.",
+      suggested_fix: null,
+      fix_note: "Check whether they had time off.",
+      details: {},
+    };
+    const late = {
+      ...noShow,
+      type: "late_arrival",
+      severity: "low",
+      entry_ids: [11],
+      scheduled_shift_id: 7,
+      description: "Sam Lee clocked in at 09:20.",
+    };
+    const win = mountApp("anomalies", auditData([late, noShow]), vi.fn());
+    const rows = [...win.document.querySelectorAll(".finding")];
+    expect(rows[0]?.textContent).toContain("No-show");
+    expect(rows[0]?.textContent).toContain("Scheduled shift #8");
+    expect(rows[0]?.textContent).not.toContain("Entry");
+    expect(rows[0]?.querySelector("button")).toBeNull();
+    expect(rows[1]?.textContent).toContain("Late arrival");
+    expect(rows[1]?.textContent).toContain("Entry #11");
+    expect(rows[1]?.textContent).toContain("Scheduled shift #7");
+  });
+
   it("shows a clear empty state when nothing was found", () => {
     const win = mountApp("anomalies", auditData([]), vi.fn());
     const doc = win.document;

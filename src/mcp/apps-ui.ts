@@ -348,7 +348,7 @@ const SCRIPT = `
   }
 
   /* ---------- the timesheet anomalies card (audit_timesheets) ---------- */
-  var THRESHOLD_KEYS = ["long_shift_hours", "missed_clock_out_hours", "meal_break_after_hours", "meal_break_min_minutes", "max_distance_meters", "edit_grace_minutes"];
+  var THRESHOLD_KEYS = ["long_shift_hours", "missed_clock_out_hours", "meal_break_after_hours", "meal_break_min_minutes", "max_distance_meters", "edit_grace_minutes", "late_grace_minutes"];
   var SEVERITIES = ["high", "medium", "low"];
   var TYPE_LABELS = {
     missed_clock_out: "Missed clock-out",
@@ -356,7 +356,9 @@ const SCRIPT = `
     overlapping_entries: "Overlapping entries",
     missed_meal_break: "Missed meal break",
     punch_far_from_site: "Punch far from site",
-    edited_after_the_fact: "Edited after the fact"
+    edited_after_the_fact: "Edited after the fact",
+    late_arrival: "Late arrival",
+    no_show: "No-show"
   };
   function typeLabel(t) { return TYPE_LABELS[t] || String(t || "").replace(/_/g, " "); }
   function findingKey(f) { return f.type + ":" + (f.entry_ids || []).join(","); }
@@ -423,7 +425,8 @@ const SCRIPT = `
         h("b", null, [typeLabel(f.type)]),
         h("span", null, [(f.employee && f.employee.name) || "Unknown member"]),
         h("span", { class: "muted" }, [f.date]),
-        ids ? h("span", { class: "muted" }, [(f.entry_ids.length === 1 ? "Entry " : "Entries ") + ids]) : null
+        ids ? h("span", { class: "muted" }, [(f.entry_ids.length === 1 ? "Entry " : "Entries ") + ids]) : null,
+        typeof f.scheduled_shift_id === "number" ? h("span", { class: "muted" }, ["Scheduled shift #" + f.scheduled_shift_id]) : null
       ]),
       h("div", { class: "desc" }, [f.description]),
       f.fix_note ? h("div", { class: "note" }, [f.fix_note]) : null
