@@ -25,6 +25,25 @@ import {
 } from "@/mcp/notification-tools";
 import { portable } from "@/mcp/portable-schema";
 import {
+  approveShiftRequestTool,
+  cancelShiftRequestInputSchema,
+  cancelShiftRequestTool,
+  claimShiftInputSchema,
+  claimShiftTool,
+  denyShiftRequestTool,
+  listOpenShiftsInputSchema,
+  listOpenShiftsTool,
+  listPendingShiftRequestsInputSchema,
+  listPendingShiftRequestsTool,
+  postShiftForPickupInputSchema,
+  postShiftForPickupTool,
+  requestShiftPickupInputSchema,
+  requestShiftPickupTool,
+  requestShiftSwapInputSchema,
+  requestShiftSwapTool,
+  reviewShiftRequestInputSchema,
+} from "@/mcp/shift-request-tools";
+import {
   addTimeEntryInputSchema,
   addTimeEntryTool,
   clockInInputSchema,
@@ -698,6 +717,163 @@ export function registerClockOutTools(server: McpServer) {
     (args, ctx) =>
       run(server, ctx.http?.authInfo, (caller) =>
         manageMemberTool(caller, args),
+      ),
+  );
+
+  /* ------------------------------------- shift swap & pickup requests -- */
+
+  const writeHints = {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: false,
+    openWorldHint: false,
+  };
+
+  server.registerTool(
+    "post_shift_for_pickup",
+    {
+      title: "Offer up one of your shifts",
+      description:
+        'Posts one of your own upcoming scheduled shifts for coworkers to pick up (e.g. "post my Saturday shift"). Pass shift_id, or date when you have one shift that day. Pass offer_to to offer it to one coworker only. Nothing changes on the schedule yet: a coworker claims it (claim_shift), then a manager approves it (approve_shift_request). Needs the Scheduling plan feature.',
+      inputSchema: portable(postShiftForPickupInputSchema),
+      annotations: writeHints,
+    },
+    (args, ctx) =>
+      run(server, ctx.http?.authInfo, (caller) =>
+        postShiftForPickupTool(caller, args),
+      ),
+  );
+
+  server.registerTool(
+    "request_shift_swap",
+    {
+      title: "Ask a coworker to swap shifts",
+      description:
+        "Asks a coworker to trade one of your upcoming shifts for one of theirs. Pass your shift (shift_id or date), the coworker, and their shift (their_shift_id or their_date). The coworker accepts with claim_shift (or declines with cancel_shift_request), then a manager approves it and both shifts change hands. Rejected if either of you would end up double-booked or on approved time off.",
+      inputSchema: portable(requestShiftSwapInputSchema),
+      annotations: writeHints,
+    },
+    (args, ctx) =>
+      run(server, ctx.http?.authInfo, (caller) =>
+        requestShiftSwapTool(caller, args),
+      ),
+  );
+
+  server.registerTool(
+    "request_shift_pickup",
+    {
+      title: "Ask to take a coworker's shift",
+      description:
+        "Asks a coworker to hand you one of their upcoming shifts (one they haven't posted). Pass the coworker and their shift (shift_id or date). They accept with claim_shift (or decline with cancel_shift_request), then a manager approves it. To take a shift someone already posted, use claim_shift instead.",
+      inputSchema: portable(requestShiftPickupInputSchema),
+      annotations: writeHints,
+    },
+    (args, ctx) =>
+      run(server, ctx.http?.authInfo, (caller) =>
+        requestShiftPickupTool(caller, args),
+      ),
+  );
+
+  server.registerTool(
+    "list_open_shifts",
+    {
+      title: "List shifts up for grabs and your shift requests",
+      description:
+        "Lists upcoming shifts coworkers have posted that you can claim (available_to_claim), swap or pickup requests waiting for your answer (awaiting_your_answer), and your own requests in progress (your_requests), each with its request_id and status. Call this before claim_shift or cancel_shift_request.",
+      inputSchema: portable(listOpenShiftsInputSchema),
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    (args, ctx) =>
+      run(server, ctx.http?.authInfo, (caller) =>
+        listOpenShiftsTool(caller, args),
+      ),
+  );
+
+  server.registerTool(
+    "claim_shift",
+    {
+      title: "Claim an offered shift or accept a swap",
+      description:
+        "Claims a shift a coworker posted, or accepts a swap or pickup request sent to you, by request_id (from list_open_shifts). You can't claim your own shift, a shift offered to someone else, or one you'd be double-booked for. The request then waits for a manager's approval; the schedule only changes once it's approved. Only call this when the user explicitly asks.",
+      inputSchema: portable(claimShiftInputSchema),
+      annotations: writeHints,
+    },
+    (args, ctx) =>
+      run(server, ctx.http?.authInfo, (caller) => claimShiftTool(caller, args)),
+  );
+
+  server.registerTool(
+    "cancel_shift_request",
+    {
+      title: "Cancel or decline a shift request",
+      description:
+        "Withdraws a shift offer, swap or pickup request you made, or declines one sent to you, by request_id. Admins can cancel any open or pending request. Approved, denied and cancelled requests can't be changed. The schedule is never changed by cancelling.",
+      inputSchema: portable(cancelShiftRequestInputSchema),
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    (args, ctx) =>
+      run(server, ctx.http?.authInfo, (caller) =>
+        cancelShiftRequestTool(caller, args),
+      ),
+  );
+
+  server.registerTool(
+    "list_pending_shift_requests",
+    {
+      title: "List shift changes waiting for approval",
+      description:
+        "Admin tool ('org:admin'): lists shift swaps and pickups that coworkers have agreed to and that wait for a manager's approval, with both shifts, who gives and who takes each, and the request_id. Pass include_open: true to also see requests still waiting for a coworker.",
+      inputSchema: portable(listPendingShiftRequestsInputSchema),
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    (args, ctx) =>
+      run(server, ctx.http?.authInfo, (caller) =>
+        listPendingShiftRequestsTool(caller, args),
+      ),
+  );
+
+  server.registerTool(
+    "approve_shift_request",
+    {
+      title: "Approve a shift swap or pickup",
+      description:
+        "Admin tool ('org:admin'): approves a shift request waiting for approval (request_id from list_pending_shift_requests) and reassigns the shift(s) on the schedule: the claimed shift moves to the coworker taking it and, for a swap, their shift moves back. Refused if anyone would be double-booked or on approved time off, or if the shift already started or changed hands. Only call this when the admin explicitly asks.",
+      inputSchema: portable(reviewShiftRequestInputSchema),
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    },
+    (args, ctx) =>
+      run(server, ctx.http?.authInfo, (caller) =>
+        approveShiftRequestTool(caller, args),
+      ),
+  );
+
+  server.registerTool(
+    "deny_shift_request",
+    {
+      title: "Deny a shift swap or pickup",
+      description:
+        "Admin tool ('org:admin'): denies a shift request waiting for approval (request_id from list_pending_shift_requests). The schedule stays as it is and the members involved are told. Only call this when the admin explicitly asks.",
+      inputSchema: portable(reviewShiftRequestInputSchema),
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    (args, ctx) =>
+      run(server, ctx.http?.authInfo, (caller) =>
+        denyShiftRequestTool(caller, args),
       ),
   );
 }

@@ -177,9 +177,13 @@ describe("Clock Out MCP server", () => {
   it("exposes all expected tools", () => {
     expect([...tools.keys()].sort()).toEqual([
       "add_time_entry",
+      "approve_shift_request",
+      "cancel_shift_request",
+      "claim_shift",
       "clock_in",
       "clock_out",
       "delete_time_entry",
+      "deny_shift_request",
       "export_timesheet",
       "get_calendar_shifts",
       "get_clock_status",
@@ -188,7 +192,9 @@ describe("Clock Out MCP server", () => {
       "get_weekly_timecard",
       "invite_member",
       "list_members",
+      "list_open_shifts",
       "list_organizations",
+      "list_pending_shift_requests",
       "list_time_entries",
       "manage_alert_settings",
       "manage_break_settings",
@@ -201,6 +207,9 @@ describe("Clock Out MCP server", () => {
       "manage_reporting_settings",
       "manage_schedule",
       "manage_time_off",
+      "post_shift_for_pickup",
+      "request_shift_pickup",
+      "request_shift_swap",
       "run_hours_report",
       "toggle_break",
       "update_time_entry",
@@ -235,6 +244,8 @@ describe("Clock Out MCP server", () => {
       "export_timesheet",
       "get_timesheet_tables",
       "get_calendar_shifts",
+      "list_open_shifts",
+      "list_pending_shift_requests",
     ]) {
       expect(tools.get(name)?.annotations?.readOnlyHint, name).toBe(true);
     }

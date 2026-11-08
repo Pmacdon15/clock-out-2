@@ -18,6 +18,16 @@ import {
 import { manageNotificationPreferencesInputSchema } from "@/mcp/notification-tools";
 import { portable, toPortableJsonSchema } from "@/mcp/portable-schema";
 import {
+  cancelShiftRequestInputSchema,
+  claimShiftInputSchema,
+  listOpenShiftsInputSchema,
+  listPendingShiftRequestsInputSchema,
+  postShiftForPickupInputSchema,
+  requestShiftPickupInputSchema,
+  requestShiftSwapInputSchema,
+  reviewShiftRequestInputSchema,
+} from "@/mcp/shift-request-tools";
+import {
   addTimeEntryInputSchema,
   clockInInputSchema,
   clockOutInputSchema,
@@ -92,6 +102,15 @@ describe("portable JSON schema", () => {
     manage_location_settings: manageLocationSettingsInputSchema,
     manage_notification_preferences: manageNotificationPreferencesInputSchema,
     manage_member: manageMemberInputSchema,
+    post_shift_for_pickup: postShiftForPickupInputSchema,
+    request_shift_swap: requestShiftSwapInputSchema,
+    request_shift_pickup: requestShiftPickupInputSchema,
+    list_open_shifts: listOpenShiftsInputSchema,
+    claim_shift: claimShiftInputSchema,
+    cancel_shift_request: cancelShiftRequestInputSchema,
+    list_pending_shift_requests: listPendingShiftRequestsInputSchema,
+    approve_shift_request: reviewShiftRequestInputSchema,
+    deny_shift_request: reviewShiftRequestInputSchema,
   };
 
   for (const [name, schema] of Object.entries(schemas)) {
