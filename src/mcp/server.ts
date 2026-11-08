@@ -326,7 +326,7 @@ export function registerClockOutTools(server: McpServer) {
     {
       title: "Add time entry or import timecard shifts",
       description:
-        "Adds one shift or a batch of shifts (entries array) for yourself or, if you are an org admin, for any member (by name, email, or user_id). Ideal when a user uploads a photo or screenshot of a weekly timecard or schedule: extract the employee name and each day's date + clock_in/clock_out (or date + hours_worked) and pass them in entries. Strictly rejects double or overlapping shifts (both within the batch and against existing database entries) so double times can never be created, and invalidates the cache.",
+        "Admin-only ('org:admin'): adds one shift or a batch of shifts (entries array) for any member (by name, email, or user_id). Non-admins cannot add time entries; they record their own shifts with clock_in and clock_out. Shifts in the future are rejected. Ideal when a user uploads a photo or screenshot of a weekly timecard or schedule: extract the employee name and each day's date + clock_in/clock_out (or date + hours_worked) and pass them in entries. Strictly rejects double or overlapping shifts (both within the batch and against existing database entries) so double times can never be created, and invalidates the cache.",
       inputSchema: portable(addTimeEntryInputSchema),
       annotations: {
         readOnlyHint: false,
