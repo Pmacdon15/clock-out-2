@@ -551,7 +551,7 @@ describe("resetCalendarFeedPath", () => {
     );
   });
 
-  it("is null without an org or a signing secret", async () => {
+  it("resets nothing without an org or a signing secret", async () => {
     mocks.protect.mockResolvedValue({ ...member, orgId: null });
     await expect(resetCalendarFeedPath()).resolves.toBeNull();
     vi.stubEnv("CALENDAR_FEED_SECRET", "");
