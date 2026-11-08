@@ -117,15 +117,15 @@ export function TimeframeSelector({
   return (
     <div className="flex flex-col gap-6">
       {isAdmin && members && members.length > 0 && (
-        <div className="relative mb-2 flex items-center gap-4 overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900 p-5 text-white shadow-xl">
+        <div className="relative mb-2 flex items-center gap-4 overflow-hidden rounded-2xl border border-blue-500 bg-gradient-to-br from-blue-600 to-indigo-600 p-5 text-white shadow-xl dark:border-zinc-800 dark:from-zinc-900 dark:to-zinc-900">
           <div className="absolute top-0 right-0 p-3 opacity-10">
             <Users className="h-20 w-20 text-white" />
           </div>
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-zinc-700 bg-zinc-800">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-blue-400 bg-blue-500 dark:border-zinc-700 dark:bg-zinc-800">
             <Users className="h-5 w-5 text-white" />
           </div>
           <div className="relative z-10 flex-1">
-            <p className="mb-1.5 font-black text-[10px] text-zinc-500 uppercase tracking-[0.2em]">
+            <p className="mb-1.5 font-black text-[10px] text-blue-100 uppercase dark:text-zinc-500 tracking-[0.2em]">
               Administrative Control: Member Logs
             </p>
             <select
@@ -179,7 +179,7 @@ export function TimeframeSelector({
         {timeframe === "custom" && (
           <div className="flex w-full items-center gap-2 sm:w-auto">
             <input
-              className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-xs outline-none focus:ring-1 focus:ring-zinc-400"
+              className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs outline-none focus:ring-1 focus:ring-blue-500 dark:border-zinc-800 dark:bg-zinc-950 dark:focus:ring-zinc-400"
               defaultValue={startDate}
               name="start-date"
               onChange={(e) => updateParams({ start: e.target.value })}
@@ -187,7 +187,7 @@ export function TimeframeSelector({
             />
             <span className="text-zinc-400">to</span>
             <input
-              className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-xs outline-none focus:ring-1 focus:ring-zinc-400"
+              className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs outline-none focus:ring-1 focus:ring-blue-500 dark:border-zinc-800 dark:bg-zinc-950 dark:focus:ring-zinc-400"
               defaultValue={endDate}
               name="end-date"
               onChange={(e) => updateParams({ end: e.target.value })}

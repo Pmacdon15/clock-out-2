@@ -27,7 +27,7 @@ describe("Button", () => {
   it("uses the default variant and size", () => {
     render(<Button>Go</Button>);
     expect(screen.getByRole("button", { name: "Go" })).toHaveClass(
-      "bg-zinc-900",
+      "bg-blue-600",
       "h-10",
     );
   });

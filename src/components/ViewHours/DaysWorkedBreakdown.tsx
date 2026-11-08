@@ -91,7 +91,7 @@ export function DaysWorkedBreakdown({
               </span>
               <div className="relative h-4 flex-1 rounded-full bg-zinc-100 dark:bg-zinc-900">
                 <div
-                  className="h-full rounded-full bg-zinc-900 transition-all duration-500 ease-out dark:bg-zinc-50"
+                  className="h-full rounded-full bg-blue-600 transition-all duration-500 ease-out dark:bg-zinc-50"
                   style={{ width: `${pct}%` }}
                 />
               </div>

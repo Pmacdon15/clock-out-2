@@ -8,6 +8,7 @@ import { dark } from "@clerk/ui/themes";
 import Link from "next/link";
 
 import { Suspense } from "react";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 export default function MainPageHeader() {
   return (
@@ -25,6 +26,7 @@ export default function MainPageHeader() {
         >
           Plans
         </Link>
+        <ThemeToggle />
         <Suspense>
           <Show when="signed-in">
             <OrganizationSwitcher
@@ -45,7 +47,7 @@ export default function MainPageHeader() {
           <Show when="signed-out">
             <SignInButton>
               <button
-                className="rounded-md bg-zinc-900 px-4 py-2 text-zinc-50 transition-colors hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+                className="rounded-md bg-blue-600 px-4 py-2 text-zinc-50 transition-colors hover:bg-blue-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
                 type="button"
               >
                 Sign In
