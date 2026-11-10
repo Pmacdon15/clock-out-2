@@ -107,6 +107,9 @@ describe("TimeClock break count limits", () => {
       shiftWith("unpaid_meal"),
       settings({ max_unpaid_breaks_per_shift: 1 }),
     );
+    fireEvent.change(screen.getByLabelText("Break type"), {
+      target: { value: "unpaid_meal" },
+    });
     expect(screen.getByTestId("break-count-limit")).toHaveTextContent(
       "You've used all 1 unpaid break allowed this shift.",
     );
@@ -132,5 +135,29 @@ describe("TimeClock break count limits", () => {
     await waitFor(() =>
       expect(mocks.startBreakAction).toHaveBeenCalledWith("paid_rest"),
     );
+  });
+
+  it("defaults to a kind that is still allowed this shift", () => {
+    renderClock(shiftWith(), settings({ max_unpaid_breaks_per_shift: 0 }));
+    expect(screen.getByLabelText("Break type")).toHaveValue("paid_rest");
+    expect(option(/Meal period/).disabled).toBe(true);
+    expect(option(/Unpaid rest break/).disabled).toBe(true);
+    expect(startButton()).toBeEnabled();
+  });
+
+  it("blocks every break when both kinds are limited to zero", () => {
+    const setOptimisticEntries = renderClock(
+      shiftWith(),
+      settings({
+        max_paid_breaks_per_shift: 0,
+        max_unpaid_breaks_per_shift: 0,
+      }),
+    );
+    expect(screen.getByTestId("break-count-limit")).toHaveTextContent(
+      "Your organization doesn't allow unpaid breaks.",
+    );
+    expect(startButton()).toBeDisabled();
+    expect(option(/Paid rest break/).disabled).toBe(true);
+    expect(setOptimisticEntries).not.toHaveBeenCalled();
   });
 });

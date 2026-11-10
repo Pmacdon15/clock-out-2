@@ -30,20 +30,28 @@ describe("getBreakCountLimits", () => {
     ["no settings", undefined],
     ["null settings", null],
     ["null limits", { max_paid_breaks_per_shift: null }],
-    ["a zero limit", { max_paid_breaks_per_shift: 0 }],
     ["a negative limit", { max_paid_breaks_per_shift: -1 }],
     ["a fractional limit", { max_paid_breaks_per_shift: 1.5 }],
   ])("treats %s as no limit", (_label, settings) => {
     expect(getBreakCountLimits(settings).paid).toBeNull();
   });
+
+  it("keeps a zero limit, meaning no breaks of that kind are allowed", () => {
+    expect(
+      getBreakCountLimits({
+        max_paid_breaks_per_shift: 0,
+        max_unpaid_breaks_per_shift: 0,
+      }),
+    ).toEqual({ paid: 0, unpaid: 0 });
+  });
 });
 
 describe("isValidBreakCountLimit", () => {
-  it.each([null, 1, 5, MAX_BREAK_COUNT_LIMIT])("accepts %s", (value) => {
+  it.each([null, 0, 1, 5, MAX_BREAK_COUNT_LIMIT])("accepts %s", (value) => {
     expect(isValidBreakCountLimit(value)).toBe(true);
   });
 
-  it.each([0, -1, 1.5, MAX_BREAK_COUNT_LIMIT + 1, Number.NaN, "2", undefined])(
+  it.each([-1, 1.5, MAX_BREAK_COUNT_LIMIT + 1, Number.NaN, "2", undefined])(
     "rejects %s",
     (value) => {
       expect(isValidBreakCountLimit(value)).toBe(false);
@@ -119,6 +127,12 @@ describe("breakCountLimitMessage", () => {
         max_unpaid_breaks_per_shift: 1,
       }),
     ).toBe("You've used all 1 unpaid break allowed this shift.");
+  });
+
+  it("says the kind isn't allowed when the limit is zero", () => {
+    expect(
+      breakCountLimitMessage("paid_rest", { max_paid_breaks_per_shift: 0 }),
+    ).toBe("Your organization doesn't allow paid breaks.");
   });
 
   it("falls back to zero when no limit is set", () => {

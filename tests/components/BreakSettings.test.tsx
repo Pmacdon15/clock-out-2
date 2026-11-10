@@ -424,6 +424,29 @@ describe("BreakSettings breaks per shift", () => {
     );
   });
 
+  it("saves a zero count so no breaks of that kind are allowed", async () => {
+    mocks.updateBreakSettingAction.mockResolvedValue({ success: true });
+    renderBreakSettings(notDocked);
+    fireEvent.click(screen.getByLabelText("Limit paid breaks per shift"));
+    fireEvent.change(screen.getByLabelText("Max paid breaks per shift"), {
+      target: { value: "0" },
+    });
+    expect(
+      screen.queryByText("Enter a whole number between 0 and 20."),
+    ).not.toBeInTheDocument();
+    fireEvent.click(save());
+    await waitFor(() =>
+      expect(mocks.updateBreakSettingAction).toHaveBeenCalledWith(
+        false,
+        30,
+        5,
+        noLimits,
+        false,
+        { paid: 0, unpaid: null },
+      ),
+    );
+  });
+
   it("clears a count limit that was switched off", async () => {
     mocks.updateBreakSettingAction.mockResolvedValue({ success: true });
     renderBreakSettings({ ...notDocked, max_unpaid_breaks_per_shift: 2 });
@@ -442,7 +465,7 @@ describe("BreakSettings breaks per shift", () => {
   });
 
   it.each([
-    ["zero", "0"],
+    ["negative", "-1"],
     ["too large", "21"],
     ["fractional", "1.5"],
   ])("blocks saving a %s count", (_l, value) => {
@@ -452,7 +475,7 @@ describe("BreakSettings breaks per shift", () => {
       target: { value },
     });
     expect(
-      screen.getByText("Enter a whole number between 1 and 20."),
+      screen.getByText("Enter a whole number between 0 and 20."),
     ).toBeInTheDocument();
     expect(save()).toBeDisabled();
   });

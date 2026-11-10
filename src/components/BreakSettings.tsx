@@ -459,8 +459,9 @@ export default function BreakSettings({
           <p className="text-muted-foreground text-sm">
             Cap how many paid and unpaid breaks a member can take in a single
             shift. Once they reach the limit, they can't start another break of
-            that kind until their next shift. Meal periods count as paid or
-            unpaid to match the lunch pay setting.
+            that kind until their next shift. Set a limit to 0 to not allow that
+            kind of break at all. Meal periods count as paid or unpaid to match
+            the lunch pay setting.
           </p>
         </div>
         {BREAK_KINDS.map((kind) => {
@@ -498,7 +499,7 @@ export default function BreakSettings({
                     className="h-12 w-full rounded-xl border-2 border-zinc-200 bg-white px-4 dark:border-zinc-800 dark:bg-zinc-950"
                     id={inputId}
                     max={MAX_BREAK_COUNT_LIMIT}
-                    min={1}
+                    min={0}
                     onChange={(e) =>
                       setCountValues((prev) => ({
                         ...prev,
@@ -511,7 +512,7 @@ export default function BreakSettings({
                   />
                   {invalid && (
                     <p className="text-red-600 text-sm dark:text-red-400">
-                      {`Enter a whole number between 1 and ${MAX_BREAK_COUNT_LIMIT}.`}
+                      {`Enter a whole number between 0 and ${MAX_BREAK_COUNT_LIMIT}.`}
                     </p>
                   )}
                 </div>
