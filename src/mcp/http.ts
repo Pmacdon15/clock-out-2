@@ -1,8 +1,9 @@
 import type { AuthInfo } from "@modelcontextprotocol/server";
 import { getPublicOrigin } from "mcp-handler";
+import { clientIp } from "@/lib/client-ip";
 import { MCP_SCOPES } from "@/mcp/oauth-config";
 
-export { MCP_SCOPES };
+export { clientIp, MCP_SCOPES };
 
 /*
  * The HTTP edge of the MCP server, written to the MCP and OAuth specs rather
@@ -229,17 +230,6 @@ export function tooManyRequests(retryAfterSeconds: number) {
     },
     { status: 429, headers: { "Retry-After": String(retryAfterSeconds) } },
   );
-}
-
-/**
- * The caller's IP for rate limiting: the first `X-Forwarded-For` hop (set by
- * Vercel's edge), then `X-Real-IP`, else "unknown" so callers without either
- * share one bucket rather than going unmetered.
- */
-export function clientIp(req: Request) {
-  const forwarded = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  const ip = forwarded || req.headers.get("x-real-ip")?.trim();
-  return ip ? ip.slice(0, 64) : "unknown";
 }
 
 export function mcpRoute(

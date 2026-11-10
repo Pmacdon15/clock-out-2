@@ -4,6 +4,8 @@ import {
   CONTENT_SECURITY_POLICY,
   CONTENT_SECURITY_POLICY_REPORT_ONLY,
   CSP_REPORT_PATH,
+  enforcedDirectiveNames,
+  enforcedPolicy,
   PERMISSIONS_POLICY,
   reportOnlyPolicy,
   STRICT_TRANSPORT_SECURITY,
@@ -76,5 +78,35 @@ describe("securityHeaders", () => {
     expect(policy).toContain(
       "frame-src 'self' https://challenges.cloudflare.com;",
     );
+  });
+});
+
+describe("promoting report-only directives to enforced", () => {
+  const reportOnly = reportOnlyPolicy("https://clerk.example.com");
+
+  it("enforces only the base directives by default", () => {
+    expect(enforcedDirectiveNames(undefined)).toEqual([]);
+    expect(enforcedPolicy(reportOnly, [])).toBe(
+      "frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'",
+    );
+  });
+
+  it("parses CSP_ENFORCE_DIRECTIVES and ignores unknown or reporting names", () => {
+    expect(
+      enforcedDirectiveNames(
+        " IMG-SRC, frame-src connect-src,img-src,bogus,report-uri",
+      ),
+    ).toEqual(["img-src", "frame-src", "connect-src"]);
+  });
+
+  it("copies the promoted directives from the report-only policy", () => {
+    const policy = enforcedPolicy(reportOnly, ["img-src", "connect-src"]);
+    expect(policy).toContain(
+      "img-src 'self' data: blob: https://img.clerk.com",
+    );
+    expect(policy).toContain("connect-src 'self' https://clerk.example.com");
+    expect(policy).toContain("frame-ancestors 'none'");
+    expect(policy).not.toContain("script-src");
+    expect(policy).not.toContain("report-uri");
   });
 });

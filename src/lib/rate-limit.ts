@@ -74,6 +74,13 @@ export const MCP_PREAUTH_IP_LIMIT: RateLimit = {
   windowSeconds: 60,
 };
 
+/** CSP violation reports per client IP; excess reports are dropped. */
+export const CSP_REPORT_LIMIT: RateLimit = {
+  name: "csp-report",
+  limit: 30,
+  windowSeconds: 60,
+};
+
 /** Retry delay reported when a fail-closed limiter can't reach the database. */
 const LIMITER_DOWN_RETRY_SECONDS = 60;
 
