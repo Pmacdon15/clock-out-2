@@ -3,6 +3,13 @@ name: Biome
 # On a pull request from this repo, Biome fixes what it can
 # (`biome check --write --unsafe`), commits the result to the PR branch, and
 # re-runs every check on that commit. Whatever it can't fix fails this check.
+#
+# Two jobs, so no write-capable token is ever present while dependency code
+# or the PR's own code (its biome.json, its lockfile) runs:
+# - `biome` installs and runs Biome with a read-only token that isn't left on
+#   disk, then uploads the fixed files as an artifact.
+# - `commit` has the write token but never checks out or runs repository
+#   code: it only turns that artifact into a signed commit through the API.
 
 on:
   pull_request:
@@ -23,8 +30,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: write # commit the fixes
-      actions: write # re-run the checks on the fix commit
+      contents: read
+    outputs:
+      has_fixes: ${{ steps.fixes.outputs.has_fixes }}
     env:
       # Fork PRs get a read-only token, so they are checked but not fixed.
       CAN_FIX: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
@@ -33,39 +41,100 @@ jobs:
         with:
           # The PR's own commit, not GitHub's merge preview, so fixes apply to the branch.
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          # Don't leave the token in .git/config for later steps to read.
+          persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: package.json
-      - run: bun install --frozen-lockfile
+      # Biome ships as a prebuilt binary package, so no install scripts are needed.
+      - run: bun install --frozen-lockfile --ignore-scripts
 
       - name: Apply safe and unsafe fixes
         if: env.CAN_FIX == 'true'
         # Unfixable problems are reported by the final step instead.
         run: bunx biome check --write --unsafe || true
 
-      - name: Commit fixes to the pull request
+      - name: Collect fixed files
+        id: fixes
         if: env.CAN_FIX == 'true'
+        run: |
+          set -euo pipefail
+          git diff --name-only > "$RUNNER_TEMP/changed.txt"
+          if [ ! -s "$RUNNER_TEMP/changed.txt" ]; then
+            echo "Nothing to fix."
+            echo "has_fixes=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          sed 's/^/Fixed: /' "$RUNNER_TEMP/changed.txt"
+          mkdir -p "$RUNNER_TEMP/fixes/files"
+          cp "$RUNNER_TEMP/changed.txt" "$RUNNER_TEMP/fixes/changed.txt"
+          while IFS= read -r file; do
+            mkdir -p "$RUNNER_TEMP/fixes/files/$(dirname "$file")"
+            cp "$file" "$RUNNER_TEMP/fixes/files/$file"
+          done < "$RUNNER_TEMP/changed.txt"
+          echo "has_fixes=true" >> "$GITHUB_OUTPUT"
+
+      - name: Upload fixed files
+        if: steps.fixes.outputs.has_fixes == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: biome-fixes
+          path: ${{ runner.temp }}/fixes
+          retention-days: 1
+
+      - name: Check
+        run: bunx biome ci --reporter=github .
+
+  commit:
+    name: Commit Biome fixes
+    needs: biome
+    # Still commit the fixes when unfixable problems fail the Check step.
+    if: ${{ !cancelled() && needs.biome.outputs.has_fixes == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write # commit the fixes
+      actions: write # re-run the checks on the fix commit
+    steps:
+      # No checkout and no install: only the artifact and the API are used here.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: biome-fixes
+          path: ${{ runner.temp }}/fixes
+
+      - name: Commit fixes to the pull request
         env:
           GH_TOKEN: ${{ github.token }}
           BRANCH: ${{ github.event.pull_request.head.ref }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          FIXES: ${{ runner.temp }}/fixes
         run: |
           set -euo pipefail
-          mapfile -t changed < <(git diff --name-only)
-          if [ "${#changed[@]}" -eq 0 ]; then
-            echo "Nothing to fix."
-            exit 0
-          fi
-          printf 'Fixed: %s\n' "${changed[@]}"
-
-          # Commit through the API so GitHub signs it (shows as Verified).
           tmp=$(mktemp -d)
-          for file in "${changed[@]}"; do
-            base64 -w0 "$file" > "$tmp/content"
+
+          # The artifact came from a job that ran PR code, so only accept plain
+          # relative paths to regular files, and never workflow files.
+          while IFS= read -r file; do
+            case "$file" in
+              "" | /* | *..* | .github/*)
+                echo "::error::Refusing to commit unexpected path: $file"
+                exit 1
+                ;;
+            esac
+            src="$FIXES/files/$file"
+            if [ ! -f "$src" ] || [ -L "$src" ]; then
+              echo "::error::Missing or non-regular fixed file: $file"
+              exit 1
+            fi
+          done < "$FIXES/changed.txt"
+
+          while IFS= read -r file; do
+            base64 -w0 "$FIXES/files/$file" > "$tmp/content"
             jq -n --arg path "$file" --rawfile contents "$tmp/content" \
               '{path: $path, contents: $contents}'
-          done | jq -s . > "$tmp/additions.json"
+          done < "$FIXES/changed.txt" | jq -s . > "$tmp/additions.json"
 
+          # Commit through the API so GitHub signs it (shows as Verified).
           jq -n \
             --arg repo "$GITHUB_REPOSITORY" \
             --arg branch "$BRANCH" \
@@ -93,6 +162,3 @@ jobs:
           for workflow in tests.yml typecheck.yml biome.yml; do
             gh workflow run "$workflow" --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
           done
-
-      - name: Check
-        run: bunx biome ci --reporter=github .
