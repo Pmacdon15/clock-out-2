@@ -146,6 +146,7 @@ import {
   manageBreaksTool,
   manageReportingSettingsTool,
   resolveMemberFromList,
+  resolveOrg,
   runHoursReportTool,
   toggleBreakTool,
   updateTimeEntryTool,
@@ -2840,5 +2841,88 @@ describe("resolveMemberFromList never exposes the roster to non-admins", () => {
     expect(res.ok).toBe(false);
     if (res.ok) return;
     expect(res.result.data.status).toBe("ambiguous_member");
+  });
+});
+
+describe("resolveOrg prefers exact matches and refuses ambiguous ones", () => {
+  const memberships = [
+    {
+      role: "org:admin",
+      organization: { id: "org_west", name: "Acme West", slug: "acme-west" },
+    },
+    {
+      role: "org:admin",
+      organization: { id: "org_acme", name: "Acme", slug: "acme-hq" },
+    },
+    {
+      role: "org:member",
+      organization: { id: "org_east", name: "Acme East", slug: "acme" },
+    },
+  ];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetUserOrgMemberships.mockResolvedValue({ data: memberships });
+  });
+
+  it.each([
+    ["org_acme", "org_acme"],
+    ["ORG_WEST", "org_west"],
+    // Exact slug beats an exact name match on another org.
+    ["acme", "org_east"],
+    ["acme-hq", "org_acme"],
+    // Exact name beats a substring match listed earlier.
+    ["Acme West", "org_west"],
+    // A single substring match is still accepted.
+    ["east", "org_east"],
+  ])("resolves %s to %s", async (needle, expected) => {
+    const res = await resolveOrg("user_admin", needle);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.org.orgId).toBe(expected);
+  });
+
+  it("returns ambiguous_organization when a substring matches several orgs", async () => {
+    const res = await resolveOrg("user_admin", "ac");
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.result.isError).toBe(true);
+    expect(res.result.data).toMatchObject({
+      status: "ambiguous_organization",
+      requested_org: "ac",
+    });
+    const orgs = (res.result.data as { organizations: { orgId: string }[] })
+      .organizations;
+    expect(orgs.map((o) => o.orgId).sort()).toEqual([
+      "org_acme",
+      "org_east",
+      "org_west",
+    ]);
+  });
+
+  it("returns ambiguous_organization when two orgs share an exact name", async () => {
+    mockGetUserOrgMemberships.mockResolvedValue({
+      data: [
+        {
+          role: "org:admin",
+          organization: { id: "org_1", name: "Shop", slug: null },
+        },
+        {
+          role: "org:admin",
+          organization: { id: "org_2", name: "Shop", slug: null },
+        },
+      ],
+    });
+    const res = await resolveOrg("user_admin", "shop");
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.result.data).toMatchObject({ status: "ambiguous_organization" });
+  });
+
+  it("still reports organization_not_found when nothing matches", async () => {
+    const res = await resolveOrg("user_admin", "globex");
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.result.data).toMatchObject({ status: "organization_not_found" });
   });
 });
