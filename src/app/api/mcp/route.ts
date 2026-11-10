@@ -1,5 +1,9 @@
 import { createMcpHandler } from "mcp-handler";
-import { checkRateLimit, MCP_REQUEST_LIMIT } from "@/lib/rate-limit";
+import {
+  checkRateLimit,
+  MCP_PREAUTH_IP_LIMIT,
+  MCP_REQUEST_LIMIT,
+} from "@/lib/rate-limit";
 import { verifyMcpToken } from "@/mcp/auth";
 import { mcpRoute } from "@/mcp/http";
 import { registerClockOutPrompts } from "@/mcp/prompts";
@@ -18,8 +22,11 @@ const handler = createMcpHandler((server) => {
   registerClockOutTools(server);
   registerClockOutPrompts(server);
 }, SERVER_OPTIONS);
-const route = mcpRoute(handler, verifyMcpToken, (userId) =>
-  checkRateLimit(MCP_REQUEST_LIMIT, userId),
+const route = mcpRoute(
+  handler,
+  verifyMcpToken,
+  (userId) => checkRateLimit(MCP_REQUEST_LIMIT, userId),
+  (ip) => checkRateLimit(MCP_PREAUTH_IP_LIMIT, ip),
 );
 
 export { route as DELETE, route as GET, route as OPTIONS, route as POST };

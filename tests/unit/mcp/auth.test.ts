@@ -12,6 +12,7 @@ vi.mock("@clerk/nextjs/server", () => ({
 import {
   allowedOAuthClientIds,
   audienceMode,
+  looksLikeOAuthToken,
   verifyMcpToken,
 } from "@/mcp/auth";
 import { mcpResourceUrl } from "@/mcp/http";
@@ -174,5 +175,36 @@ describe("verifyMcpToken audience check", () => {
     expect(console.warn).toHaveBeenCalledWith(
       expect.stringContaining("MCP_TOKEN_AUDIENCE=log"),
     );
+  });
+});
+
+describe("verifyMcpToken token format pre-check", () => {
+  const req = new Request("https://clockout.patmac.ca/api/mcp");
+
+  beforeEach(() => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockAuthenticateRequest.mockReset();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it.each(["oat_abc123", "oat_A-b_9", "eyJhbGciOi.eyJzdWIiOi.c2lnbmF0dXJl"])(
+    "accepts the shape of %s",
+    (token) => {
+      expect(looksLikeOAuthToken(token)).toBe(true);
+    },
+  );
+
+  it.each(["junk", "oat_", "a.b", "oat_has space", `oat_${"a".repeat(5000)}`])(
+    "rejects the shape of %s",
+    (token) => {
+      expect(looksLikeOAuthToken(token)).toBe(false);
+    },
+  );
+
+  it("refuses a malformed token without calling Clerk", async () => {
+    expect(await verifyMcpToken(req, "not-a-token")).toBeUndefined();
+    expect(mockAuthenticateRequest).not.toHaveBeenCalled();
   });
 });

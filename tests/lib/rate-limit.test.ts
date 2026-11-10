@@ -122,6 +122,26 @@ describe("checkRateLimit", () => {
     await fresh.checkRateLimit(limit, "user_1");
     expect(textOf(1)).toContain("CREATE TABLE IF NOT EXISTS rate_limits");
   });
+
+  it("refuses requests when the database fails for a fail-closed limit", async () => {
+    vi.resetModules();
+    vi.stubEnv("DATABASE_URL", "postgres://test");
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const fresh: RateLimitModule = await import("@/lib/rate-limit");
+    sql.mockRejectedValueOnce(new Error("db down"));
+    await expect(
+      fresh.checkRateLimit({ ...limit, failClosed: true }, "user_1"),
+    ).resolves.toEqual({ ok: false, retryAfterSeconds: 60 });
+  });
+
+  it("marks the cost-bearing limits as fail-closed and MCP as fail-open", () => {
+    expect(rl.GEOCODE_LIMIT.failClosed).toBe(true);
+    expect(rl.PUNCH_GEOCODE_LIMIT.failClosed).toBe(true);
+    expect(rl.TEST_NOTIFICATION_LIMIT.failClosed).toBe(true);
+    expect(rl.TEST_REPORT_LIMIT.failClosed).toBe(true);
+    expect(rl.MCP_REQUEST_LIMIT.failClosed).toBeFalsy();
+    expect(rl.MCP_PREAUTH_IP_LIMIT.failClosed).toBeFalsy();
+  });
 });
 
 describe("rate limit messages", () => {
