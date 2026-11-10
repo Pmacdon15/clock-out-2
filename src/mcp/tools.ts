@@ -929,13 +929,36 @@ export async function resolveOrg(
 
   if (requestedOrg?.trim()) {
     const needle = requestedOrg.trim().toLowerCase();
-    const matched = list.find(
-      (o) =>
-        o.orgId.toLowerCase() === needle ||
-        o.orgSlug?.toLowerCase() === needle ||
-        o.orgName.toLowerCase() === needle ||
-        o.orgName.toLowerCase().includes(needle),
-    );
+    // Strongest match wins: exact ID, then exact slug, then exact name, and
+    // only then a name substring. A loose name must never silently pick a
+    // different org than an exact match would, because the same resolver
+    // gates destructive admin tools.
+    const tiers: ((o: (typeof list)[number]) => boolean)[] = [
+      (o) => o.orgId.toLowerCase() === needle,
+      (o) => o.orgSlug?.toLowerCase() === needle,
+      (o) => o.orgName.toLowerCase() === needle,
+      (o) => o.orgName.toLowerCase().includes(needle),
+    ];
+    let candidates: typeof list = [];
+    for (const tier of tiers) {
+      candidates = list.filter(tier);
+      if (candidates.length > 0) break;
+    }
+    if (candidates.length > 1) {
+      return {
+        ok: false,
+        result: {
+          summary: `Multiple organizations matched "${requestedOrg}": ${candidates.map((o) => `${o.orgName} (${o.orgId})`).join(", ")}. Please specify the exact organization ID or slug.`,
+          data: {
+            status: "ambiguous_organization",
+            requested_org: requestedOrg,
+            organizations: candidates,
+          },
+          isError: true,
+        },
+      };
+    }
+    const matched = candidates[0];
     if (!matched) {
       return {
         ok: false,
