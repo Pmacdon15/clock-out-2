@@ -346,6 +346,8 @@ describe("FCM tokens", () => {
     ).resolves.toEqual({ token });
     expect(textOf(0)).toContain("INSERT INTO fcm_tokens");
     expect(textOf(0)).toContain("ON CONFLICT (token)");
+    expect(textOf(0)).toContain("WHERE fcm_tokens.user_id =");
+    expect(textOf(0)).toContain("OR fcm_tokens.endpoint =");
     expect(valuesOf(0)).toEqual([
       token,
       "u1",
@@ -354,6 +356,8 @@ describe("FCM tokens", () => {
       "u1",
       "https://fcm/ep",
       "UA",
+      "u1",
+      "https://fcm/ep",
     ]);
     expect(textOf(1)).toContain("DELETE FROM push_subscriptions");
     expect(valuesOf(1)).toEqual([
@@ -369,7 +373,36 @@ describe("FCM tokens", () => {
     sql.mockResolvedValueOnce([{ token }]);
     await adb.dbSaveFcmToken("u1", { token }, null);
     expect(sql).toHaveBeenCalledTimes(1);
-    expect(valuesOf(0)).toEqual([token, "u1", null, null, "u1", null, null]);
+    expect(valuesOf(0)).toEqual([
+      token,
+      "u1",
+      null,
+      null,
+      "u1",
+      null,
+      null,
+      "u1",
+      null,
+    ]);
+  });
+
+  it("refuses to take over another user's token without a matching subscription", async () => {
+    await primeTables();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    // The guarded upsert matches no row: the token belongs to someone else.
+    sql.mockResolvedValueOnce([]);
+    await expect(
+      adb.dbSaveFcmToken(
+        "attacker",
+        { token, endpoint: "https://fcm/other", replacedEndpoint: "https://x" },
+        "UA",
+      ),
+    ).resolves.toBeNull();
+    // No cleanup runs on the caller's or anyone else's rows.
+    expect(sql).toHaveBeenCalledTimes(1);
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringContaining("Refused to reassign an FCM token"),
+    );
   });
 
   it("lists tokens for many users, skipping the query for nobody", async () => {
