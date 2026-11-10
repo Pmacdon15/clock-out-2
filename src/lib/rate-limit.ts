@@ -74,6 +74,13 @@ export const MCP_PREAUTH_IP_LIMIT: RateLimit = {
   windowSeconds: 60,
 };
 
+/** CSP violation reports per client IP; excess reports are dropped. */
+export const CSP_REPORT_LIMIT: RateLimit = {
+  name: "csp-report",
+  limit: 30,
+  windowSeconds: 60,
+};
+
 /**
  * Organization invitations sent through MCP, per org. Each one emails an
  * arbitrary address from the app's Clerk instance.
