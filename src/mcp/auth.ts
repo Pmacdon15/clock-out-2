@@ -11,22 +11,34 @@ import { mcpResourceUrl } from "@/mcp/http";
  * `{ acceptsToken: "oauth_token" }` so case-insensitive `Bearer` schemes work
  * and the verified Clerk `userId` is placed in `extra.userId`.
  */
+/** Whether this is the production deployment (not a preview or local dev). */
+export function isProductionDeployment(): boolean {
+  return process.env.VERCEL_ENV === "production";
+}
+
 /**
  * OAuth client IDs allowed to call Clock Out, from `MCP_ALLOWED_OAUTH_CLIENT_IDS`
  * (comma or whitespace separated). Clerk only grants its built-in scopes, so
  * a token's scopes can't tell a Clock Out connection apart from any other app
  * signed in with this Clerk instance. Setting the allowlist limits the MCP
- * server and the export endpoint to the clients you trust. Unset or empty
- * keeps today's behaviour (every client Clerk registered is accepted).
+ * server and the export endpoint to the clients you trust.
+ *
+ * Returns null when every client is accepted: `*`, or unset/empty outside
+ * production. In production an unset or empty list fails closed (an empty
+ * set, so every token is rejected) because dynamic client registration lets
+ * anyone register a client on the Clerk instance.
  */
 export function allowedOAuthClientIds(
   raw = process.env.MCP_ALLOWED_OAUTH_CLIENT_IDS,
+  production = isProductionDeployment(),
 ): Set<string> | null {
   const ids = (raw ?? "")
     .split(/[\s,]+/)
     .map((id) => id.trim())
     .filter(Boolean);
-  return ids.length > 0 ? new Set(ids) : null;
+  if (ids.includes("*")) return null;
+  if (ids.length > 0) return new Set(ids);
+  return production ? new Set() : null;
 }
 
 export type AudienceMode = "off" | "log" | "enforce";
@@ -35,14 +47,19 @@ export type AudienceMode = "off" | "log" | "enforce";
  * How strictly a token's audience (RFC 8707 `aud`) must name this MCP
  * server, from `MCP_TOKEN_AUDIENCE`: "enforce" rejects a token whose
  * audience is missing or different, "log" only warns (to see whether the
- * clients' tokens carry it before enforcing), and anything else skips the
- * check. Each check is one extra Clerk Backend API call.
+ * clients' tokens carry it before enforcing), and "off" skips the check.
+ * Unset or unrecognised values default to "enforce" in production and
+ * "off" elsewhere, so production only accepts tokens issued for this server
+ * unless it is explicitly turned off. Each check is one extra Clerk Backend
+ * API call.
  */
 export function audienceMode(
   raw = process.env.MCP_TOKEN_AUDIENCE,
+  production = isProductionDeployment(),
 ): AudienceMode {
   const mode = raw?.trim().toLowerCase();
-  return mode === "enforce" || mode === "log" ? mode : "off";
+  if (mode === "enforce" || mode === "log" || mode === "off") return mode;
+  return production ? "enforce" : "off";
 }
 
 /** Whether the token was issued for this server, per {@link audienceMode}. */
@@ -97,7 +114,9 @@ async function verifyOAuthToken(
   const allowed = allowedOAuthClientIds();
   if (allowed && (!auth.clientId || !allowed.has(auth.clientId))) {
     console.warn(
-      `MCP: rejected an OAuth access token from client ${auth.clientId ?? "(none)"}, which isn't in MCP_ALLOWED_OAUTH_CLIENT_IDS`,
+      allowed.size === 0
+        ? "MCP: rejected an OAuth access token because MCP_ALLOWED_OAUTH_CLIENT_IDS is not set in production (set it to your clients' IDs, or * to accept any client)"
+        : `MCP: rejected an OAuth access token from client ${auth.clientId ?? "(none)"}, which isn't in MCP_ALLOWED_OAUTH_CLIENT_IDS`,
     );
     return undefined;
   }
