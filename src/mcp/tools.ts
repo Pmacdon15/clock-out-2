@@ -41,6 +41,7 @@ import {
 import { payRateMap } from "@/lib/pay";
 import { loadPdfImage } from "@/lib/pdf-image";
 import { punchReverseGeocode, punchSearchAddress } from "@/lib/punch-geocode";
+import { checkRateLimit, INVITE_LIMIT } from "@/lib/rate-limit";
 import { orgHasReportingFeature, sendWeeklyReports } from "@/lib/reports";
 import {
   buildEmployeeSummary,
@@ -720,6 +721,11 @@ export const runHoursReportInputSchema = z.object({
   timezone: timezoneField,
 });
 
+/** Longest email address accepted (RFC 5321 path limit). */
+const MAX_EMAIL_LENGTH = 254;
+/** Most invitations one invite_member call may send. */
+export const MAX_INVITES_PER_REQUEST = 20;
+
 export const inviteMemberInputSchema = z.object({
   org_id: orgIdField,
   action: z
@@ -730,15 +736,17 @@ export const inviteMemberInputSchema = z.object({
     ),
   email: z
     .string()
+    .max(MAX_EMAIL_LENGTH)
     .optional()
     .describe(
       "Email address to invite (when action is 'send') or whose pending invitation should be revoked (when action is 'revoke').",
     ),
   emails: z
-    .array(z.string())
+    .array(z.string().max(MAX_EMAIL_LENGTH))
+    .max(MAX_INVITES_PER_REQUEST)
     .optional()
     .describe(
-      "Batch of email addresses to invite at once (when action is 'send').",
+      `Batch of up to ${MAX_INVITES_PER_REQUEST} email addresses to invite at once (when action is 'send').`,
     ),
   role: z
     .enum(["org:member", "org:admin", "member", "admin"])
@@ -766,6 +774,8 @@ export type OrgContext = {
   orgSlug: string | null;
   /** Uploaded org logo, or null when Clerk would show its placeholder. */
   orgImageUrl?: string | null;
+  /** Clerk's membership cap for the org; 0 or missing means no cap. */
+  maxAllowedMemberships?: number;
   role: string;
   isAdmin: boolean;
 };
@@ -910,9 +920,16 @@ export async function resolveOrg(
       m.organization.hasImage ? m.organization.imageUrl : null,
     ]),
   );
+  const maxMemberships = new Map(
+    memberships.map((m) => [
+      m.organization.id,
+      m.organization.maxAllowedMemberships ?? 0,
+    ]),
+  );
   const withImage = (o: (typeof list)[number]): OrgContext => ({
     ...o,
     orgImageUrl: imageUrls.get(o.orgId) ?? null,
+    maxAllowedMemberships: maxMemberships.get(o.orgId) ?? 0,
   });
 
   if (list.length === 0) {
@@ -4697,7 +4714,9 @@ function normalizeInviteRole(
 }
 
 function isValidEmailAddress(email: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  return (
+    email.length <= MAX_EMAIL_LENGTH && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+  );
 }
 
 export async function inviteMemberTool(
@@ -4849,6 +4868,20 @@ export async function inviteMemberTool(
     };
   }
 
+  // The schema caps `emails`, but `email` adds one more and direct callers
+  // skip the schema, so cap the combined list here too.
+  if (uniqueEmails.length > MAX_INVITES_PER_REQUEST) {
+    return {
+      summary: `You can invite at most ${MAX_INVITES_PER_REQUEST} people per request (got ${uniqueEmails.length}). Split the list into smaller batches.`,
+      data: {
+        status: "too_many_invitations",
+        max_per_request: MAX_INVITES_PER_REQUEST,
+        requested: uniqueEmails.length,
+      },
+      isError: true,
+    };
+  }
+
   const invalidEmails = uniqueEmails.filter((e) => !isValidEmailAddress(e));
   if (invalidEmails.length > 0) {
     return {
@@ -4904,6 +4937,7 @@ export async function inviteMemberTool(
   }> = [];
   const failed: Array<{ email_address: string; error: string }> = [];
 
+  const toInvite: string[] = [];
   for (const email of uniqueEmails) {
     if (memberEmails.has(email)) {
       skipped.push({
@@ -4920,6 +4954,42 @@ export async function inviteMemberTool(
         reason: "already_invited",
         invitation_id: existingPending.id,
       });
+      continue;
+    }
+    toInvite.push(email);
+  }
+
+  // Pending invitations will become members too, so they count against the
+  // org's cap alongside the new batch. A cap of 0 means unlimited.
+  const maxAllowed = org.maxAllowedMemberships ?? 0;
+  const projected =
+    existingMembers.length + pendingInvitationsRes.length + toInvite.length;
+  if (maxAllowed > 0 && toInvite.length > 0 && projected > maxAllowed) {
+    const room = Math.max(
+      0,
+      maxAllowed - existingMembers.length - pendingInvitationsRes.length,
+    );
+    return {
+      summary: `${org.orgName} allows ${maxAllowed} members. It has ${existingMembers.length} and ${pendingInvitationsRes.length} pending invitation${pendingInvitationsRes.length === 1 ? "" : "s"}, so there is room for ${room} more, not ${toInvite.length}. Revoke pending invitations or upgrade the organization plan on Clock Out.`,
+      data: {
+        status: "membership_limit_reached",
+        org_id: org.orgId,
+        max_allowed: maxAllowed,
+        members: existingMembers.length,
+        pending_invitations: pendingInvitationsRes.length,
+        requested: toInvite.length,
+        room,
+      },
+      isError: true,
+    };
+  }
+
+  for (const email of toInvite) {
+    // Each invitation sends an email from the app's Clerk instance, so they
+    // are metered per org, not just per request.
+    const limited = await checkRateLimit(INVITE_LIMIT, org.orgId);
+    if (!limited.ok) {
+      skipped.push({ email_address: email, reason: "rate_limited" });
       continue;
     }
 
@@ -4955,7 +5025,7 @@ export async function inviteMemberTool(
   }
   if (skipped.length > 0) {
     parts.push(
-      `Skipped ${skipped.map((s) => `${s.email_address} (${s.reason === "already_member" ? "already a member" : "invitation already pending"})`).join(", ")}`,
+      `Skipped ${skipped.map((s) => `${s.email_address} (${s.reason === "already_member" ? "already a member" : s.reason === "rate_limited" ? "invitation limit reached, try again later" : "invitation already pending"})`).join(", ")}`,
     );
   }
   if (failed.length > 0) {
@@ -4964,7 +5034,8 @@ export async function inviteMemberTool(
     );
   }
 
-  const isError = sent.length === 0 && failed.length > 0;
+  const rateLimited = skipped.some((s) => s.reason === "rate_limited");
+  const isError = sent.length === 0 && (failed.length > 0 || rateLimited);
 
   return {
     summary: `${parts.join(". ")}.`,
@@ -4972,9 +5043,11 @@ export async function inviteMemberTool(
       status:
         sent.length > 0
           ? "invited"
-          : skipped.length > 0
-            ? "skipped"
-            : "invite_failed",
+          : rateLimited
+            ? "rate_limited"
+            : skipped.length > 0
+              ? "skipped"
+              : "invite_failed",
       organization: { org_id: org.orgId, name: org.orgName },
       role,
       sent,
