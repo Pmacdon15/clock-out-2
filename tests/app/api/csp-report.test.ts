@@ -198,4 +198,26 @@ describe("log sanitising helpers", () => {
     });
     expect(await readCappedText(req, 16)).toBe("hello");
   });
+
+  it("reads a request with no body as empty text", async () => {
+    const req = new Request("https://clockout.app/x", { method: "POST" });
+    expect(await readCappedText(req, 16)).toBe("");
+  });
+
+  it("still rejects an oversized body when cancelling the stream fails", async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new Uint8Array(32));
+      },
+      cancel() {
+        throw new Error("cancel failed");
+      },
+    });
+    const req = new Request("https://clockout.app/x", {
+      method: "POST",
+      body: stream,
+      duplex: "half",
+    } as RequestInit);
+    expect(await readCappedText(req, 16)).toBeNull();
+  });
 });

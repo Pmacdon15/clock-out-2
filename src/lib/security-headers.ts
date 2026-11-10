@@ -124,9 +124,10 @@ export function enforcedPolicy(
   reportOnly: string,
   promote: readonly string[],
 ): string {
-  const promoted = reportOnly
-    .split("; ")
-    .filter((d) => promote.includes(d.split(" ")[0] ?? ""));
+  const promoted = reportOnly.split("; ").filter((d) => {
+    const name = d.split(" ")[0];
+    return promote.some((p) => p === name);
+  });
   return [...BASE_ENFORCED_DIRECTIVES, ...promoted].join("; ");
 }
 
