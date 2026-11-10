@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -24,6 +25,18 @@ vi.mock("@/lib/plan-features", () => ({
 import { GET } from "@/app/api/calendar/[token]/route";
 import { createFeedToken } from "@/lib/calendar-feed";
 
+/** The member's current feed nonce in most tests. */
+const NONCE = "nonce_current";
+
+/** A legacy v1 token (org and member, no nonce), signed with the test secret. */
+const legacyV1Token = () => {
+  const payload = Buffer.from("v1:org_1:user_1").toString("base64url");
+  const signature = createHmac("sha256", "clockout-calendar-feed:test-secret")
+    .update(payload)
+    .digest("base64url");
+  return `${payload}.${signature}`;
+};
+
 const call = (token: string) =>
   GET(new Request(`https://clockout.app/api/calendar/${token}`), {
     params: Promise.resolve({ token }),
@@ -38,7 +51,9 @@ describe("GET /api/calendar/[token]", () => {
   beforeEach(() => {
     vi.stubEnv("CALENDAR_FEED_SECRET", "test-secret");
     mocks.getMemberships.mockResolvedValue({ data: [membership] });
-    mocks.getUser.mockResolvedValue({ privateMetadata: {} });
+    mocks.getUser.mockResolvedValue({
+      privateMetadata: { calendarFeedNonce: NONCE },
+    });
     mocks.orgHasPlanFeature.mockResolvedValue(true);
     mocks.dbGetScheduledShifts.mockResolvedValue([
       {
@@ -58,7 +73,7 @@ describe("GET /api/calendar/[token]", () => {
   });
 
   it("serves the member's shifts as an iCalendar feed", async () => {
-    const token = createFeedToken("org_1", "user_1") as string;
+    const token = createFeedToken("org_1", "user_1", NONCE) as string;
     const res = await call(`${token}.ics`);
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toBe(
@@ -79,7 +94,7 @@ describe("GET /api/calendar/[token]", () => {
   });
 
   it("keeps the URL out of search indexes and referrers", async () => {
-    const token = createFeedToken("org_1", "user_1") as string;
+    const token = createFeedToken("org_1", "user_1", NONCE) as string;
     const res = await call(`${token}.ics`);
     expect(res.headers.get("X-Robots-Tag")).toBe("noindex, nofollow");
     expect(res.headers.get("Referrer-Policy")).toBe("no-referrer");
@@ -93,12 +108,22 @@ describe("GET /api/calendar/[token]", () => {
     expect((await call(`${token}.ics`)).status).toBe(200);
   });
 
+  it("rejects legacy v1 links, with or without a nonce on the member", async () => {
+    expect((await call(`${legacyV1Token()}.ics`)).status).toBe(404);
+    mocks.getUser.mockResolvedValue({ privateMetadata: {} });
+    expect((await call(`${legacyV1Token()}.ics`)).status).toBe(404);
+    expect(mocks.getUser).not.toHaveBeenCalled();
+    expect(mocks.dbGetScheduledShifts).not.toHaveBeenCalled();
+  });
+
+  it("rejects every link for a member without a nonce", async () => {
+    mocks.getUser.mockResolvedValue({ privateMetadata: {} });
+    const token = createFeedToken("org_1", "user_1", NONCE) as string;
+    expect((await call(`${token}.ics`)).status).toBe(404);
+    expect(mocks.dbGetScheduledShifts).not.toHaveBeenCalled();
+  });
+
   it("revokes links made before the member reset theirs", async () => {
-    mocks.getUser.mockResolvedValue({
-      privateMetadata: { calendarFeedNonce: "nonce_current" },
-    });
-    const v1 = createFeedToken("org_1", "user_1") as string;
-    expect((await call(`${v1}.ics`)).status).toBe(404);
     const old = createFeedToken("org_1", "user_1", "nonce_previous") as string;
     expect((await call(`${old}.ics`)).status).toBe(404);
     expect(mocks.dbGetScheduledShifts).not.toHaveBeenCalled();
@@ -106,7 +131,7 @@ describe("GET /api/calendar/[token]", () => {
 
   it("fails closed when the member can't be looked up", async () => {
     mocks.getUser.mockRejectedValue(new Error("clerk down"));
-    const token = createFeedToken("org_1", "user_1") as string;
+    const token = createFeedToken("org_1", "user_1", NONCE) as string;
     expect((await call(`${token}.ics`)).status).toBe(404);
   });
 
@@ -118,7 +143,7 @@ describe("GET /api/calendar/[token]", () => {
 
   it("stops serving once the member leaves the org", async () => {
     mocks.getMemberships.mockResolvedValue({ data: [] });
-    const token = createFeedToken("org_1", "user_1") as string;
+    const token = createFeedToken("org_1", "user_1", NONCE) as string;
     expect((await call(token)).status).toBe(404);
 
     mocks.getMemberships.mockRejectedValue(new Error("clerk down"));
@@ -131,7 +156,7 @@ describe("GET /api/calendar/[token]", () => {
     mocks.getMemberships.mockResolvedValue({
       data: [{ publicUserData: { userId: "user_1" } }],
     });
-    const token = createFeedToken("org_1", "user_1") as string;
+    const token = createFeedToken("org_1", "user_1", NONCE) as string;
     const res = await call(token);
     const body = await res.text();
     expect(res.status).toBe(200);

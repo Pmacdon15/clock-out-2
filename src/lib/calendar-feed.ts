@@ -11,34 +11,44 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 export const CALENDAR_FEED_PATH = "/api/calendar";
 
 /**
- * Token formats. v1 tokens name the org and member only; v2 tokens add the
- * member's feed nonce, which "Reset link" rotates to revoke old URLs. A v1
- * token keeps working until its member first resets their link.
+ * Token format. v2 tokens name the org, the member and the member's feed
+ * nonce, which "Reset link" rotates to revoke old URLs. Legacy v1 tokens
+ * (org and member only, no nonce) could never be revoked, so they are no
+ * longer issued or accepted: a member with an old v1 URL subscribes again
+ * with the link the Schedule page now shows.
  */
-const TOKEN_V1 = "v1";
 const TOKEN_V2 = "v2";
 
 /** Where a member's feed nonce is kept, in their Clerk private metadata. */
 export const FEED_NONCE_METADATA_KEY = "calendarFeedNonce";
 
 let warnedAboutFallback = false;
+let warnedAboutMissingSecret = false;
 
 /**
- * The key feed URLs are signed with. Prefer CALENDAR_FEED_SECRET: falling
- * back to CLERK_SECRET_KEY reuses the Clerk key for something unrelated, and
- * rotating it would silently break every feed URL. The fallback stays so
- * existing deployments' feeds keep working, but it is logged once per
- * instance so it gets noticed.
+ * The key feed URLs are signed with: CALENDAR_FEED_SECRET. Production
+ * requires it and fails closed without it (feeds are turned off), so the
+ * Clerk backend key is never reused there. Elsewhere (local dev, previews)
+ * CLERK_SECRET_KEY stays as a convenience fallback, logged once per instance.
  */
 function feedSecret(): string | null {
   const dedicated = process.env.CALENDAR_FEED_SECRET;
   if (dedicated) return dedicated;
+  if (process.env.VERCEL_ENV === "production") {
+    if (!warnedAboutMissingSecret) {
+      warnedAboutMissingSecret = true;
+      console.error(
+        "Calendar feeds are off: CALENDAR_FEED_SECRET isn't set in production, and the Clerk secret is never used for them there.",
+      );
+    }
+    return null;
+  }
   const clerk = process.env.CLERK_SECRET_KEY;
   if (!clerk) return null;
   if (!warnedAboutFallback) {
     warnedAboutFallback = true;
     console.warn(
-      "Calendar feeds are signed with CLERK_SECRET_KEY because CALENDAR_FEED_SECRET isn't set. Set CALENDAR_FEED_SECRET so rotating the Clerk key doesn't break every feed URL (members will need to subscribe again once).",
+      "Calendar feeds are signed with CLERK_SECRET_KEY because CALENDAR_FEED_SECRET isn't set. This fallback only works outside production; set CALENDAR_FEED_SECRET.",
     );
   }
   return clerk;
@@ -63,31 +73,29 @@ export function feedNonceFrom(
 }
 
 /**
- * A token for one member's feed in one org, or null without a secret. With a
- * nonce, the token only works while that nonce is the member's current one.
+ * A token for one member's feed in one org, or null without a secret. The
+ * token only works while `nonce` is the member's current feed nonce.
  */
 export function createFeedToken(
   orgId: string,
   userId: string,
-  nonce: string | null = null,
+  nonce: string,
 ): string | null {
   const secret = feedSecret();
   if (!secret) return null;
-  const raw = nonce
-    ? `${TOKEN_V2}:${orgId}:${userId}:${nonce}`
-    : `${TOKEN_V1}:${orgId}:${userId}`;
+  const raw = `${TOKEN_V2}:${orgId}:${userId}:${nonce}`;
   const payload = Buffer.from(raw).toString("base64url");
   return `${payload}.${sign(payload, secret)}`;
 }
 
 /**
- * The org, member and nonce (null for a v1 token) a feed token was made
- * for, or null if it isn't valid. Callers must still check the nonce
+ * The org, member and nonce a feed token was made for, or null if it isn't
+ * valid (legacy v1 tokens included). Callers must still check the nonce
  * against the member's current one with {@link feedNonceMatches}.
  */
 export function verifyFeedToken(
   token: string,
-): { orgId: string; userId: string; nonce: string | null } | null {
+): { orgId: string; userId: string; nonce: string } | null {
   const secret = feedSecret();
   if (!secret) return null;
   const [payload, signature, ...rest] = token.split(".");
@@ -97,24 +105,25 @@ export function verifyFeedToken(
   if (expected.length !== given.length || !timingSafeEqual(expected, given)) {
     return null;
   }
-  const [version, orgId, userId, ...extra] = Buffer.from(payload, "base64url")
+  const [version, orgId, userId, nonce, ...extra] = Buffer.from(
+    payload,
+    "base64url",
+  )
     .toString()
     .split(":");
-  if (!orgId || !userId) return null;
-  if (version === TOKEN_V1 && extra.length === 0) {
-    return { orgId, userId, nonce: null };
-  }
-  if (version === TOKEN_V2 && extra.length === 1 && extra[0]) {
-    return { orgId, userId, nonce: extra[0] };
-  }
-  return null;
+  if (version !== TOKEN_V2 || !orgId || !userId || !nonce) return null;
+  if (extra.length > 0) return null;
+  return { orgId, userId, nonce };
 }
 
-/** Whether a token's nonce is the member's current one (both null for v1). */
+/**
+ * Whether a token's nonce is the member's current one. A member without a
+ * nonce has no valid feed URL.
+ */
 export const feedNonceMatches = (
-  tokenNonce: string | null,
+  tokenNonce: string,
   currentNonce: string | null,
-) => tokenNonce === currentNonce;
+) => currentNonce !== null && tokenNonce === currentNonce;
 
 /** The feed's path for a token; `.ics` helps apps recognise it. */
 export const feedPath = (token: string) => `${CALENDAR_FEED_PATH}/${token}.ics`;
