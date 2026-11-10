@@ -120,9 +120,14 @@ vi.mock("@/lib/reports", () => ({
 const mockReverseGeocode = vi.fn(async () => null);
 const mockSearchAddress = vi.fn(async () => []);
 
+const mockCheckRateLimit = vi.fn(
+  async (): Promise<
+    { ok: true; remaining: number } | { ok: false; retryAfterSeconds: number }
+  > => ({ ok: true, remaining: 1 }),
+);
 vi.mock("@/lib/rate-limit", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/rate-limit")>()),
-  checkRateLimit: vi.fn(async () => ({ ok: true as const, remaining: 1 })),
+  checkRateLimit: (...args: unknown[]) => mockCheckRateLimit(...(args as [])),
 }));
 
 vi.mock("@/lib/geoapify", () => ({
@@ -145,6 +150,7 @@ import {
   getClockStatus,
   getLocationSettingsTool,
   getTimesheetTablesTool,
+  inviteMemberInputSchema,
   inviteMemberTool,
   listOrganizations,
   manageBreakSettingsTool,
@@ -2929,5 +2935,157 @@ describe("resolveOrg prefers exact matches and refuses ambiguous ones", () => {
     expect(res.ok).toBe(false);
     if (res.ok) return;
     expect(res.result.data).toMatchObject({ status: "organization_not_found" });
+  });
+});
+
+describe("invite_member limits", () => {
+  const caller = { userId: "user_admin", client: "Claude" };
+  const adminOf = (maxAllowedMemberships?: number) => ({
+    data: [
+      {
+        role: "org:admin",
+        organization: {
+          id: "org_1",
+          name: "PatMac Org",
+          slug: "patmac-org",
+          maxAllowedMemberships,
+        },
+      },
+    ],
+  });
+  const member = (n: number) => ({
+    role: "org:member",
+    publicUserData: {
+      userId: `user_${n}`,
+      firstName: `M${n}`,
+      lastName: null,
+      identifier: `m${n}@patmac.ca`,
+    },
+  });
+  const pending = (n: number) => ({
+    id: `orginv_${n}`,
+    emailAddress: `pending${n}@patmac.ca`,
+    role: "org:member",
+    status: "pending",
+    createdAt: 0,
+    updatedAt: 0,
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockCheckRateLimit.mockResolvedValue({ ok: true, remaining: 10 });
+    mockGetUserOrgMemberships.mockResolvedValue(adminOf());
+    mockGetOrgMemberships.mockResolvedValue({ data: [member(1)] });
+    mockGetOrganizationInvitationList.mockResolvedValue({ data: [] });
+    mockCreateOrganizationInvitation.mockImplementation(
+      async ({ emailAddress }: { emailAddress: string }) => ({
+        id: `orginv_${emailAddress}`,
+        emailAddress,
+        role: "org:member",
+        status: "pending",
+        createdAt: 0,
+      }),
+    );
+  });
+
+  it("caps the emails array in the input schema", () => {
+    const emails = (n: number) =>
+      Array.from({ length: n }, (_, i) => `p${i}@patmac.ca`);
+    expect(
+      inviteMemberInputSchema.safeParse({ emails: emails(20) }).success,
+    ).toBe(true);
+    expect(
+      inviteMemberInputSchema.safeParse({ emails: emails(21) }).success,
+    ).toBe(false);
+    expect(
+      inviteMemberInputSchema.safeParse({
+        email: `${"a".repeat(250)}@x.ca`,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("refuses more than 20 addresses even when the schema is skipped", async () => {
+    const res = await inviteMemberTool(caller, {
+      email: "extra@patmac.ca",
+      emails: Array.from({ length: 20 }, (_, i) => `p${i}@patmac.ca`),
+    });
+    expect(res.isError).toBe(true);
+    expect(res.data).toMatchObject({
+      status: "too_many_invitations",
+      max_per_request: 20,
+      requested: 21,
+    });
+    expect(mockCreateOrganizationInvitation).not.toHaveBeenCalled();
+  });
+
+  it("refuses a batch that would exceed the cap once pending invitations are counted", async () => {
+    mockGetUserOrgMemberships.mockResolvedValue(adminOf(4));
+    mockGetOrganizationInvitationList.mockResolvedValue({
+      data: [pending(1), pending(2)],
+    });
+
+    // 1 member + 2 pending + 2 new = 5 > 4
+    const res = await inviteMemberTool(caller, {
+      emails: ["a@patmac.ca", "b@patmac.ca"],
+    });
+
+    expect(res.isError).toBe(true);
+    expect(res.data).toMatchObject({
+      status: "membership_limit_reached",
+      max_allowed: 4,
+      members: 1,
+      pending_invitations: 2,
+      requested: 2,
+      room: 1,
+    });
+    expect(mockCreateOrganizationInvitation).not.toHaveBeenCalled();
+  });
+
+  it("sends a batch that fits the cap, and treats a cap of 0 as unlimited", async () => {
+    mockGetUserOrgMemberships.mockResolvedValue(adminOf(4));
+    const fits = await inviteMemberTool(caller, {
+      emails: ["a@patmac.ca", "b@patmac.ca", "c@patmac.ca"],
+    });
+    expect(fits.data.status).toBe("invited");
+    expect(mockCreateOrganizationInvitation).toHaveBeenCalledTimes(3);
+
+    mockGetUserOrgMemberships.mockResolvedValue(adminOf(0));
+    const unlimited = await inviteMemberTool(caller, {
+      emails: Array.from({ length: 10 }, (_, i) => `u${i}@patmac.ca`),
+    });
+    expect(unlimited.data.status).toBe("invited");
+  });
+
+  it("meters each invitation per org and stops at the limit", async () => {
+    mockCheckRateLimit
+      .mockResolvedValueOnce({ ok: true, remaining: 1 })
+      .mockResolvedValue({ ok: false, retryAfterSeconds: 600 });
+
+    const res = await inviteMemberTool(caller, {
+      emails: ["a@patmac.ca", "b@patmac.ca", "c@patmac.ca"],
+    });
+
+    expect(mockCheckRateLimit).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "invite" }),
+      "org_1",
+    );
+    expect(mockCreateOrganizationInvitation).toHaveBeenCalledTimes(1);
+    expect(res.data.status).toBe("invited");
+    expect(res.data.skipped).toEqual([
+      { email_address: "b@patmac.ca", reason: "rate_limited" },
+      { email_address: "c@patmac.ca", reason: "rate_limited" },
+    ]);
+    expect(res.summary).toContain("invitation limit reached");
+  });
+
+  it("reports rate_limited as an error when nothing could be sent", async () => {
+    mockCheckRateLimit.mockResolvedValue({
+      ok: false,
+      retryAfterSeconds: 600,
+    });
+    const res = await inviteMemberTool(caller, { email: "a@patmac.ca" });
+    expect(res.isError).toBe(true);
+    expect(res.data.status).toBe("rate_limited");
+    expect(mockCreateOrganizationInvitation).not.toHaveBeenCalled();
   });
 });

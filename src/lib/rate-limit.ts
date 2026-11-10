@@ -74,6 +74,17 @@ export const MCP_PREAUTH_IP_LIMIT: RateLimit = {
   windowSeconds: 60,
 };
 
+/**
+ * Organization invitations sent through MCP, per org. Each one emails an
+ * arbitrary address from the app's Clerk instance.
+ */
+export const INVITE_LIMIT: RateLimit = {
+  name: "invite",
+  limit: 50,
+  windowSeconds: 60 * 60,
+  failClosed: true,
+};
+
 /** Retry delay reported when a fail-closed limiter can't reach the database. */
 const LIMITER_DOWN_RETRY_SECONDS = 60;
 
