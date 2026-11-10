@@ -53,6 +53,11 @@ CREATE TABLE IF NOT EXISTS overtime_settings (
     weekly_threshold_hours DOUBLE PRECISION,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+-- Banked overtime (time in lieu). When bank_overtime is on, the first
+-- bank_after_overtime_hours overtime hours each week are paid and the rest
+-- are banked instead of paid. NULL/0 banks every overtime hour.
+ALTER TABLE overtime_settings ADD COLUMN IF NOT EXISTS bank_overtime BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE overtime_settings ADD COLUMN IF NOT EXISTS bank_after_overtime_hours DOUBLE PRECISION;
 
 -- Each member's hourly rate and overtime multiplier, for estimated gross
 -- pay: regular hours x rate + overtime hours x rate x multiplier. No row

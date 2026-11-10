@@ -86,6 +86,7 @@ import {
   reportingSettingsSchema,
 } from "./input-validation";
 import {
+  isValidBankAfterHours,
   isValidOvertimeThreshold,
   MAX_DAILY_OVERTIME_HOURS,
   MAX_WEEKLY_OVERTIME_HOURS,
@@ -706,6 +707,7 @@ export async function getOrgBreakSettings(): Promise<
 export async function updateOvertimeSettingsDal(
   dailyThresholdHours: number | null,
   weeklyThresholdHours: number | null,
+  banking?: { bankOvertime: boolean; bankAfterOvertimeHours: number | null },
 ) {
   const authUser = await auth.protect();
   if (!authUser.userId || !authUser.orgId || authUser.orgRole !== "org:admin") {
@@ -713,7 +715,13 @@ export async function updateOvertimeSettingsDal(
   }
   if (
     !isValidOvertimeThreshold(dailyThresholdHours, MAX_DAILY_OVERTIME_HOURS) ||
-    !isValidOvertimeThreshold(weeklyThresholdHours, MAX_WEEKLY_OVERTIME_HOURS)
+    !isValidOvertimeThreshold(
+      weeklyThresholdHours,
+      MAX_WEEKLY_OVERTIME_HOURS,
+    ) ||
+    (banking !== undefined &&
+      (typeof banking.bankOvertime !== "boolean" ||
+        !isValidBankAfterHours(banking.bankAfterOvertimeHours)))
   ) {
     return errAsync({ reason: "Invalid overtime settings" } as const);
   }
@@ -721,6 +729,7 @@ export async function updateOvertimeSettingsDal(
     authUser.orgId,
     dailyThresholdHours,
     weeklyThresholdHours,
+    ...(banking ? [banking] : []),
   )
     .then((updated) => {
       return okAsync(updated);

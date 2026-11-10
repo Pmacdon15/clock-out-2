@@ -3,6 +3,7 @@
 import { Hourglass } from "lucide-react";
 import { useMemo } from "react";
 import {
+  describeBanking,
   describeOvertime,
   type OvertimeSplit,
   sumOvertime,
@@ -49,6 +50,8 @@ export function OvertimeSummary({
   }, [entries, overtimeByEntry, isViewingAll, members]);
 
   const hasOvertime = total.overtimeHours > 0;
+  // Present only when the org banks overtime.
+  const banked = total.bankedOvertimeHours;
 
   return (
     <Card className="p-6" data-testid="overtime-summary">
@@ -60,6 +63,9 @@ export function OvertimeSummary({
           </h3>
           <p className="text-xs text-zinc-500 dark:text-zinc-400">
             Hours {describeOvertime(overtimeSettings)} count as overtime.
+            {banked !== undefined && (
+              <> Banking is on: {describeBanking(overtimeSettings)}.</>
+            )}
           </p>
         </div>
       </div>
@@ -92,6 +98,28 @@ export function OvertimeSummary({
             {total.overtimeHours.toFixed(2)}h
           </div>
         </div>
+        {banked !== undefined && (
+          <div
+            className={`col-span-2 rounded-xl p-3 ${
+              banked > 0
+                ? "bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-300"
+                : "bg-zinc-50 dark:bg-zinc-900"
+            }`}
+          >
+            <div className="font-bold text-[10px] uppercase tracking-wider opacity-80">
+              Banked overtime
+            </div>
+            <div
+              className="font-black text-xl tabular-nums"
+              data-testid="banked-hours"
+            >
+              {banked.toFixed(2)}h
+            </div>
+            <div className="text-xs opacity-80" data-testid="paid-overtime">
+              {(total.overtimeHours - banked).toFixed(2)}h overtime paid
+            </div>
+          </div>
+        )}
       </div>
       {hasOvertime && (
         <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
@@ -109,6 +137,8 @@ export function OvertimeSummary({
               <span className="font-medium">{member.name}</span>
               <span className="font-bold text-orange-700 tabular-nums dark:text-orange-400">
                 {member.overtimeHours.toFixed(2)}h OT
+                {member.bankedOvertimeHours !== undefined &&
+                  ` · ${member.bankedOvertimeHours.toFixed(2)}h banked`}
               </span>
             </li>
           ))}

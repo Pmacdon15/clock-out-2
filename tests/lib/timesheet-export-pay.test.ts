@@ -35,6 +35,12 @@ const paid = (overrides: Partial<ExportRow> = {}) =>
   applyPay([row({ payRate: rate, ...overrides })])[0];
 
 describe("pay on export rows", () => {
+  it("leaves banked overtime out of overtime pay", () => {
+    expect(
+      paid({ hours: 10, overtimeHours: 2, bankedOvertimeHours: 1.5 })?.pay,
+    ).toEqual({ regularPay: 160, overtimePay: 15, grossPay: 175 });
+  });
+
   it("adds each rated employee's pay, with overtime at the multiplier", () => {
     const entries = [
       makeEntry({

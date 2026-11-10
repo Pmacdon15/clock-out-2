@@ -135,3 +135,15 @@ describe("formatting", () => {
     expect(formatMultiplier(1.3333)).toBe("1.33x");
   });
 });
+
+describe("computePay with banked overtime", () => {
+  it("leaves banked overtime hours out of overtime pay", () => {
+    const rate = { hourlyRate: 20, overtimeMultiplier: 1.5 };
+    expect(
+      computePay(
+        { regularHours: 40, overtimeHours: 4, bankedOvertimeHours: 3 },
+        rate,
+      ),
+    ).toEqual({ regularPay: 800, overtimePay: 30, grossPay: 830 });
+  });
+});

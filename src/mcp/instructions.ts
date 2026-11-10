@@ -113,7 +113,7 @@ Interactive Timecard, Hours Report & Timesheet Anomalies (MCP Apps):
 - In the app, admins can edit a shift's times or skip_lunch flag (it calls update_time_entry) and approve or deny pending time off in the period (it calls manage_time_off). Members only see their own hours, with no edit or approve buttons. The server applies the same role checks to these calls as to yours.
 
 Overtime, Alerts & Other Settings (admins):
-- manage_overtime_settings: daily_threshold_hours / weekly_threshold_hours (null turns one off).
+- manage_overtime_settings: daily_threshold_hours / weekly_threshold_hours (null turns one off); bank_overtime and bank_after_overtime_hours bank overtime as time in lieu past that many overtime hours per week (0 banks all).
 - manage_pay_period_settings: anyone can 'get' the current pay period, its payday and the next ones (pass date for a past or future period); admins 'update' frequency ('weekly' / 'bi-weekly'), payday (any one payday, YYYY-MM-DD) and holdback_days (7 = one week). For hours in a pay period, take its start_date/end_date and pass them to run_hours_report or get_weekly_timecard. "When do I get paid?" or "what pay period is this?" → manage_pay_period_settings.
 - manage_alert_settings: forgot-to-clock-out reminders, automatic clock-out, break reminders, copying admins, and schedule notices. Only pass the fields to change.
 - Timecards (get_weekly_timecard) and hours reports (run_hours_report) include each member's overtime hours (when the organization tracks overtime) and approved time off in the period (time off only on plans with the Time Off feature).

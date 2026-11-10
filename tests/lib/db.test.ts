@@ -993,12 +993,18 @@ describe("overtime settings", () => {
   it("ensureOvertimeSettingsTable creates settings then overtime_settings", async () => {
     sql.mockResolvedValue([]);
     await db.ensureOvertimeSettingsTable();
-    expect(sql).toHaveBeenCalledTimes(2);
+    expect(sql).toHaveBeenCalledTimes(4);
     expect(textOf(0)).toContain("CREATE TABLE IF NOT EXISTS settings");
     expect(textOf(1)).toContain("CREATE TABLE IF NOT EXISTS overtime_settings");
     expect(textOf(1)).toContain("REFERENCES settings(org_id)");
     expect(textOf(1)).toContain("daily_threshold_hours DOUBLE PRECISION");
     expect(textOf(1)).toContain("weekly_threshold_hours DOUBLE PRECISION");
+    expect(textOf(2)).toContain(
+      "ADD COLUMN IF NOT EXISTS bank_overtime BOOLEAN NOT NULL DEFAULT FALSE",
+    );
+    expect(textOf(3)).toContain(
+      "ADD COLUMN IF NOT EXISTS bank_after_overtime_hours DOUBLE PRECISION",
+    );
   });
 
   it("ensureOvertimeSettingsTable only runs once per instance", async () => {
@@ -1008,7 +1014,7 @@ describe("overtime settings", () => {
       db.ensureOvertimeSettingsTable(),
     ]);
     await db.ensureOvertimeSettingsTable();
-    expect(sql).toHaveBeenCalledTimes(2);
+    expect(sql).toHaveBeenCalledTimes(4);
   });
 
   it("ensureOvertimeSettingsTable retries after a failure", async () => {
@@ -1017,11 +1023,13 @@ describe("overtime settings", () => {
     sql.mockReset();
     sql.mockResolvedValue([]);
     await db.ensureOvertimeSettingsTable();
-    expect(sql).toHaveBeenCalledTimes(2);
+    expect(sql).toHaveBeenCalledTimes(4);
   });
 
   it("dbGetOvertimeSettings creates the table, then reads and tags the cache", async () => {
     sql
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ org_id: "o1", daily_threshold_hours: 8 }]);
@@ -1029,8 +1037,8 @@ describe("overtime settings", () => {
       org_id: "o1",
       daily_threshold_hours: 8,
     });
-    expect(textOf(2)).toContain("SELECT * FROM overtime_settings");
-    expect(valuesOf(2)).toEqual(["o1"]);
+    expect(textOf(4)).toContain("SELECT * FROM overtime_settings");
+    expect(valuesOf(4)).toEqual(["o1"]);
     expect(cacheTag).toHaveBeenCalledWith("overtime-settings-o1");
     expect(cacheLife).toHaveBeenCalledWith("hours");
   });
@@ -1045,16 +1053,37 @@ describe("overtime settings", () => {
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ org_id: "o1", daily_threshold_hours: 8 }]);
     await expect(db.dbUpdateOvertimeSettings("o1", 8, null)).resolves.toEqual({
       org_id: "o1",
       daily_threshold_hours: 8,
     });
-    expect(textOf(2)).toContain("INSERT INTO settings");
-    expect(valuesOf(2)).toEqual(["o1"]);
-    expect(textOf(3)).toContain("INSERT INTO overtime_settings");
-    expect(textOf(3)).toContain("ON CONFLICT (org_id)");
-    expect(valuesOf(3)).toEqual(["o1", 8, null, 8, null]);
+    expect(textOf(4)).toContain("INSERT INTO settings");
+    expect(valuesOf(4)).toEqual(["o1"]);
+    expect(textOf(5)).toContain("INSERT INTO overtime_settings");
+    expect(textOf(5)).toContain("ON CONFLICT (org_id)");
+    expect(textOf(5)).not.toContain("bank_overtime");
+    expect(valuesOf(5)).toEqual(["o1", 8, null, 8, null]);
+  });
+
+  it("dbUpdateOvertimeSettings saves the banking rules when given", async () => {
+    sql
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ org_id: "o1", bank_overtime: true }]);
+    await expect(
+      db.dbUpdateOvertimeSettings("o1", null, 40, {
+        bankOvertime: true,
+        bankAfterOvertimeHours: 5,
+      }),
+    ).resolves.toEqual({ org_id: "o1", bank_overtime: true });
+    expect(textOf(5)).toContain("bank_overtime, bank_after_overtime_hours");
+    expect(valuesOf(5)).toEqual(["o1", null, 40, true, 5, null, 40, true, 5]);
   });
 });
 

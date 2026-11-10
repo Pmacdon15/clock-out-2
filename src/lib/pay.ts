@@ -1,4 +1,4 @@
-import type { OvertimeSplit } from "./overtime";
+import { type OvertimeSplit, paidOvertimeHours } from "./overtime";
 import type { PayRateData } from "./types";
 
 /**
@@ -82,14 +82,16 @@ export function payRateMap(
 
 /** Gross pay for some regular and overtime hours at one rate. */
 export function computePay(
-  hours: Pick<OvertimeSplit, "regularHours" | "overtimeHours">,
+  hours: Pick<
+    OvertimeSplit,
+    "regularHours" | "overtimeHours" | "bankedOvertimeHours"
+  >,
   rate: PayRate,
 ): PayBreakdown {
   const regularPay = Math.max(0, hours.regularHours) * rate.hourlyRate;
+  // Banked overtime is owed as time off, not paid now.
   const overtimePay =
-    Math.max(0, hours.overtimeHours) *
-    rate.hourlyRate *
-    rate.overtimeMultiplier;
+    paidOvertimeHours(hours) * rate.hourlyRate * rate.overtimeMultiplier;
   return { regularPay, overtimePay, grossPay: regularPay + overtimePay };
 }
 

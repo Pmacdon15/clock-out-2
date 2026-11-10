@@ -2,12 +2,16 @@ import { describe, expect, it } from "vitest";
 import {
   allocateOvertime,
   computeEntryOvertime,
+  describeBanking,
   describeOvertime,
   formatThreshold,
+  getOvertimeBanking,
   getOvertimeThresholds,
   isOvertimeEnabled,
+  isValidBankAfterHours,
   isValidOvertimeThreshold,
   MAX_DAILY_OVERTIME_HOURS,
+  paidOvertimeHours,
   sumOvertime,
   weekStartOf,
 } from "@/lib/overtime";
@@ -261,5 +265,95 @@ describe("describeOvertime", () => {
     expect(formatThreshold(8)).toBe("8h");
     expect(formatThreshold(MAX_DAILY_OVERTIME_HOURS)).toBe("24h");
     expect(formatThreshold(7.333333)).toBe("7.33h");
+  });
+});
+
+describe("banked overtime", () => {
+  const shift = (key: string, day: string, hours: number, worker = "a") => ({
+    key,
+    worker,
+    day,
+    hours,
+  });
+  const banking = (afterHours: number | null) => ({
+    daily_threshold_hours: 8,
+    weekly_threshold_hours: null,
+    bank_overtime: true,
+    bank_after_overtime_hours: afterHours,
+  });
+
+  it("reads the banking rules, treating bad values as bank-all", () => {
+    expect(getOvertimeBanking(null)).toEqual({
+      enabled: false,
+      afterHours: 0,
+    });
+    expect(getOvertimeBanking(banking(4))).toEqual({
+      enabled: true,
+      afterHours: 4,
+    });
+    expect(getOvertimeBanking(banking(-3)).afterHours).toBe(0);
+    expect(getOvertimeBanking(banking(500)).afterHours).toBe(0);
+    expect(getOvertimeBanking(banking(null)).afterHours).toBe(0);
+  });
+
+  it("validates the stored bank-after value", () => {
+    expect(isValidBankAfterHours(null)).toBe(true);
+    expect(isValidBankAfterHours(0)).toBe(true);
+    expect(isValidBankAfterHours(168)).toBe(true);
+    expect(isValidBankAfterHours(-1)).toBe(false);
+    expect(isValidBankAfterHours(169)).toBe(false);
+    expect(isValidBankAfterHours(Number.NaN)).toBe(false);
+    expect(isValidBankAfterHours("4")).toBe(false);
+  });
+
+  it("leaves banking out of the split when it is off", () => {
+    const result = allocateOvertime(
+      [shift("s1", "2026-01-05", 10)],
+      settings(8, null),
+    );
+    expect(result.get("s1")).not.toHaveProperty("bankedOvertimeHours");
+    expect(sumOvertime(result.values())).not.toHaveProperty(
+      "bankedOvertimeHours",
+    );
+  });
+
+  it("banks all overtime when no paid allowance is set", () => {
+    const result = allocateOvertime(
+      [shift("s1", "2026-01-05", 10)],
+      banking(0),
+    );
+    expect(result.get("s1")).toMatchObject({
+      overtimeHours: 2,
+      bankedOvertimeHours: 2,
+    });
+    expect(paidOvertimeHours(result.get("s1") as never)).toBe(0);
+  });
+
+  it("pays the first overtime hours each week and banks the rest", () => {
+    // 3h OT Mon, 3h OT Tue, then 2h OT the next Monday (a new week).
+    const result = allocateOvertime(
+      [
+        shift("mon", "2026-01-05", 11),
+        shift("tue", "2026-01-06", 11),
+        shift("b", "2026-01-06", 11, "b"),
+        shift("next", "2026-01-12", 10),
+      ],
+      banking(4),
+    );
+    expect(result.get("mon")?.bankedOvertimeHours).toBe(0);
+    expect(result.get("tue")?.bankedOvertimeHours).toBe(2);
+    // Another worker has their own allowance.
+    expect(result.get("b")?.bankedOvertimeHours).toBe(0);
+    expect(result.get("next")?.bankedOvertimeHours).toBe(0);
+    const total = sumOvertime(result.values());
+    expect(total.overtimeHours).toBe(11);
+    expect(total.bankedOvertimeHours).toBe(2);
+    expect(paidOvertimeHours(total)).toBe(9);
+  });
+
+  it("describes the banking rule", () => {
+    expect(describeBanking(null)).toBe("off");
+    expect(describeBanking(banking(0))).toBe("all overtime is banked");
+    expect(describeBanking(banking(5))).toBe("overtime past 5h/week is banked");
   });
 });
