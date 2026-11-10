@@ -213,8 +213,11 @@ export async function saveFcmTokenDal(
   input: FcmTokenInput,
   userAgent?: string | null,
 ): Promise<Result<true, Failure>> {
-  const { userId } = await auth.protect();
+  const { userId, has } = await auth.protect();
   if (!userId) return err({ reason: "Unauthorized" });
+  if (!has({ feature: NOTIFICATIONS_FEATURE })) {
+    return err({ reason: UPGRADE_REASON });
+  }
   if (!isValidFcmToken(input)) {
     return err({ reason: "Invalid device registration" });
   }

@@ -365,8 +365,20 @@ export async function dbSaveFcmToken(
 			endpoint = ${endpoint},
 			user_agent = ${userAgent},
 			last_seen_at = NOW()
+		WHERE fcm_tokens.user_id = ${userId}
+			OR fcm_tokens.endpoint = ${endpoint}
 		RETURNING *
 	`;
+  // Another user's token only moves to the caller when the caller also sends
+  // the browser subscription already stored for it (the same browser, e.g. a
+  // shared device). Knowing the token alone isn't enough to take over
+  // someone's alerts. NULL endpoints never match.
+  if (!saved) {
+    console.warn(
+      "Refused to reassign an FCM token owned by another user without a matching subscription",
+    );
+    return null;
+  }
   const legacy = [endpoint, input.replacedEndpoint ?? null].filter(
     (e): e is string => typeof e === "string",
   );

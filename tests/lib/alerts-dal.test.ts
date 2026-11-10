@@ -220,6 +220,15 @@ describe("notifications paywall", () => {
     expect((await sendTestNotificationDal())._unsafeUnwrapErr()).toEqual({
       reason,
     });
+    expect(
+      (
+        await saveFcmTokenDal({
+          token: "fcm_token-abc:123456789012345",
+          endpoint: "https://fcm.googleapis.com/fcm/send/x",
+        })
+      )._unsafeUnwrapErr(),
+    ).toEqual({ reason });
+    expect(mocks.dbSaveFcmToken).not.toHaveBeenCalled();
     expect(unpaid.has).toHaveBeenCalledWith({ feature: "notifications" });
     expect(mocks.dbUpdateNotificationPreferences).not.toHaveBeenCalled();
     expect(mocks.dbSavePushSubscription).not.toHaveBeenCalled();
