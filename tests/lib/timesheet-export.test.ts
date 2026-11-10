@@ -1411,6 +1411,19 @@ describe("overtime in exports", () => {
       dailyOt,
     );
 
+  it("adds banked overtime hours when the org banks overtime", () => {
+    const [banked] = applyOvertime([row({ hours: 10 })], {
+      ...dailyOt,
+      bank_overtime: true,
+      bank_after_overtime_hours: 0.5,
+    });
+    expect(banked).toMatchObject({
+      overtimeHours: 2,
+      bankedOvertimeHours: 1.5,
+    });
+    expect(rows()[0]).not.toHaveProperty("bankedOvertimeHours");
+  });
+
   it("leaves rows untouched when the org tracks no overtime", () => {
     const plain = [row()];
     expect(applyOvertime(plain, null)).toBe(plain);

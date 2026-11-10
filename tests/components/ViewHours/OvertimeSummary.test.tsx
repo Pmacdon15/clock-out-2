@@ -117,6 +117,25 @@ describe("OvertimeSummary", () => {
     expect(screen.getByText(/4.00h OT · 2.00h banked/)).toBeInTheDocument();
   });
 
+  it("shows zero banked hours when the paid allowance covers all overtime", () => {
+    const banking = {
+      ...settings,
+      bank_overtime: true,
+      bank_after_overtime_hours: 10,
+    };
+    render(
+      <OvertimeSummary
+        entries={[ada]}
+        overtimeByEntry={computeEntryOvertime([ada], banking)}
+        overtimeSettings={banking}
+      />,
+    );
+    expect(screen.getByTestId("banked-hours")).toHaveTextContent("0.00h");
+    expect(screen.getByTestId("paid-overtime")).toHaveTextContent(
+      "1.00h overtime paid",
+    );
+  });
+
   it("hides the banked card when banking is off", () => {
     renderSummary();
     expect(screen.queryByTestId("banked-hours")).not.toBeInTheDocument();
