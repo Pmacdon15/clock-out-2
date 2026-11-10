@@ -147,11 +147,6 @@ export default function TimeClock({
   // The kinds the org offers, lunch (paid or unpaid, per the org) first.
   const offeredBreakTypes = getOfferedBreakTypes(breakSettings);
   const [pickedBreakType, setBreakType] = useState<BreakType | null>(null);
-  // Defaults to lunch, and falls back to it if the org's lunch pay changes.
-  const breakType =
-    pickedBreakType && offeredBreakTypes.includes(pickedBreakType)
-      ? pickedBreakType
-      : offeredBreakTypes[0];
   // Which punch is waiting on the browser for a position, if any.
   const [locatingFor, setLocatingFor] = useState<"in" | "out" | null>(null);
   const isLocating = locatingFor !== null;
@@ -163,6 +158,15 @@ export default function TimeClock({
     .sort(
       (a, b) => new Date(b.clock_in).getTime() - new Date(a.clock_in).getTime(),
     )[0];
+
+  // Defaults to lunch (or the first kind still allowed this shift), and falls
+  // back to it if the org's lunch pay changes.
+  const breakType =
+    pickedBreakType && offeredBreakTypes.includes(pickedBreakType)
+      ? pickedBreakType
+      : (offeredBreakTypes.find(
+          (type) => !isBreakCountReached(activeEntry, type, breakSettings),
+        ) ?? offeredBreakTypes[0]);
 
   const openBreak = getOpenBreak(activeEntry);
   // When the running break hits its type's limit, if the org set one.

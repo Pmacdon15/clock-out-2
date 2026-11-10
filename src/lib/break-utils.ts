@@ -224,12 +224,13 @@ type BreakCountLimitSettings = Partial<
 
 const normalizeCountLimit = (value: unknown): number | null => {
   const count = Number(value);
-  return value !== null && Number.isInteger(count) && count > 0 ? count : null;
+  return value !== null && Number.isInteger(count) && count >= 0 ? count : null;
 };
 
 /**
- * The org's per-shift count limits for paid and unpaid breaks. Zero,
- * negative and non-integer values all mean "no limit".
+ * The org's per-shift count limits for paid and unpaid breaks. Zero means
+ * no breaks of that kind are allowed at all; negative and non-integer values
+ * mean "no limit".
  */
 export function getBreakCountLimits(
   breakSettings?: BreakCountLimitSettings | null,
@@ -245,7 +246,7 @@ export function isValidBreakCountLimit(value: unknown): boolean {
   return (
     value === null ||
     (Number.isInteger(value) &&
-      (value as number) >= 1 &&
+      (value as number) >= 0 &&
       (value as number) <= MAX_BREAK_COUNT_LIMIT)
   );
 }
@@ -292,6 +293,7 @@ export function breakCountLimitMessage(
   const paid = isPaidBreakType(type);
   const limit = getBreakCountLimits(breakSettings)[paid ? "paid" : "unpaid"];
   const kind = paid ? "paid" : "unpaid";
+  if (limit === 0) return `Your organization doesn't allow ${kind} breaks.`;
   return `You've used all ${limit ?? 0} ${kind} break${limit === 1 ? "" : "s"} allowed this shift.`;
 }
 

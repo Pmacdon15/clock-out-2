@@ -921,7 +921,7 @@ describe("updateBreakSettingsDal", () => {
   });
 
   it.each([
-    ["a zero count", 0],
+    ["a negative count", -1],
     ["a fractional count", 1.5],
     ["an excessive count", 21],
     ["a NaN count", Number.NaN],
