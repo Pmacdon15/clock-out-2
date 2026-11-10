@@ -1997,7 +1997,9 @@ export async function setTimeOffAllowanceDal(
 
 /**
  * The path of the signed-in member's private calendar feed for the current
- * org, for subscribing to their shifts in a calendar app. Null when there is
+ * org, for subscribing to their shifts in a calendar app. A member without a
+ * feed nonce (who only ever had a legacy, unrevocable v1 link) is given one
+ * first, so the link shown is always a revocable v2 one. Null when there is
  * no org or the server has no secret to sign feed URLs with.
  */
 export async function getCalendarFeedPath(): Promise<string | null> {
@@ -2006,9 +2008,20 @@ export async function getCalendarFeedPath(): Promise<string | null> {
   const client = await clerkClient();
   const user = await client.users.getUser(userId).catch(() => null);
   if (!user) return null;
-  const nonce = feedNonceFrom(
+  let nonce = feedNonceFrom(
     user.privateMetadata as Record<string, unknown> | undefined,
   );
+  if (!nonce) {
+    nonce = newFeedNonce();
+    try {
+      await client.users.updateUserMetadata(userId, {
+        privateMetadata: { [FEED_NONCE_METADATA_KEY]: nonce },
+      });
+    } catch (e) {
+      console.error("Error saving calendar feed nonce: ", e);
+      return null;
+    }
+  }
   const token = createFeedToken(orgId, userId, nonce);
   return token ? feedPath(token) : null;
 }

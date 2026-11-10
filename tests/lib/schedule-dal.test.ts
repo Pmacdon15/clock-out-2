@@ -501,17 +501,34 @@ describe("without the scheduling plan feature", () => {
 describe("getCalendarFeedPath", () => {
   afterEach(() => vi.unstubAllEnvs());
 
-  it("returns the member's signed feed path", async () => {
+  it("gives a member without a nonce one, and a v2 path signed with it", async () => {
     vi.stubEnv("CALENDAR_FEED_SECRET", "test-secret");
     mocks.protect.mockResolvedValue(member);
     const path = await getCalendarFeedPath();
     expect(path).toMatch(/^\/api\/calendar\/[\w-]+\.[\w-]+\.ics$/);
+    const [userId, metadata] = mocks.updateUserMetadata.mock.calls[0] as [
+      string,
+      { privateMetadata: { calendarFeedNonce: string } },
+    ];
+    expect(userId).toBe("user_1");
+    const nonce = metadata.privateMetadata.calendarFeedNonce;
+    expect(nonce).toMatch(/^[\w-]{8,64}$/);
     const token = (path as string).slice("/api/calendar/".length, -4);
     expect(verifyFeedToken(token)).toEqual({
       orgId: "org_1",
       userId: "user_1",
-      nonce: null,
+      nonce,
     });
+  });
+
+  it("is null when the new nonce can't be saved", async () => {
+    vi.stubEnv("CALENDAR_FEED_SECRET", "test-secret");
+    mocks.protect.mockResolvedValue(member);
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.updateUserMetadata.mockRejectedValueOnce(new Error("clerk down"));
+    await expect(getCalendarFeedPath()).resolves.toBeNull();
+    expect(error).toHaveBeenCalled();
+    error.mockRestore();
   });
 
   it("signs the member's current nonce into the path", async () => {
@@ -523,6 +540,7 @@ describe("getCalendarFeedPath", () => {
     const path = (await getCalendarFeedPath()) as string;
     const token = path.slice("/api/calendar/".length, -4);
     expect(verifyFeedToken(token)?.nonce).toBe("nonce_current");
+    expect(mocks.updateUserMetadata).not.toHaveBeenCalled();
   });
 
   it("is null when the member can't be looked up", async () => {
