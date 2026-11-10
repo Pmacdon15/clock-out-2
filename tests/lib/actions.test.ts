@@ -195,6 +195,27 @@ describe("updateTimeEntryAction arguments", () => {
     );
   });
 
+  it.each([
+    ["a non-string clock-in", { not: "a date" }, null],
+    ["an unparseable clock-in", "not a date", null],
+    ["an unparseable clock-out", "2026-01-05T09:00:00.000Z", "nope"],
+  ])(
+    "rejects %s without calling the DAL",
+    async (_label, clockIn, clockOut) => {
+      await expect(
+        updateTimeEntryAction(
+          7,
+          clockIn as unknown as string,
+          clockOut as string | null,
+        ),
+      ).resolves.toEqual({
+        success: false,
+        error: "Invalid clock-in or clock-out time",
+      });
+      expect(mocks.updateTimeEntry).not.toHaveBeenCalled();
+    },
+  );
+
   it("forwards skip_lunch when provided", async () => {
     mocks.updateTimeEntry.mockResolvedValue(ok(entry));
     await updateTimeEntryAction(
@@ -461,6 +482,16 @@ describe("updateBreakAction", () => {
       null,
       "paid_rest",
     );
+  });
+
+  it("rejects an unparseable start without calling the DAL", async () => {
+    await expect(
+      updateBreakAction(7, 12 as unknown as string, null, "paid_rest"),
+    ).resolves.toEqual({
+      success: false,
+      error: "Invalid break start or end time",
+    });
+    expect(mocks.updateBreakDal).not.toHaveBeenCalled();
   });
 
   it("returns the failure reason", async () => {

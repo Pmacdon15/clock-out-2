@@ -35,6 +35,7 @@ import {
 import type { Coordinates } from "./geo";
 import { reverseGeocode, searchAddress } from "./geoapify";
 import { mirrorShiftToGoogleCalendar } from "./google-calendar";
+import { parseClientDate } from "./input-validation";
 import {
   checkRateLimit,
   GEOCODE_LIMIT,
@@ -121,8 +122,12 @@ export async function updateTimeEntryAction(
   clock_out: string | null,
   skip_lunch?: boolean,
 ) {
-  const clockInDate = new Date(clock_in);
-  const clockOutDate = clock_out ? new Date(clock_out) : null;
+  const clockInDate = parseClientDate(clock_in);
+  // The edit form sends "" for a shift that is still open.
+  const clockOutDate = clock_out ? parseClientDate(clock_out) : null;
+  if (!clockInDate || (clock_out && !clockOutDate)) {
+    return { success: false, error: "Invalid clock-in or clock-out time" };
+  }
   const result =
     skip_lunch === undefined
       ? await dalUpdateTimeEntry(id, clockInDate, clockOutDate)
@@ -318,12 +323,12 @@ export async function updateBreakAction(
   break_end: string | null,
   break_type: BreakType,
 ) {
-  const result = await dalUpdateBreak(
-    id,
-    new Date(break_start),
-    break_end ? new Date(break_end) : null,
-    break_type,
-  );
+  const breakStart = parseClientDate(break_start);
+  const breakEnd = break_end ? parseClientDate(break_end) : null;
+  if (!breakStart || (break_end && !breakEnd)) {
+    return { success: false, error: "Invalid break start or end time" };
+  }
+  const result = await dalUpdateBreak(id, breakStart, breakEnd, break_type);
 
   return result.match(
     (brk) => {

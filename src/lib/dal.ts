@@ -2,6 +2,7 @@ import { auth, clerkClient } from "@clerk/nextjs/server";
 import { addDays, format, startOfDay, subDays } from "date-fns";
 import { fromZonedTime } from "date-fns-tz";
 import { errAsync, okAsync, type ResultAsync } from "neverthrow";
+import { isValidTimeZone } from "./alerts";
 import {
   BREAK_TYPE_VALUES,
   breakCountLimitMessage,
@@ -80,6 +81,11 @@ import {
   type StoredLocation,
 } from "./geo";
 import { reverseGeocode } from "./geoapify";
+import {
+  invalidSiteTextReason,
+  isWithinRecordedWindow,
+  reportingSettingsSchema,
+} from "./input-validation";
 import {
   isValidOvertimeThreshold,
   MAX_DAILY_OVERTIME_HOURS,
@@ -267,6 +273,9 @@ export async function getTimeEntries(
   }
 
   const tz = filters?.timezone || "UTC";
+  if (!isValidTimeZone(tz)) {
+    return { ok: false, error: { reason: "Invalid time zone" } };
+  }
   const startDate = parseFilterDate(filters?.start, tz, false);
   const endDate = parseFilterDate(filters?.end, tz, true);
 
@@ -301,6 +310,9 @@ export async function getOrgTimeEntries(filters?: {
   }
 
   const tz = filters?.timezone || "UTC";
+  if (!isValidTimeZone(tz)) {
+    return { ok: false, error: { reason: "Invalid time zone" } };
+  }
   const startDate = parseFilterDate(filters?.start, tz, false);
   const endDate = parseFilterDate(filters?.end, tz, true);
 
@@ -479,6 +491,15 @@ export async function updateTimeEntry(
   if (hasInvalidTime) {
     return errAsync({ reason: "Invalid clock-in or clock-out time" } as const);
   }
+  if (
+    !isWithinRecordedWindow(clock_in) ||
+    (clock_out !== null && !isWithinRecordedWindow(clock_out))
+  ) {
+    return errAsync({
+      reason:
+        "Clock-in and clock-out must be after 2000 and no more than a week from now",
+    } as const);
+  }
   if (clock_out !== null && clock_out.getTime() <= clock_in.getTime()) {
     return errAsync({ reason: "Clock out must be after clock in" } as const);
   }
@@ -551,11 +572,19 @@ export async function updateReportingSettingsDal(
   ) {
     return errAsync({ reason: "Unauthorized" } as const);
   }
-  return await dbUpdateReportingSettings(
-    authUser.orgId,
+  const parsed = reportingSettingsSchema.safeParse({
     frequency,
     day,
     interval,
+  });
+  if (!parsed.success) {
+    return errAsync({ reason: "Invalid reporting settings" } as const);
+  }
+  return await dbUpdateReportingSettings(
+    authUser.orgId,
+    parsed.data.frequency,
+    parsed.data.day,
+    parsed.data.interval,
   )
     .then((updated) => {
       return okAsync(updated);
@@ -1094,6 +1123,12 @@ export async function updateBreakDal(
   if (!userId || !orgId || orgRole !== "org:admin") {
     return errAsync({ reason: "Unauthorized" } as const);
   }
+  if (
+    !isWithinRecordedWindow(breakStart) ||
+    (breakEnd !== null && !isWithinRecordedWindow(breakEnd))
+  ) {
+    return errAsync({ reason: "Invalid break start or end time" } as const);
+  }
 
   const existing = await dbGetBreakWithEntry(id, orgId).catch((e) => {
     console.error("Error fetching break: ", e);
@@ -1207,8 +1242,10 @@ function invalidSiteReason(
   latitude: number,
   longitude: number,
   radiusMeters: number,
+  address?: string | null,
 ) {
-  if (!name.trim()) return "Site name is required";
+  const invalidText = invalidSiteTextReason(name, address);
+  if (invalidText) return invalidText;
   if (
     !Number.isFinite(latitude) ||
     latitude < -90 ||
@@ -1284,7 +1321,13 @@ export async function createSiteDal(
   ) {
     return errAsync({ reason: "Unauthorized" } as const);
   }
-  const invalid = invalidSiteReason(name, latitude, longitude, radiusMeters);
+  const invalid = invalidSiteReason(
+    name,
+    latitude,
+    longitude,
+    radiusMeters,
+    address,
+  );
   if (invalid) {
     return errAsync({ reason: invalid } as const);
   }
@@ -1332,7 +1375,13 @@ export async function updateSiteDal(
   ) {
     return errAsync({ reason: "Unauthorized" } as const);
   }
-  const invalid = invalidSiteReason(name, latitude, longitude, radiusMeters);
+  const invalid = invalidSiteReason(
+    name,
+    latitude,
+    longitude,
+    radiusMeters,
+    address,
+  );
   if (invalid) {
     return errAsync({ reason: invalid } as const);
   }
