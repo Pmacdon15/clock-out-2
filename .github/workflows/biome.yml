@@ -88,21 +88,29 @@ jobs:
   commit:
     name: Commit Biome fixes
     needs: biome
-    # Still commit the fixes when unfixable problems fail the Check step.
-    if: ${{ !cancelled() && needs.biome.outputs.has_fixes == 'true' }}
+    # Always runs (so it reports a result instead of showing as skipped),
+    # including when unfixable problems fail the Check step. With nothing to
+    # commit it only says so; the steps below that use the token are skipped.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: write # commit the fixes
       actions: write # re-run the checks on the fix commit
     steps:
+      - name: Nothing to commit
+        if: needs.biome.outputs.has_fixes != 'true'
+        run: echo "Biome made no changes (or this run can't fix, e.g. a fork PR or a push to master), so there is nothing to commit."
+
       # No checkout and no install: only the artifact and the API are used here.
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - if: needs.biome.outputs.has_fixes == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: biome-fixes
           path: ${{ runner.temp }}/fixes
 
       - name: Commit fixes to the pull request
+        if: needs.biome.outputs.has_fixes == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           BRANCH: ${{ github.event.pull_request.head.ref }}
