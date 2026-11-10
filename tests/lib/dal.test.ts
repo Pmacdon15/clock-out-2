@@ -216,6 +216,14 @@ describe("getOrgMembers", () => {
 });
 
 describe("getTimeEntries", () => {
+  it("rejects an unknown time zone without querying", async () => {
+    mocks.protect.mockResolvedValue(member);
+    await expect(
+      getTimeEntries(undefined, { start: "2026-01-01", timezone: "Not/AZone" }),
+    ).resolves.toEqual({ ok: false, error: { reason: "Invalid time zone" } });
+    expect(mocks.dbGetTimeEntries).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["no user", noUser],
     ["no org", noOrg],
@@ -288,6 +296,14 @@ describe("getTimeEntries", () => {
 });
 
 describe("getOrgTimeEntries", () => {
+  it("rejects an unknown time zone without querying", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    await expect(
+      getOrgTimeEntries({ timezone: "x".repeat(200) }),
+    ).resolves.toEqual({ ok: false, error: { reason: "Invalid time zone" } });
+    expect(mocks.dbGetOrgTimeEntries).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["no user", noUser],
     ["no org", noOrg],
@@ -489,6 +505,18 @@ describe("updateTimeEntry", () => {
   const clockInAt = new Date("2026-01-05T09:00:00Z");
   const clockOutAt = new Date("2026-01-05T17:00:00Z");
 
+  it.each([
+    ["before 2000", new Date("1990-01-01T09:00:00Z"), clockOutAt],
+    ["far in the future", clockInAt, new Date("9000-01-01T00:00:00Z")],
+  ])("rejects times %s", async (_label, inAt, outAt) => {
+    mocks.protect.mockResolvedValue(admin);
+    expect((await updateTimeEntry(1, inAt, outAt))._unsafeUnwrapErr()).toEqual({
+      reason:
+        "Clock-in and clock-out must be after 2000 and no more than a week from now",
+    });
+    expect(mocks.dbUpdateTimeEntry).not.toHaveBeenCalled();
+  });
+
   it("rejects requests without a user or org", async () => {
     mocks.protect.mockResolvedValue(noOrg);
     expect(
@@ -663,6 +691,21 @@ describe("updateReportingSettingsDal", () => {
     expect(
       (await updateReportingSettingsDal("weekly"))._unsafeUnwrapErr(),
     ).toEqual({ reason: "Failed to update settings" });
+  });
+
+  it.each([
+    ["an unknown frequency", "x".repeat(5000), null, 1],
+    ["an unknown day", "custom", "Funday", 1],
+    ["an out-of-range interval", "custom", "Monday", 52],
+    ["a fractional interval", "custom", "Monday", 1.5],
+  ])("rejects %s without saving", async (_label, freq, day, interval) => {
+    mocks.protect.mockResolvedValue(withFeature(admin, true));
+    expect(
+      (
+        await updateReportingSettingsDal(freq, day, interval)
+      )._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Invalid reporting settings" });
+    expect(mocks.dbUpdateReportingSettings).not.toHaveBeenCalled();
   });
 });
 
@@ -1662,6 +1705,20 @@ describe("updateBreakDal", () => {
     expect(mocks.dbUpdateBreak).not.toHaveBeenCalled();
   });
 
+  it("rejects break times outside the recorded window", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    const result = await updateBreakDal(
+      4,
+      new Date("1970-01-01T00:00:00Z"),
+      breakEnd,
+      "unpaid_meal",
+    );
+    expect(result._unsafeUnwrapErr()).toEqual({
+      reason: "Invalid break start or end time",
+    });
+    expect(mocks.dbGetBreakWithEntry).not.toHaveBeenCalled();
+  });
+
   it("fails when the break does not exist in the org", async () => {
     mocks.protect.mockResolvedValue(admin);
     mocks.dbGetBreakWithEntry.mockResolvedValue(undefined);
@@ -1923,6 +1980,14 @@ describe.each([
     ["a negative radius", "Depot", 45, -75, -1, "Invalid site radius"],
     ["an absurd radius", "Depot", 45, -75, 200_000, "Invalid site radius"],
     ["a NaN radius", "Depot", 45, -75, Number.NaN, "Invalid site radius"],
+    [
+      "an oversized name",
+      "a".repeat(101),
+      45,
+      -75,
+      150,
+      "Site name must be 100 characters or fewer",
+    ],
   ])("rejects %s", async (_label, siteName, lat, lon, radius, reason) => {
     mocks.protect.mockResolvedValue(withFeatures(admin, "geofencing"));
     expect((await call(siteName, lat, lon, radius))._unsafeUnwrapErr()).toEqual(
@@ -1958,6 +2023,14 @@ describe.each([
         ? [7, "org_1", "Depot", 45, -75, 150, "111 Albert St"]
         : ["org_1", "Depot", 45, -75, 150, "111 Albert St"]),
     );
+  });
+
+  it("rejects an oversized address without saving", async () => {
+    mocks.protect.mockResolvedValue(withFeatures(admin, "geofencing"));
+    expect(
+      (await call("Depot", 45, -75, 150, "a".repeat(501)))._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Site address must be 500 characters or fewer" });
+    expect(dbFn()).not.toHaveBeenCalled();
   });
 
   it("returns an error when the query fails", async () => {
