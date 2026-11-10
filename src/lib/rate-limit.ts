@@ -15,6 +15,12 @@ export type RateLimit = {
   limit: number;
   /** Window length in seconds. */
   windowSeconds: number;
+  /**
+   * Refuse requests when the limiter itself fails (database down). Set for
+   * limits that guard paid or quota-bound services, so an outage can't
+   * silently remove the cap; left off where availability matters more.
+   */
+  failClosed?: boolean;
 };
 
 export type RateLimitResult =
@@ -26,18 +32,31 @@ export const GEOCODE_LIMIT: RateLimit = {
   name: "geocode",
   limit: 60,
   windowSeconds: 10 * 60,
+  failClosed: true,
+};
+/**
+ * Reverse geocoding / address search done while punching in or out (web and
+ * MCP), per user. Hitting it never blocks the punch, only skips the lookup.
+ */
+export const PUNCH_GEOCODE_LIMIT: RateLimit = {
+  name: "punch-geocode",
+  limit: 30,
+  windowSeconds: 10 * 60,
+  failClosed: true,
 };
 /** "Send a test notification" (SES email + push). */
 export const TEST_NOTIFICATION_LIMIT: RateLimit = {
   name: "test-notification",
   limit: 5,
   windowSeconds: 60 * 60,
+  failClosed: true,
 };
 /** "Send this week's report now" (SES email to every admin). */
 export const TEST_REPORT_LIMIT: RateLimit = {
   name: "test-report",
   limit: 3,
   windowSeconds: 60 * 60,
+  failClosed: true,
 };
 /** MCP requests per signed-in user (each one makes several Clerk calls). */
 export const MCP_REQUEST_LIMIT: RateLimit = {
@@ -45,6 +64,18 @@ export const MCP_REQUEST_LIMIT: RateLimit = {
   limit: 120,
   windowSeconds: 60,
 };
+/**
+ * Requests carrying a bearer token, per client IP, counted before the token
+ * is verified so junk tokens can't drive unbounded Clerk API calls.
+ */
+export const MCP_PREAUTH_IP_LIMIT: RateLimit = {
+  name: "mcp-ip",
+  limit: 300,
+  windowSeconds: 60,
+};
+
+/** Retry delay reported when a fail-closed limiter can't reach the database. */
+const LIMITER_DOWN_RETRY_SECONDS = 60;
 
 let tableReady: Promise<void> | null = null;
 
@@ -71,9 +102,9 @@ export function retryAfterText(seconds: number) {
 }
 
 /**
- * Counts one request against `limit` for `subject` (a user or org ID) and
- * says whether it's allowed. A database error lets the request through:
- * a broken limiter shouldn't take the feature down with it.
+ * Counts one request against `limit` for `subject` (a user, org ID or IP)
+ * and says whether it's allowed. On a database error the request is let
+ * through, unless the limit is `failClosed`, in which case it is refused.
  */
 export async function checkRateLimit(
   limit: RateLimit,
@@ -106,6 +137,9 @@ export async function checkRateLimit(
     return { ok: false, retryAfterSeconds };
   } catch (error) {
     console.error(`Rate limit check failed for ${limit.name}:`, error);
+    if (limit.failClosed) {
+      return { ok: false, retryAfterSeconds: LIMITER_DOWN_RETRY_SECONDS };
+    }
     return { ok: true, remaining: limit.limit };
   }
 }

@@ -38,9 +38,9 @@ import {
   type SiteLike,
   type StoredLocation,
 } from "@/lib/geo";
-import { reverseGeocode, searchAddress } from "@/lib/geoapify";
 import { payRateMap } from "@/lib/pay";
 import { loadPdfImage } from "@/lib/pdf-image";
+import { punchReverseGeocode, punchSearchAddress } from "@/lib/punch-geocode";
 import { orgHasReportingFeature, sendWeeklyReports } from "@/lib/reports";
 import {
   buildEmployeeSummary,
@@ -1299,7 +1299,14 @@ export async function resolveMcpLocation(
   input: McpLocationInput,
   enforceGeofence = true,
   orgName = "organization",
+  /** The caller, for metering Geoapify lookups (PUNCH_GEOCODE_LIMIT). */
+  userId = orgId,
 ): Promise<McpLocationResolution> {
+  const reverseGeocode = (coordinates: {
+    latitude: number;
+    longitude: number;
+  }) => punchReverseGeocode(userId, coordinates);
+  const searchAddress = (text: string) => punchSearchAddress(userId, text);
   let settings: LocationSettingsData | null = null;
   try {
     settings = (await dbGetLocationSettings(orgId)) ?? null;
@@ -1951,6 +1958,7 @@ export async function clockInTool(
     input,
     true,
     org.orgName,
+    caller.userId,
   );
 
   if (!locationResolution.allowed) {
@@ -2105,6 +2113,7 @@ export async function clockOutTool(
     input,
     false,
     org.orgName,
+    caller.userId,
   );
   const punchLocation = locationResolution.allowed
     ? locationResolution.location

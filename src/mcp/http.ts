@@ -231,10 +231,23 @@ export function tooManyRequests(retryAfterSeconds: number) {
   );
 }
 
+/**
+ * The caller's IP for rate limiting: the first `X-Forwarded-For` hop (set by
+ * Vercel's edge), then `X-Real-IP`, else "unknown" so callers without either
+ * share one bucket rather than going unmetered.
+ */
+export function clientIp(req: Request) {
+  const forwarded = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  const ip = forwarded || req.headers.get("x-real-ip")?.trim();
+  return ip ? ip.slice(0, 64) : "unknown";
+}
+
 export function mcpRoute(
   handler: McpHandler,
   verifyToken: VerifyToken,
   rateLimit?: RateLimitCheck,
+  /** Checked per client IP before the token is verified (see clientIp). */
+  preAuthRateLimit?: RateLimitCheck,
 ) {
   return async function route(req: Request): Promise<Response> {
     if (req.method === "OPTIONS") return preflight(req);
@@ -245,6 +258,15 @@ export function mcpRoute(
         `MCP: ${req.method} without a bearer token, asked to sign in (${callerLabel(req)})`,
       );
       return withCors(unauthorized(req));
+    }
+
+    if (preAuthRateLimit) {
+      const ip = clientIp(req);
+      const limited = await preAuthRateLimit(ip);
+      if (!limited.ok) {
+        console.warn(`MCP: rate limited IP ${ip} (${callerLabel(req)})`);
+        return withCors(tooManyRequests(limited.retryAfterSeconds));
+      }
     }
 
     let authInfo: AuthInfo | undefined;

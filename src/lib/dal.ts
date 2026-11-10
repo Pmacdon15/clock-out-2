@@ -80,7 +80,6 @@ import {
   isCaptureEnabled,
   type StoredLocation,
 } from "./geo";
-import { reverseGeocode } from "./geoapify";
 import {
   invalidSiteTextReason,
   isWithinRecordedWindow,
@@ -100,6 +99,7 @@ import {
   TIME_OFF_FEATURE,
   TIME_OFF_UPGRADE_REASON,
 } from "./plan-features";
+import { punchReverseGeocode } from "./punch-geocode";
 import {
   evaluateShifts,
   invalidShiftReason,
@@ -150,6 +150,7 @@ export type { SerializableResult, TimeEntry, TimeEntryBreak };
  * of the clock.
  */
 async function resolvePunchLocation(
+  userId: string,
   orgId: string,
   coordinates: Coordinates | null | undefined,
   enforceGeofence: boolean,
@@ -186,7 +187,7 @@ async function resolvePunchLocation(
 
   let address: string | null = null;
   try {
-    address = await reverseGeocode({
+    address = await punchReverseGeocode(userId, {
       latitude: decision.location.latitude,
       longitude: decision.location.longitude,
     });
@@ -378,6 +379,7 @@ export async function clockIn(coordinates?: Coordinates | null) {
   }
 
   const punchLocation = await resolvePunchLocation(
+    userId,
     orgId,
     coordinates,
     true,
@@ -420,6 +422,7 @@ export async function clockOut(coordinates?: Coordinates | null) {
   // Clocking out is never geofenced — leaving a site must not trap anyone on
   // the clock — but it still records where it happened when capture is on.
   const punchLocation = await resolvePunchLocation(
+    userId,
     orgId,
     coordinates,
     false,

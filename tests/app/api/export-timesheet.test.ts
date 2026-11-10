@@ -16,6 +16,15 @@ vi.mock("@clerk/nextjs/server", () => ({
   })),
 }));
 
+const mockCheckRateLimit = vi.fn(async () => ({
+  ok: true as const,
+  remaining: 1,
+}));
+vi.mock("@/lib/rate-limit", () => ({
+  checkRateLimit: (...args: unknown[]) => mockCheckRateLimit(...args),
+  MCP_PREAUTH_IP_LIMIT: { name: "mcp-ip", limit: 300, windowSeconds: 60 },
+}));
+
 const mockVerifyMcpToken = vi.fn();
 vi.mock("@/mcp/auth", () => ({
   verifyMcpToken: (...args: unknown[]) => mockVerifyMcpToken(...args),
@@ -238,6 +247,33 @@ describe("GET /api/export/timesheet", () => {
     const res = await GET(req);
 
     expect(res.status).toBe(401);
+  });
+
+  it("rate limits bearer requests per IP before verifying the token", async () => {
+    mockAuth.mockResolvedValueOnce({ userId: null });
+    mockCheckRateLimit.mockResolvedValueOnce({
+      ok: false,
+      retryAfterSeconds: 30,
+    } as never);
+
+    const req = new Request(
+      "https://clockout.patmac.ca/api/export/timesheet?org_id=org_1",
+      {
+        headers: {
+          authorization: "Bearer oat_123",
+          "x-forwarded-for": "203.0.113.9, 10.0.0.1",
+        },
+      },
+    );
+    const res = await GET(req);
+
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("30");
+    expect(mockCheckRateLimit).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "mcp-ip" }),
+      "203.0.113.9",
+    );
+    expect(mockVerifyMcpToken).not.toHaveBeenCalled();
   });
 
   it("downloads a CSV attachment with text/csv headers", async () => {

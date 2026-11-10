@@ -120,6 +120,11 @@ vi.mock("@/lib/reports", () => ({
 const mockReverseGeocode = vi.fn(async () => null);
 const mockSearchAddress = vi.fn(async () => []);
 
+vi.mock("@/lib/rate-limit", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/rate-limit")>()),
+  checkRateLimit: vi.fn(async () => ({ ok: true as const, remaining: 1 })),
+}));
+
 vi.mock("@/lib/geoapify", () => ({
   reverseGeocode: (...args: unknown[]) => mockReverseGeocode(...args),
   searchAddress: (...args: unknown[]) => mockSearchAddress(...args),

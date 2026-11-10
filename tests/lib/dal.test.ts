@@ -91,6 +91,11 @@ vi.mock("@/lib/utils-clerk", () => ({
   isOverMemberShipLimit: mocks.isOverMemberShipLimit,
 }));
 
+vi.mock("@/lib/rate-limit", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/rate-limit")>()),
+  checkRateLimit: vi.fn(async () => ({ ok: true as const, remaining: 1 })),
+}));
+
 vi.mock("@/lib/geoapify", () => ({
   reverseGeocode: mocks.reverseGeocode,
 }));

@@ -82,11 +82,28 @@ async function audienceAllowed(
   }
 }
 
+/**
+ * Whether a bearer token could be a Clerk OAuth access token: an opaque
+ * `oat_...` token or a JWT. Anything else is refused without a Clerk call,
+ * so junk tokens cost nothing.
+ */
+export function looksLikeOAuthToken(token: string): boolean {
+  if (token.length > 4096) return false;
+  return (
+    /^oat_[A-Za-z0-9_-]+$/.test(token) ||
+    /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token)
+  );
+}
+
 export async function verifyMcpToken(
   req: Request,
   token: string | undefined,
 ): Promise<AuthInfo | undefined> {
   if (!token) return undefined;
+  if (!looksLikeOAuthToken(token)) {
+    console.warn("MCP: refused a bearer token that isn't an OAuth token");
+    return undefined;
+  }
   return verifyOAuthToken(req, token);
 }
 

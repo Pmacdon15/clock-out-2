@@ -1,6 +1,12 @@
 import { auth } from "@clerk/nextjs/server";
+import { checkRateLimit, MCP_PREAUTH_IP_LIMIT } from "@/lib/rate-limit";
 import { verifyMcpToken } from "@/mcp/auth";
-import { bearerToken, publicOrigin } from "@/mcp/http";
+import {
+  bearerToken,
+  clientIp,
+  publicOrigin,
+  tooManyRequests,
+} from "@/mcp/http";
 import {
   exportTimesheetInputSchema,
   generateTimesheetExport,
@@ -12,6 +18,11 @@ export async function GET(req: Request): Promise<Response> {
 
   if (!userId) {
     const token = bearerToken(req);
+    if (token) {
+      // Counted before verification so junk tokens can't drive Clerk calls.
+      const limited = await checkRateLimit(MCP_PREAUTH_IP_LIMIT, clientIp(req));
+      if (!limited.ok) return tooManyRequests(limited.retryAfterSeconds);
+    }
     const authInfo = token ? await verifyMcpToken(req, token) : undefined;
     if (typeof authInfo?.extra?.userId === "string") {
       userId = authInfo.extra.userId;
