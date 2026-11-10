@@ -11,12 +11,12 @@ import { configuredIssuer } from "../mcp/oauth-config";
  * connect and frame sources, is sent report-only (below) until its reports
  * show it doesn't block anything the app needs.
  */
-export const CONTENT_SECURITY_POLICY = [
+const BASE_ENFORCED_DIRECTIVES = [
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "object-src 'none'",
   "form-action 'self'",
-].join("; ");
+];
 
 /**
  * Browser features the app may use: geolocation for clock-in location on
@@ -79,6 +79,61 @@ export function reportOnlyPolicy(clerkOrigin: string | null) {
 
 export const CONTENT_SECURITY_POLICY_REPORT_ONLY = reportOnlyPolicy(
   configuredIssuer(),
+);
+
+/** Report-only directives that may be promoted to the enforced policy. */
+export const PROMOTABLE_DIRECTIVES = [
+  "default-src",
+  "script-src",
+  "style-src",
+  "img-src",
+  "font-src",
+  "connect-src",
+  "frame-src",
+  "worker-src",
+  "manifest-src",
+] as const;
+
+/**
+ * Directive names to enforce, from `CSP_ENFORCE_DIRECTIVES` (comma or space
+ * separated, e.g. "img-src, frame-src, connect-src"). Unknown names are
+ * ignored. Read at build time, since headers are set in next.config.ts.
+ */
+export function enforcedDirectiveNames(
+  raw = process.env.CSP_ENFORCE_DIRECTIVES,
+): string[] {
+  const allowed = new Set<string>(PROMOTABLE_DIRECTIVES);
+  return [
+    ...new Set(
+      (raw ?? "")
+        .split(/[\s,]+/)
+        .map((d) => d.trim().toLowerCase())
+        .filter((d) => allowed.has(d)),
+    ),
+  ];
+}
+
+/**
+ * The enforced policy: the always-safe base directives plus any report-only
+ * directives promoted with CSP_ENFORCE_DIRECTIVES once their reports at
+ * /api/csp-report are clean. Promote one or two at a time, starting with
+ * img-src, frame-src, connect-src and default-src, which don't depend on
+ * nonces.
+ */
+export function enforcedPolicy(
+  reportOnly: string,
+  promote: readonly string[],
+): string {
+  const promoted = reportOnly.split("; ").filter((d) => {
+    const name = d.split(" ")[0];
+    return promote.some((p) => p === name);
+  });
+  return [...BASE_ENFORCED_DIRECTIVES, ...promoted].join("; ");
+}
+
+export const CONTENT_SECURITY_POLICY = enforcedPolicy(
+  CONTENT_SECURITY_POLICY_REPORT_ONLY,
+  enforcedDirectiveNames(),
 );
 
 export const securityHeaders = [
