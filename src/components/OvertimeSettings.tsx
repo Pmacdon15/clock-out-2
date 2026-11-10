@@ -6,8 +6,11 @@ import { startTransition, useState } from "react";
 import { toast } from "sonner";
 import { updateOvertimeSettingsAction } from "@/lib/actions";
 import {
+  getOvertimeBanking,
   getOvertimeThresholds,
+  isValidBankAfterHours,
   isValidOvertimeThreshold,
+  MAX_BANK_AFTER_OVERTIME_HOURS,
   MAX_DAILY_OVERTIME_HOURS,
   MAX_WEEKLY_OVERTIME_HOURS,
 } from "@/lib/overtime";
@@ -55,14 +58,30 @@ export default function OvertimeSettings({
     weekly: saved.weekly ?? FIELDS[1].defaultHours,
   });
 
+  const savedBanking = getOvertimeBanking(initialData);
+  const [bankOvertime, setBankOvertime] = useState(savedBanking.enabled);
+  const [bankAfterHours, setBankAfterHours] = useState(savedBanking.afterHours);
+
   const thresholds: Record<Field, number | null> = {
     daily: enabled.daily ? hours.daily : null,
     weekly: enabled.weekly ? hours.weekly : null,
   };
+  // Turning banking off keeps no "bank past" value.
+  const banking = {
+    bankOvertime,
+    bankAfterOvertimeHours: bankOvertime ? bankAfterHours : null,
+  };
 
   const { mutate, isPending } = useMutation({
-    mutationFn: (next: Record<Field, number | null>) =>
-      updateOvertimeSettingsAction(next.daily, next.weekly),
+    mutationFn: (next: {
+      thresholds: Record<Field, number | null>;
+      banking: typeof banking;
+    }) =>
+      updateOvertimeSettingsAction(
+        next.thresholds.daily,
+        next.thresholds.weekly,
+        next.banking,
+      ),
     onSuccess: (res) => {
       if (res.success) {
         toast.success("Overtime settings updated");
@@ -72,11 +91,18 @@ export default function OvertimeSettings({
     },
   });
 
+  const bankAfterInvalid =
+    bankOvertime && !isValidBankAfterHours(bankAfterHours);
   const hasChanged =
-    thresholds.daily !== saved.daily || thresholds.weekly !== saved.weekly;
-  const invalid = FIELDS.some(
-    (field) => !isValidOvertimeThreshold(thresholds[field.id], field.max),
-  );
+    thresholds.daily !== saved.daily ||
+    thresholds.weekly !== saved.weekly ||
+    bankOvertime !== savedBanking.enabled ||
+    (bankOvertime && bankAfterHours !== savedBanking.afterHours);
+  const invalid =
+    bankAfterInvalid ||
+    FIELDS.some(
+      (field) => !isValidOvertimeThreshold(thresholds[field.id], field.max),
+    );
 
   return (
     <Card className="p-8">
@@ -156,6 +182,59 @@ export default function OvertimeSettings({
             </div>
           );
         })}
+
+        <div className="space-y-2 border-zinc-200 border-t pt-6 dark:border-zinc-800">
+          <label
+            className="flex cursor-pointer items-start gap-3"
+            htmlFor="overtime-bank"
+          >
+            <input
+              checked={bankOvertime}
+              className="mt-1 h-4 w-4 accent-zinc-900 dark:accent-zinc-100"
+              id="overtime-bank"
+              onChange={(e) => setBankOvertime(e.target.checked)}
+              type="checkbox"
+            />
+            <span>
+              <span className="block font-medium">Bank overtime</span>
+              <span className="block text-muted-foreground text-sm">
+                Save overtime as banked hours (time in lieu) instead of paying
+                it. Banked hours are left out of overtime pay estimates.
+              </span>
+            </span>
+          </label>
+          {bankOvertime && (
+            <div className="space-y-1 pl-7">
+              <label
+                className="font-medium text-sm"
+                htmlFor="overtime-bank-after-hours"
+              >
+                Bank overtime past (overtime hours per week)
+              </label>
+              <input
+                className="h-12 w-full rounded-xl border-2 border-zinc-200 bg-white px-4 dark:border-zinc-800 dark:bg-zinc-950"
+                id="overtime-bank-after-hours"
+                max={MAX_BANK_AFTER_OVERTIME_HOURS}
+                min={0}
+                onChange={(e) => setBankAfterHours(Number(e.target.value))}
+                step={0.5}
+                type="number"
+                value={bankAfterHours}
+              />
+              <p className="text-muted-foreground text-sm">
+                The first this-many overtime hours each Monday–Sunday week are
+                paid; every overtime hour past that is banked. Use 0 to bank all
+                overtime.
+              </p>
+              {bankAfterInvalid && (
+                <p className="text-red-600 text-sm dark:text-red-400">
+                  Enter a number of hours from 0 to{" "}
+                  {MAX_BANK_AFTER_OVERTIME_HOURS}.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="mt-8 flex justify-end">
@@ -168,9 +247,11 @@ export default function OvertimeSettings({
                 onUpdateOptimistic({
                   daily_threshold_hours: thresholds.daily,
                   weekly_threshold_hours: thresholds.weekly,
+                  bank_overtime: banking.bankOvertime,
+                  bank_after_overtime_hours: banking.bankAfterOvertimeHours,
                 });
               }
-              await mutate(thresholds);
+              await mutate({ thresholds, banking });
             });
           }}
         >

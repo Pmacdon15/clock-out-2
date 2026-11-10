@@ -816,8 +816,23 @@ describe("updateOvertimeSettingsAction", () => {
       success: true,
       data: { org_id: "org_1" },
     });
-    expect(mocks.updateOvertimeSettingsDal).toHaveBeenCalledWith(8, 40);
+    expect(mocks.updateOvertimeSettingsDal).toHaveBeenCalledWith(
+      8,
+      40,
+      undefined,
+    );
     expect(mocks.updateTag).toHaveBeenCalledWith("overtime-settings-org_1");
+  });
+
+  it("passes the banking rules through", async () => {
+    mocks.updateOvertimeSettingsDal.mockResolvedValue(ok({ org_id: "org_1" }));
+    const banking = { bankOvertime: true, bankAfterOvertimeHours: 4 };
+    await updateOvertimeSettingsAction(null, 40, banking);
+    expect(mocks.updateOvertimeSettingsDal).toHaveBeenCalledWith(
+      null,
+      40,
+      banking,
+    );
   });
 
   it("returns the failure reason", async () => {

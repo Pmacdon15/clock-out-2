@@ -19,6 +19,8 @@ import type { BreakSettingsData, OvertimeSettingsData } from "./types";
 /** Largest threshold accepted, in hours. */
 export const MAX_DAILY_OVERTIME_HOURS = 24;
 export const MAX_WEEKLY_OVERTIME_HOURS = 168;
+/** Largest "bank past" value accepted, in overtime hours per week. */
+export const MAX_BANK_AFTER_OVERTIME_HOURS = 168;
 
 export type OvertimeThresholds = {
   /** Hours per day before overtime starts; null = no daily overtime. */
@@ -32,6 +34,17 @@ export type OvertimeSplit = {
   overtimeHours: number;
   dailyOvertimeHours: number;
   weeklyOvertimeHours: number;
+  /**
+   * The part of `overtimeHours` banked as time in lieu instead of paid. Only
+   * present when the org banks overtime.
+   */
+  bankedOvertimeHours?: number;
+};
+
+export type OvertimeBanking = {
+  enabled: boolean;
+  /** Overtime hours paid each week before banking starts (0 = bank all). */
+  afterHours: number;
 };
 
 export type OvertimeShift<K> = {
@@ -71,6 +84,38 @@ export function isOvertimeEnabled(
   const { daily, weekly } = getOvertimeThresholds(settings);
   return daily !== null || weekly !== null;
 }
+
+/** How overtime is banked; anything missing or invalid means "bank all". */
+export function getOvertimeBanking(
+  settings?: Partial<OvertimeSettingsData> | null,
+): OvertimeBanking {
+  const after = Number(settings?.bank_after_overtime_hours ?? 0);
+  return {
+    enabled: settings?.bank_overtime === true,
+    afterHours:
+      Number.isFinite(after) &&
+      after > 0 &&
+      after <= MAX_BANK_AFTER_OVERTIME_HOURS
+        ? after
+        : 0,
+  };
+}
+
+/** Whether a "bank past" value is acceptable to store (null = bank all). */
+export function isValidBankAfterHours(value: unknown): boolean {
+  return (
+    value === null ||
+    (typeof value === "number" &&
+      Number.isFinite(value) &&
+      value >= 0 &&
+      value <= MAX_BANK_AFTER_OVERTIME_HOURS)
+  );
+}
+
+/** Overtime hours that are paid now (overtime minus whatever is banked). */
+export const paidOvertimeHours = (
+  split: Pick<OvertimeSplit, "overtimeHours" | "bankedOvertimeHours">,
+) => Math.max(0, split.overtimeHours - (split.bankedOvertimeHours ?? 0));
 
 /** Whether a threshold value is acceptable to store (null turns it off). */
 export function isValidOvertimeThreshold(value: unknown, max: number): boolean {
@@ -114,8 +159,10 @@ export function allocateOvertime<K>(
   settings?: Partial<OvertimeSettingsData> | null,
 ): Map<K, OvertimeSplit> {
   const { daily, weekly } = getOvertimeThresholds(settings);
+  const banking = getOvertimeBanking(settings);
   const dayHours = new Map<string, number>();
   const weekRegular = new Map<string, number>();
+  const weekOvertime = new Map<string, number>();
   const result = new Map<K, OvertimeSplit>();
 
   for (const shift of shifts) {
@@ -133,12 +180,24 @@ export function allocateOvertime<K>(
     const weeklyOt = overflow(weekBefore, remaining, weekly);
     weekRegular.set(weekKey, weekBefore + remaining - weeklyOt);
 
-    result.set(shift.key, {
-      regularHours: hours - dailyOt - weeklyOt,
-      overtimeHours: dailyOt + weeklyOt,
+    const overtime = dailyOt + weeklyOt;
+    const split: OvertimeSplit = {
+      regularHours: hours - overtime,
+      overtimeHours: overtime,
       dailyOvertimeHours: dailyOt,
       weeklyOvertimeHours: weeklyOt,
-    });
+    };
+    if (banking.enabled) {
+      // The week's first `afterHours` overtime hours are paid; the rest bank.
+      const otBefore = weekOvertime.get(weekKey) ?? 0;
+      weekOvertime.set(weekKey, otBefore + overtime);
+      split.bankedOvertimeHours = overflow(
+        otBefore,
+        overtime,
+        banking.afterHours,
+      );
+    }
+    result.set(shift.key, split);
   }
 
   return result;
@@ -146,12 +205,16 @@ export function allocateOvertime<K>(
 
 /** Adds splits together (for day, week, member and grand totals). */
 export function sumOvertime(splits: Iterable<OvertimeSplit>): OvertimeSplit {
-  const total = { ...ZERO };
+  const total: OvertimeSplit = { ...ZERO };
   for (const split of splits) {
     total.regularHours += split.regularHours;
     total.overtimeHours += split.overtimeHours;
     total.dailyOvertimeHours += split.dailyOvertimeHours;
     total.weeklyOvertimeHours += split.weeklyOvertimeHours;
+    if (split.bankedOvertimeHours !== undefined) {
+      total.bankedOvertimeHours =
+        (total.bankedOvertimeHours ?? 0) + split.bankedOvertimeHours;
+    }
   }
   return total;
 }
@@ -209,4 +272,15 @@ export function describeOvertime(
     ...(weekly !== null ? [`${formatThreshold(weekly)}/week`] : []),
   ];
   return parts.length > 0 ? `over ${parts.join(" or ")}` : "off";
+}
+
+/** "all overtime is banked", "overtime past 5h/week is banked", or "off". */
+export function describeBanking(
+  settings?: Partial<OvertimeSettingsData> | null,
+): string {
+  const { enabled, afterHours } = getOvertimeBanking(settings);
+  if (!enabled) return "off";
+  return afterHours > 0
+    ? `overtime past ${formatThreshold(afterHours)}/week is banked`
+    : "all overtime is banked";
 }

@@ -78,11 +78,16 @@ describe("OvertimeSettings", () => {
     fireEvent.click(save());
 
     await waitFor(() =>
-      expect(mocks.updateOvertimeSettingsAction).toHaveBeenCalledWith(7.5, 44),
+      expect(mocks.updateOvertimeSettingsAction).toHaveBeenCalledWith(7.5, 44, {
+        bankOvertime: false,
+        bankAfterOvertimeHours: null,
+      }),
     );
     expect(onUpdateOptimistic).toHaveBeenCalledWith({
       daily_threshold_hours: 7.5,
       weekly_threshold_hours: 44,
+      bank_overtime: false,
+      bank_after_overtime_hours: null,
     });
     await waitFor(() =>
       expect(mocks.toast.success).toHaveBeenCalledWith(
@@ -101,6 +106,7 @@ describe("OvertimeSettings", () => {
       expect(mocks.updateOvertimeSettingsAction).toHaveBeenCalledWith(
         null,
         null,
+        { bankOvertime: false, bankAfterOvertimeHours: null },
       ),
     );
   });
@@ -111,7 +117,11 @@ describe("OvertimeSettings", () => {
     fireEvent.click(weeklyToggle());
     fireEvent.click(save());
     await waitFor(() =>
-      expect(mocks.updateOvertimeSettingsAction).toHaveBeenCalledWith(null, 40),
+      expect(mocks.updateOvertimeSettingsAction).toHaveBeenCalledWith(
+        null,
+        40,
+        { bankOvertime: false, bankAfterOvertimeHours: null },
+      ),
     );
     expect(onUpdateOptimistic).not.toHaveBeenCalled();
   });
@@ -156,5 +166,49 @@ describe("OvertimeSettings", () => {
     fireEvent.click(save());
     await waitFor(() => expect(save()).toBeDisabled());
     expect(save().querySelector(".animate-spin")).not.toBeNull();
+  });
+
+  it("banks overtime past a number of overtime hours per week", async () => {
+    mocks.updateOvertimeSettingsAction.mockResolvedValue({ success: true });
+    const onUpdateOptimistic = renderOvertimeSettings(saved);
+    expect(
+      screen.queryByLabelText(/Bank overtime past/),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Bank overtime/ }));
+    const input = screen.getByLabelText(/Bank overtime past/);
+    expect(input).toHaveValue(0);
+    fireEvent.change(input, { target: { value: "5" } });
+    fireEvent.click(save());
+    await waitFor(() =>
+      expect(mocks.updateOvertimeSettingsAction).toHaveBeenCalledWith(8, null, {
+        bankOvertime: true,
+        bankAfterOvertimeHours: 5,
+      }),
+    );
+    expect(onUpdateOptimistic).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bank_overtime: true,
+        bank_after_overtime_hours: 5,
+      }),
+    );
+  });
+
+  it("shows stored banking rules and blocks an invalid bank threshold", () => {
+    renderOvertimeSettings({
+      ...saved,
+      bank_overtime: true,
+      bank_after_overtime_hours: 3,
+    });
+    expect(
+      screen.getByRole("checkbox", { name: /^Bank overtime/ }),
+    ).toBeChecked();
+    const input = screen.getByLabelText(/Bank overtime past/);
+    expect(input).toHaveValue(3);
+    expect(save()).toBeDisabled();
+    fireEvent.change(input, { target: { value: "-1" } });
+    expect(
+      screen.getByText("Enter a number of hours from 0 to 168."),
+    ).toBeInTheDocument();
+    expect(save()).toBeDisabled();
   });
 });

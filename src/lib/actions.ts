@@ -234,10 +234,12 @@ export async function updateBreakSettingAction(
 export async function updateOvertimeSettingsAction(
   dailyThresholdHours: number | null,
   weeklyThresholdHours: number | null,
+  banking?: { bankOvertime: boolean; bankAfterOvertimeHours: number | null },
 ) {
   const result = await updateOvertimeSettingsDal(
     dailyThresholdHours,
     weeklyThresholdHours,
+    banking,
   );
 
   return result.match(

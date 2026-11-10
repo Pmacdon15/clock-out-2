@@ -107,6 +107,13 @@ export type OvertimeSettingsData = {
   org_id: string;
   daily_threshold_hours: number | null;
   weekly_threshold_hours: number | null;
+  /**
+   * Bank overtime as time in lieu instead of paying it. Each week the first
+   * `bank_after_overtime_hours` overtime hours are paid; every overtime hour
+   * past that is banked. Null/0 banks all overtime.
+   */
+  bank_overtime?: boolean | null;
+  bank_after_overtime_hours?: number | null;
   updated_at?: Date;
 };
 

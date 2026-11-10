@@ -10,7 +10,11 @@ import {
   isPaidBreakType,
 } from "./break-utils";
 import { formatCoordinates } from "./geo";
-import { allocateOvertime, isOvertimeEnabled } from "./overtime";
+import {
+  allocateOvertime,
+  isOvertimeEnabled,
+  type OvertimeSplit,
+} from "./overtime";
 import {
   computePay,
   formatMoney,
@@ -84,6 +88,8 @@ export type ExportRow = {
    * on every row when the org tracks overtime, absent when it doesn't.
    */
   overtimeHours?: number;
+  /** Part of overtimeHours banked as time in lieu (when the org banks it). */
+  bankedOvertimeHours?: number;
   /** The employee's pay rate, when one is set. */
   payRate?: PayRate;
   /**
@@ -303,7 +309,11 @@ export function applyPay(rows: ExportRow[]): ExportRow[] {
     return {
       ...row,
       pay: computePay(
-        { regularHours: hours - overtimeHours, overtimeHours },
+        {
+          regularHours: hours - overtimeHours,
+          overtimeHours,
+          bankedOvertimeHours: row.bankedOvertimeHours,
+        },
         row.payRate,
       ),
     };
@@ -357,11 +367,16 @@ export function applyOvertime(
     })),
     overtimeSettings,
   );
-  return rows.map((row, index) => ({
-    ...row,
-    overtimeHours: (splits.get(index) as { overtimeHours: number })
-      .overtimeHours,
-  }));
+  return rows.map((row, index) => {
+    const split = splits.get(index) as OvertimeSplit;
+    return {
+      ...row,
+      overtimeHours: split.overtimeHours,
+      ...(split.bankedOvertimeHours !== undefined
+        ? { bankedOvertimeHours: split.bankedOvertimeHours }
+        : {}),
+    };
+  });
 }
 
 /** Whether the rows carry overtime (the org tracks it). */

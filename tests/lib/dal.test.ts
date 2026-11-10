@@ -944,6 +944,42 @@ describe("updateBreakSettingsDal", () => {
     expect(mocks.dbUpdateBreakSettings).not.toHaveBeenCalled();
   });
 
+  it.each([
+    [
+      "a negative bank threshold",
+      { bankOvertime: true, bankAfterOvertimeHours: -1 },
+    ],
+    [
+      "a bank threshold over 168h",
+      { bankOvertime: true, bankAfterOvertimeHours: 200 },
+    ],
+    [
+      "a non-boolean bank flag",
+      { bankOvertime: "yes", bankAfterOvertimeHours: 0 },
+    ],
+  ])("rejects %s", async (_label, banking) => {
+    mocks.protect.mockResolvedValue(admin);
+    expect(
+      (
+        await updateOvertimeSettingsDal(8, 40, banking as never)
+      )._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Invalid overtime settings" });
+    expect(mocks.dbUpdateOvertimeSettings).not.toHaveBeenCalled();
+  });
+
+  it("saves the banking rules with the thresholds", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbUpdateOvertimeSettings.mockResolvedValue({ org_id: "org_1" });
+    const banking = { bankOvertime: true, bankAfterOvertimeHours: 4 };
+    expect((await updateOvertimeSettingsDal(8, 40, banking)).isOk()).toBe(true);
+    expect(mocks.dbUpdateOvertimeSettings).toHaveBeenCalledWith(
+      "org_1",
+      8,
+      40,
+      banking,
+    );
+  });
+
   it("returns an error when the save fails", async () => {
     mocks.protect.mockResolvedValue(admin);
     mocks.dbUpdateBreakSettings.mockRejectedValue(new Error("db"));

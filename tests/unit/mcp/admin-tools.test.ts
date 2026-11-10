@@ -727,6 +727,43 @@ describe("manage_overtime_settings", () => {
     expect(res.summary).toContain("over 8h/day or 40h/week");
   });
 
+  it("turns banking on and keeps the thresholds", async () => {
+    m.dbGetOvertimeSettings.mockResolvedValue({
+      org_id: "org_1",
+      daily_threshold_hours: 8,
+      weekly_threshold_hours: 40,
+    });
+    m.dbUpdateOvertimeSettings.mockResolvedValue({
+      org_id: "org_1",
+      daily_threshold_hours: 8,
+      weekly_threshold_hours: 40,
+      bank_overtime: true,
+      bank_after_overtime_hours: 5,
+    });
+    const res = await manageOvertimeSettingsTool(admin, {
+      action: "update",
+      bank_overtime: true,
+      bank_after_overtime_hours: 5,
+    });
+    expect(m.dbUpdateOvertimeSettings).toHaveBeenCalledWith("org_1", 8, 40, {
+      bankOvertime: true,
+      bankAfterOvertimeHours: 5,
+    });
+    expect(res.summary).toContain("overtime past 5h/week is banked");
+  });
+
+  it("shows the banking rule", async () => {
+    m.dbGetOvertimeSettings.mockResolvedValue({
+      org_id: "org_1",
+      daily_threshold_hours: 8,
+      weekly_threshold_hours: null,
+      bank_overtime: true,
+      bank_after_overtime_hours: null,
+    });
+    const res = await manageOvertimeSettingsTool(admin, {});
+    expect(res.summary).toContain("all overtime is banked");
+  });
+
   it("forbids members from changing it", async () => {
     asRole("org:member");
     m.dbGetOvertimeSettings.mockResolvedValue(undefined);

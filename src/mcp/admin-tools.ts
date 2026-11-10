@@ -37,8 +37,11 @@ import {
 } from "@/lib/db";
 import { reverseGeocode, searchAddress } from "@/lib/geoapify";
 import {
+  describeBanking,
   describeOvertime,
+  isValidBankAfterHours,
   isValidOvertimeThreshold,
+  MAX_BANK_AFTER_OVERTIME_HOURS,
   MAX_DAILY_OVERTIME_HOURS,
   MAX_WEEKLY_OVERTIME_HOURS,
 } from "@/lib/overtime";
@@ -281,6 +284,21 @@ export const manageOvertimeSettingsInputSchema = z.object({
     .optional()
     .describe(
       "Hours in a week after which time counts as overtime (e.g. 40 or 44). null turns weekly overtime off; omit to keep the current value.",
+    ),
+  bank_overtime: z
+    .boolean()
+    .optional()
+    .describe(
+      "Bank overtime as time in lieu instead of paying it. Omit to keep the current value.",
+    ),
+  bank_after_overtime_hours: z
+    .number()
+    .min(0)
+    .max(MAX_BANK_AFTER_OVERTIME_HOURS)
+    .nullable()
+    .optional()
+    .describe(
+      "With banking on: overtime hours paid each Monday–Sunday week before the rest is banked (0 or null banks all overtime). Omit to keep the current value.",
     ),
 });
 
@@ -1383,21 +1401,28 @@ export async function manageOvertimeSettingsTool(
       current?.weekly_threshold_hours == null
         ? null
         : Number(current.weekly_threshold_hours),
+    bank_overtime: current?.bank_overtime === true,
+    bank_after_overtime_hours:
+      current?.bank_after_overtime_hours == null
+        ? null
+        : Number(current.bank_after_overtime_hours),
   };
 
   if ((input.action ?? "get") === "get") {
     return {
-      summary: `Overtime for ${org.orgName}: ${describeOvertime(settings)}.`,
+      summary: `Overtime for ${org.orgName}: ${describeOvertime(settings)}; banking ${describeBanking(settings)}.`,
       data: { organization: orgInfo(org), settings },
     };
   }
   if (!org.isAdmin) return forbidden("change overtime settings");
   if (
     input.daily_threshold_hours === undefined &&
-    input.weekly_threshold_hours === undefined
+    input.weekly_threshold_hours === undefined &&
+    input.bank_overtime === undefined &&
+    input.bank_after_overtime_hours === undefined
   ) {
     return invalid(
-      "Nothing to update. Pass daily_threshold_hours and/or weekly_threshold_hours (null turns one off).",
+      "Nothing to update. Pass daily_threshold_hours, weekly_threshold_hours (null turns one off), bank_overtime and/or bank_after_overtime_hours.",
     );
   }
   const daily =
@@ -1414,14 +1439,31 @@ export async function manageOvertimeSettingsTool(
   ) {
     return invalid("Invalid overtime thresholds.");
   }
-  const updated = await dbUpdateOvertimeSettings(org.orgId, daily, weekly);
+  const bankingChanged =
+    input.bank_overtime !== undefined ||
+    input.bank_after_overtime_hours !== undefined;
+  const bankAfter =
+    input.bank_after_overtime_hours === undefined
+      ? settings.bank_after_overtime_hours
+      : input.bank_after_overtime_hours;
+  if (bankingChanged && !isValidBankAfterHours(bankAfter)) {
+    return invalid("Invalid bank_after_overtime_hours.");
+  }
+  const updated = bankingChanged
+    ? await dbUpdateOvertimeSettings(org.orgId, daily, weekly, {
+        bankOvertime: input.bank_overtime ?? settings.bank_overtime,
+        bankAfterOvertimeHours: bankAfter,
+      })
+    : await dbUpdateOvertimeSettings(org.orgId, daily, weekly);
   revalidate(`overtime-settings-${org.orgId}`);
   const next = {
     daily_threshold_hours: updated.daily_threshold_hours,
     weekly_threshold_hours: updated.weekly_threshold_hours,
+    bank_overtime: updated.bank_overtime === true,
+    bank_after_overtime_hours: updated.bank_after_overtime_hours ?? null,
   };
   return {
-    summary: `Updated overtime for ${org.orgName}: ${describeOvertime(next)}.`,
+    summary: `Updated overtime for ${org.orgName}: ${describeOvertime(next)}; banking ${describeBanking(next)}.`,
     data: { status: "updated", organization: orgInfo(org), settings: next },
   };
 }

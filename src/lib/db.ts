@@ -424,6 +424,14 @@ export function ensureOvertimeSettingsTable(): Promise<void> {
 			updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 		)
 	`;
+    await sql`
+		ALTER TABLE overtime_settings
+			ADD COLUMN IF NOT EXISTS bank_overtime BOOLEAN NOT NULL DEFAULT FALSE
+	`;
+    await sql`
+		ALTER TABLE overtime_settings
+			ADD COLUMN IF NOT EXISTS bank_after_overtime_hours DOUBLE PRECISION
+	`;
   })().catch((error) => {
     overtimeSettingsTableReady = null;
     throw error;
@@ -451,6 +459,7 @@ export async function dbUpdateOvertimeSettings(
   orgId: string,
   dailyThresholdHours: number | null,
   weeklyThresholdHours: number | null,
+  banking?: { bankOvertime: boolean; bankAfterOvertimeHours: number | null },
 ) {
   await ensureOvertimeSettingsTable();
   await sql`
@@ -458,6 +467,29 @@ export async function dbUpdateOvertimeSettings(
 		VALUES (${orgId}, NOW())
 		ON CONFLICT (org_id) DO UPDATE SET updated_at = NOW()
 	`;
+
+  // Without `banking`, leave the org's banking rules as they are.
+  if (banking) {
+    const [updated] = await sql`
+		INSERT INTO overtime_settings (
+			org_id, daily_threshold_hours, weekly_threshold_hours,
+			bank_overtime, bank_after_overtime_hours, updated_at
+		)
+		VALUES (
+			${orgId}, ${dailyThresholdHours}, ${weeklyThresholdHours},
+			${banking.bankOvertime}, ${banking.bankAfterOvertimeHours}, NOW()
+		)
+		ON CONFLICT (org_id)
+		DO UPDATE SET
+            daily_threshold_hours = ${dailyThresholdHours},
+            weekly_threshold_hours = ${weeklyThresholdHours},
+            bank_overtime = ${banking.bankOvertime},
+            bank_after_overtime_hours = ${banking.bankAfterOvertimeHours},
+            updated_at = NOW()
+		RETURNING *
+	`;
+    return updated as OvertimeSettingsData;
+  }
 
   const [updated] = await sql`
 		INSERT INTO overtime_settings (
