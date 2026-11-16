@@ -124,6 +124,36 @@ beforeEach(() => {
   mocks.send.mockResolvedValue({ MessageId: "m1" });
 });
 
+describe("company branding", () => {
+  it("passes the org name and uploaded logo to the email", async () => {
+    mocks.getOrganization.mockResolvedValue({
+      ...org,
+      hasImage: true,
+      imageUrl: "https://img.clerk.com/acme.png",
+    });
+    mocks.dbGetTimeEntriesForPeriod.mockResolvedValue([
+      shift("2026-01-02T09:00:00Z", "2026-01-02T10:00:00Z"),
+    ]);
+    await sendWeeklyReports(start, end, "org_1");
+    expect(emailProps(0).orgName).toBe("Acme");
+    expect(emailProps(0).orgLogoUrl).toBe("https://img.clerk.com/acme.png");
+  });
+
+  it("skips Clerk's placeholder image when no logo was uploaded", async () => {
+    mocks.getOrganization.mockResolvedValue({
+      ...org,
+      hasImage: false,
+      imageUrl: "https://img.clerk.com/placeholder.png",
+    });
+    mocks.dbGetTimeEntriesForPeriod.mockResolvedValue([
+      shift("2026-01-02T09:00:00Z", "2026-01-02T10:00:00Z"),
+    ]);
+    await sendWeeklyReports(start, end, "org_1");
+    expect(emailProps(0).orgName).toBe("Acme");
+    expect(emailProps(0)).not.toHaveProperty("orgLogoUrl");
+  });
+});
+
 describe("SES client", () => {
   it("defaults to us-east-1", () => {
     expect(initialSesConfig).toEqual({ region: "us-east-1" });

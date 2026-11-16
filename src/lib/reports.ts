@@ -361,6 +361,11 @@ export async function sendWeeklyReports(
           const emailHtml = await render(
             WeeklyReportEmail({
               userName,
+              orgName: org.name,
+              // Only uploaded logos — skip Clerk's generated placeholder.
+              ...(org.hasImage && org.imageUrl
+                ? { orgLogoUrl: org.imageUrl }
+                : {}),
               totalHours: totalHoursString,
               ...(overtimeEnabled
                 ? {

@@ -206,4 +206,21 @@ describe("WeeklyReportEmail", () => {
     expect(text).not.toContain("Approved Time Off");
     expect(text).not.toContain("Time Off");
   });
+
+  it("shows the company logo and name in the header", async () => {
+    const doc = await renderEmail({
+      ...base,
+      orgName: "Acme Co",
+      orgLogoUrl: "https://img.clerk.com/acme.png",
+    });
+    const logo = doc.querySelector('img[alt="Acme Co logo"]');
+    expect(logo?.getAttribute("src")).toBe("https://img.clerk.com/acme.png");
+    expect(doc.body.textContent).toContain("Acme Co");
+  });
+
+  it("shows the company name without a logo when none is set", async () => {
+    const doc = await renderEmail({ ...base, orgName: "Acme Co" });
+    expect(doc.querySelectorAll("img")).toHaveLength(1); // chart only
+    expect(doc.body.textContent).toContain("Acme Co");
+  });
 });
