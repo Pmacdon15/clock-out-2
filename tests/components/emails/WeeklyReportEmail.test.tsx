@@ -223,4 +223,14 @@ describe("WeeklyReportEmail", () => {
     expect(doc.querySelectorAll("img")).toHaveLength(1); // chart only
     expect(doc.body.textContent).toContain("Acme Co");
   });
+
+  it("labels the logo generically when the company has no name", async () => {
+    const doc = await renderEmail({
+      ...base,
+      orgLogoUrl: "https://img.clerk.com/acme.png",
+    });
+    expect(
+      doc.querySelector('img[alt="Company logo"]')?.getAttribute("src"),
+    ).toBe("https://img.clerk.com/acme.png");
+  });
 });
