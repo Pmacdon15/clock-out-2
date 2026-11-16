@@ -16,6 +16,10 @@ import { Tailwind } from "@react-email/tailwind";
 
 interface WeeklyReportEmailProps {
   userName: string;
+  /** Company (organization) name shown in the email header. */
+  orgName?: string;
+  /** Company logo shown above the name; omitted when the org has none. */
+  orgLogoUrl?: string;
   totalHours: string;
   /** Present only when the org tracks overtime. */
   regularHours?: string;
@@ -58,6 +62,8 @@ interface WeeklyReportEmailProps {
 
 export const WeeklyReportEmail = ({
   userName = "User",
+  orgName,
+  orgLogoUrl,
   totalHours = "0h 0m",
   regularHours,
   overtimeHours,
@@ -102,10 +108,30 @@ export const WeeklyReportEmail = ({
       <Preview>
         {timeframe === "custom" ? "Hours Report" : "Weekly Hours Report"} for{" "}
         {userName}
+        {orgName ? ` at ${orgName}` : ""}
       </Preview>
       <Tailwind>
         <Body className="mx-auto my-auto bg-gray-50 px-2 font-sans">
           <Container className="mx-auto my-[40px] max-w-[465px] rounded border border-gray-200 border-solid bg-white p-[20px]">
+            {(orgLogoUrl || orgName) && (
+              <Section className="mt-[12px] text-center">
+                {orgLogoUrl && (
+                  <Img
+                    alt={orgName ? `${orgName} logo` : "Company logo"}
+                    className="mx-auto rounded-md"
+                    height="64"
+                    src={orgLogoUrl}
+                    style={{ objectFit: "contain" }}
+                    width="64"
+                  />
+                )}
+                {orgName && (
+                  <Text className="m-0 mt-[8px] font-semibold text-[18px] text-black">
+                    {orgName}
+                  </Text>
+                )}
+              </Section>
+            )}
             <Heading className="mx-0 my-[30px] p-0 text-center font-normal text-[24px] text-black">
               Time Report
             </Heading>
