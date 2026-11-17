@@ -1,12 +1,12 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { err, ok, type Result } from "neverthrow";
 import {
-  isValidFcmToken,
   isValidNotificationPreferences,
   isValidPushSubscription,
   isValidTimeZone,
   normalizeAlertSettings,
   normalizeNotificationPreferences,
+  sanitizeFcmToken,
   validateAlertSettings,
 } from "./alerts";
 import {
@@ -218,19 +218,12 @@ export async function saveFcmTokenDal(
   if (!has({ feature: NOTIFICATIONS_FEATURE })) {
     return err({ reason: UPGRADE_REASON });
   }
-  if (!isValidFcmToken(input)) {
+  const registration = sanitizeFcmToken(input);
+  if (!registration) {
     return err({ reason: "Invalid device registration" });
   }
   const agent = typeof userAgent === "string" ? userAgent.slice(0, 512) : null;
-  return await dbSaveFcmToken(
-    userId,
-    {
-      token: input.token,
-      endpoint: input.endpoint ?? null,
-      replacedEndpoint: input.replacedEndpoint ?? null,
-    },
-    agent,
-  )
+  return await dbSaveFcmToken(userId, registration, agent)
     .then(() => ok(true as const))
     .catch((e) => {
       console.error("Save FCM token error: ", e);

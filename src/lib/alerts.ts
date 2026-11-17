@@ -243,6 +243,31 @@ export function isValidFcmToken(input: unknown): input is FcmTokenInput {
   );
 }
 
+/**
+ * Keeps a registration's token, and each endpoint only when it is a known push
+ * service URL. Browsers sometimes report endpoints we don't recognise (Chrome
+ * hands out `permanently-removed.invalid` ones for retired subscriptions);
+ * those are only used to tidy up and to match a shared device, so we drop
+ * them rather than refuse the device. Null when the token itself is unusable.
+ */
+export function sanitizeFcmToken(input: unknown): FcmTokenInput | null {
+  if (!input || typeof input !== "object") return null;
+  const { token, endpoint, replacedEndpoint } = input as Record<
+    string,
+    unknown
+  >;
+  if (typeof token !== "string" || !/^[A-Za-z0-9_:-]{20,4096}$/.test(token)) {
+    return null;
+  }
+  const clean = (value: unknown) =>
+    typeof value === "string" && isPushServiceUrl(value) ? value : null;
+  return {
+    token,
+    endpoint: clean(endpoint),
+    replacedEndpoint: clean(replacedEndpoint),
+  };
+}
+
 /* ---------------------------------------------------------- planning -- */
 
 export type PlannedAlert =
