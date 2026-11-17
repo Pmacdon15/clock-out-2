@@ -527,6 +527,9 @@ function ShiftForm({
     onSuccess: (res) => {
       if (res.success) {
         toast.success("Shift published");
+        // Clear the date so the form doesn't flag the shift it just
+        // published as an overlap with itself.
+        setDate("");
         setNote("");
       } else {
         toast.error(res.error);
