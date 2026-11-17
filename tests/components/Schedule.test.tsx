@@ -322,6 +322,28 @@ describe("Schedule", () => {
     expect(screen.getByLabelText("Note (optional)")).toHaveValue("");
   });
 
+  it("blocks a shift that overlaps one the member already has", () => {
+    renderSchedule([shift("scheduled")]);
+    fireEvent.change(screen.getByLabelText("Member"), {
+      target: { value: "user_1" },
+    });
+    fireEvent.change(screen.getByLabelText("Date"), {
+      target: { value: "2026-01-05" },
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Sam is already scheduled Mon, Jan 5, 9:00 AM – 5:00 PM",
+    );
+    expect(
+      screen.getByRole("button", { name: "Publish shift" }),
+    ).toBeDisabled();
+
+    // Someone else can still take that slot.
+    fireEvent.change(screen.getByLabelText("Member"), {
+      target: { value: "user_2" },
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("blocks a shift on the member's approved time off", () => {
     renderSchedule([], true, true, [
       timeOff(),

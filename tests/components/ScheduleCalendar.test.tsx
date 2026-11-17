@@ -117,4 +117,59 @@ describe("ScheduleCalendar", () => {
     await waitFor(() => expect(mocks.toast.error).toHaveBeenCalledWith("Nope"));
     confirm.mockRestore();
   });
+
+  it("reports an unreachable Google Calendar", async () => {
+    mocks.disconnect.mockRejectedValue(new Error("network"));
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    renderWithClient(
+      <ScheduleCalendar
+        googleConnectedPromise={resolved(true)}
+        upcoming={upcoming}
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Disconnect Google Calendar" }),
+    );
+    await waitFor(() =>
+      expect(mocks.toast.error).toHaveBeenCalledWith(
+        "Couldn't reach Google Calendar. Try again.",
+      ),
+    );
+    confirm.mockRestore();
+  });
+
+  it("offers Apple and Outlook subscriptions when there is a feed", async () => {
+    renderWithClient(
+      <ScheduleCalendar
+        calendarFeedPromise={resolved("/api/calendar/tok.ics")}
+        upcoming={upcoming}
+      />,
+    );
+    expect(
+      await screen.findByText("Use Apple Calendar or Outlook instead?"),
+    ).toBeTruthy();
+  });
+
+  it("uses the singular for one shift and skips the count when none were removed", async () => {
+    mocks.disconnect.mockResolvedValue({ status: "ok", removed: 0 });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    renderWithClient(
+      <ScheduleCalendar
+        googleConnectedPromise={resolved(true)}
+        upcoming={[{ id: 1, user_id: "me" }]}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: "Add 1 shift to Google Calendar" }),
+    ).toBeEnabled();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Disconnect Google Calendar" }),
+    );
+    await waitFor(() =>
+      expect(mocks.toast.success).toHaveBeenCalledWith(
+        "Google Calendar disconnected",
+      ),
+    );
+    confirm.mockRestore();
+  });
 });

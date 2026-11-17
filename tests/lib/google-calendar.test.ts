@@ -16,6 +16,7 @@ import {
   googleCalendarToken,
   googleShiftEventId,
   mirrorShiftToGoogleCalendar,
+  revokeGoogleToken,
   writeGoogleCalendarEvent,
 } from "@/lib/google-calendar";
 import { GOOGLE_CALENDAR_SCOPE } from "@/lib/google-calendar-scope";
@@ -208,5 +209,17 @@ describe("mirrorShiftToGoogleCalendar", () => {
     await mirrorShiftToGoogleCalendar("removed", shift);
     expect(error).toHaveBeenCalledTimes(2);
     error.mockRestore();
+  });
+});
+
+describe("revokeGoogleToken", () => {
+  it("revokes the token, counting an already dead one as revoked", async () => {
+    const fetch = stubFetch(res(200), res(400), res(500));
+    expect(await revokeGoogleToken("tok")).toBe(true);
+    expect(await revokeGoogleToken("tok")).toBe(true);
+    expect(await revokeGoogleToken("tok")).toBe(false);
+    expect(fetch.mock.calls[0][0]).toBe("https://oauth2.googleapis.com/revoke");
+    expect(fetch.mock.calls[0][1].method).toBe("POST");
+    expect(fetch.mock.calls[0][1].body).toBe("token=tok");
   });
 });

@@ -105,7 +105,7 @@ export async function addShiftsToGoogleCalendarAction(
 export async function googleCalendarConnectedAction(): Promise<boolean> {
   const { userId } = await auth.protect();
   if (!userId) return false;
-  return (await googleCalendarToken(userId).catch(() => null)) !== null;
+  return (await googleCalendarToken(userId)) !== null;
 }
 
 export type DisconnectGoogleCalendarResult =
@@ -125,7 +125,7 @@ export async function disconnectGoogleCalendarAction(
   if (!userId || !orgId) {
     return { status: "error", error: "Unauthorized" };
   }
-  const token = await googleCalendarToken(userId).catch(() => null);
+  const token = await googleCalendarToken(userId);
   if (!token) return { status: "ok", removed: 0 };
 
   let removed = 0;

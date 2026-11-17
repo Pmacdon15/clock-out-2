@@ -261,6 +261,37 @@ describe("disconnectGoogleCalendarAction", () => {
     expect(mocks.revoke).not.toHaveBeenCalled();
   });
 
+  it("rejects a signed-out caller", async () => {
+    session({ userId: null });
+    await expect(disconnectGoogleCalendarAction()).resolves.toEqual({
+      status: "error",
+      error: "Unauthorized",
+    });
+    await expect(googleCalendarConnectedAction()).resolves.toBe(false);
+  });
+
+  it("still revokes when shifts can't be loaded or removed", async () => {
+    mocks.dbGetScheduledShifts.mockRejectedValueOnce(new Error("db"));
+    mocks.revoke.mockResolvedValue(true);
+    await expect(disconnectGoogleCalendarAction()).resolves.toEqual({
+      status: "ok",
+      removed: 0,
+    });
+    mocks.dbGetScheduledShifts.mockResolvedValue([shift(1), shift(2)]);
+    mocks.del.mockRejectedValueOnce(new Error("net")).mockResolvedValue(true);
+    await expect(disconnectGoogleCalendarAction()).resolves.toEqual({
+      status: "ok",
+      removed: 1,
+    });
+    expect(mocks.revoke).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports a revoke that can't reach Google", async () => {
+    mocks.dbGetScheduledShifts.mockResolvedValue([]);
+    mocks.revoke.mockRejectedValue(new Error("net"));
+    expect((await disconnectGoogleCalendarAction()).status).toBe("error");
+  });
+
   it("reports a failed revoke", async () => {
     mocks.dbGetScheduledShifts.mockResolvedValue([]);
     mocks.revoke.mockResolvedValue(false);

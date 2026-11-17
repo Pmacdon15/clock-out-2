@@ -229,5 +229,8 @@ describe("findOverlappingShift", () => {
     expect(
       findOverlappingShift(shifts, "u1", at("12:00"), at("20:00"), 1),
     ).toBeUndefined();
+    expect(
+      findOverlappingShift(shifts, "u1", new Date("nope"), at("20:00")),
+    ).toBeUndefined();
   });
 });

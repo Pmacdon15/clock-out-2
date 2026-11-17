@@ -425,6 +425,18 @@ describe("createScheduledShiftDal", () => {
     expect(mocks.dbCreateScheduledShift).not.toHaveBeenCalled();
   });
 
+  it("reports a failed overlap check", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbGetOverlappingScheduledShift.mockRejectedValue(new Error("db"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(
+      (
+        await createScheduledShiftDal("user_1", shiftStart, shiftEnd)
+      )._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Failed to create shift" });
+    expect(mocks.dbCreateScheduledShift).not.toHaveBeenCalled();
+  });
+
   it("reports a failed insert", async () => {
     mocks.protect.mockResolvedValue(admin);
     mocks.dbCreateScheduledShift.mockRejectedValue(new Error("db"));
