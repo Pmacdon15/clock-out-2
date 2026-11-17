@@ -19,15 +19,16 @@ export const ACTIVE_SHIFT_REQUEST_STATUSES: ShiftRequestStatus[] = [
   "pending_approval",
 ];
 
-let shiftRequestsTableReady: Promise<void> | null = null;
+let shiftRequestsTableReady = false;
 
 /**
  * Production databases that predate `shift_requests` in schema.sql don't
  * have it, so create it on first use (same approach as the other optional
  * tables). Runs once per server instance; a failure is not cached.
  */
-export function ensureShiftRequestsTable(): Promise<void> {
-  shiftRequestsTableReady ??= (async () => {
+export async function ensureShiftRequestsTable(): Promise<void> {
+  if (shiftRequestsTableReady) return;
+  await (async () => {
     await ensureScheduledShiftsTable();
     await sql`
 		CREATE TABLE IF NOT EXISTS shift_requests (
@@ -62,16 +63,13 @@ export function ensureShiftRequestsTable(): Promise<void> {
 			ON shift_requests (shift_id)
 			WHERE status IN ('open', 'pending_approval')
 	`;
-  })().catch((error) => {
-    shiftRequestsTableReady = null;
-    throw error;
-  });
-  return shiftRequestsTableReady;
+  })();
+  shiftRequestsTableReady = true;
 }
 
 /** Test-only: forget that the table check ran. */
 export function resetShiftRequestsTableCheck() {
-  shiftRequestsTableReady = null;
+  shiftRequestsTableReady = false;
 }
 
 /**

@@ -1,3 +1,4 @@
+import { startOfDay } from "date-fns";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const m = vi.hoisted(() => ({
@@ -12,6 +13,7 @@ const m = vi.hoisted(() => ({
   dbListShiftRequests: vi.fn(),
 }));
 
+vi.mock("next/server", () => ({ connection: () => Promise.resolve() }));
 vi.mock("@clerk/nextjs/server", () => ({ auth: { protect: m.protect } }));
 vi.mock("@/lib/alerts-runner", () => ({ loadOrgMembers: m.loadOrgMembers }));
 vi.mock("@/lib/db", () => ({ dbGetScheduledShifts: m.dbGetScheduledShifts }));
@@ -86,11 +88,17 @@ describe("getShiftRequestsView", () => {
   });
 
   it("offers upcoming shifts with no live request, without their notes", async () => {
-    const shift = (id: number, user_id: string) => ({
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-08T12:00:00Z"));
+    const shift = (
+      id: number,
+      user_id: string,
+      start = "2026-11-10T09:00:00Z",
+    ) => ({
       id,
       org_id: "o1",
       user_id,
-      shift_start: new Date("2026-11-10T09:00:00Z"),
+      shift_start: new Date(start),
       shift_end: new Date("2026-11-10T17:00:00Z"),
       note: "secret",
       created_by: "boss",
@@ -106,6 +114,8 @@ describe("getShiftRequestsView", () => {
       shift(3, "amy"),
       shift(4, "ben"),
       shift(5, "ben"),
+      // Earlier today, so already started: not offered.
+      shift(6, "amy", "2026-11-08T08:00:00Z"),
     ]);
     const result = await getShiftRequestsView();
     expect(result.ok && result.value.shifts).toEqual([
@@ -124,9 +134,12 @@ describe("getShiftRequestsView", () => {
     ]);
     const [org, user, start, end] = m.dbGetScheduledShifts.mock.calls[0];
     expect([org, user]).toEqual(["o1", null]);
+    // Whole days, so the cached query's key doesn't change every request.
+    expect(start).toEqual(startOfDay(new Date("2026-11-08T12:00:00Z")));
     expect((end as Date).getTime() - (start as Date).getTime()).toBe(
-      TRADEABLE_SHIFT_DAYS * 24 * 60 * 60 * 1000,
+      (TRADEABLE_SHIFT_DAYS + 1) * 24 * 60 * 60 * 1000,
     );
+    vi.useRealTimers();
   });
 
   it("needs a signed-in member of an org on a plan with Scheduling", async () => {

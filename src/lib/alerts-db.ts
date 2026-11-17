@@ -18,7 +18,7 @@ import type {
   ScheduledShift,
 } from "./types";
 
-let alertTablesReady: Promise<void> | null = null;
+let alertTablesReady = false;
 
 /**
  * Alert rules, notification preferences, push subscriptions, FCM tokens, the
@@ -27,8 +27,9 @@ let alertTablesReady: Promise<void> | null = null;
  * does. Runs once per server instance; a failure is not cached, so the next
  * call retries.
  */
-export function ensureAlertTables(): Promise<void> {
-  alertTablesReady ??= (async () => {
+export async function ensureAlertTables(): Promise<void> {
+  if (alertTablesReady) return;
+  await (async () => {
     await sql`
 		CREATE TABLE IF NOT EXISTS settings (
 			org_id TEXT PRIMARY KEY,
@@ -115,16 +116,13 @@ export function ensureAlertTables(): Promise<void> {
 			updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 		)
 	`;
-  })().catch((error) => {
-    alertTablesReady = null;
-    throw error;
-  });
-  return alertTablesReady;
+  })();
+  alertTablesReady = true;
 }
 
 /** Test-only: forget that the table check ran. */
 export function resetAlertTablesCheck() {
-  alertTablesReady = null;
+  alertTablesReady = false;
 }
 
 /* ------------------------------------------------------ alert settings -- */

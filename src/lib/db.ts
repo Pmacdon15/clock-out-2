@@ -28,6 +28,15 @@ if (!process.env.DATABASE_URL) {
 
 export const sql = neon(process.env.DATABASE_URL);
 
+/*
+ * The `ensure*Table` checks below remember only that they finished, never a
+ * promise still in flight. A promise started in one request and awaited by
+ * another is unsafe with Cache Components: if a prefetch prerender starts the
+ * DDL, its fetch hangs until that prerender ends, and every `"use cache"` read
+ * on the instance waiting on it hangs too (up to the 50s cache-fill timeout).
+ * Running the idempotent DDL twice on a cold instance is the cheaper failure.
+ */
+
 export async function dbGetTimeEntries(
   userId: string,
   orgId: string,
@@ -265,7 +274,7 @@ export async function dbUpdateReportingSettings(
   return updated as ReportingSettingsData;
 }
 
-let breakSettingsTableReady: Promise<void> | null = null;
+let breakSettingsTableReady = false;
 
 /**
  * Lunch-break settings are free for every admin. Production databases that
@@ -273,8 +282,9 @@ let breakSettingsTableReady: Promise<void> | null = null;
  * (and the `settings` parent it references) on first use. Runs once per
  * server instance; a failure is not cached, so the next call retries.
  */
-export function ensureBreakSettingsTable(): Promise<void> {
-  breakSettingsTableReady ??= (async () => {
+export async function ensureBreakSettingsTable(): Promise<void> {
+  if (breakSettingsTableReady) return;
+  await (async () => {
     await sql`
 		CREATE TABLE IF NOT EXISTS settings (
 			org_id TEXT PRIMARY KEY,
@@ -299,16 +309,13 @@ export function ensureBreakSettingsTable(): Promise<void> {
 			ADD COLUMN IF NOT EXISTS max_paid_breaks_per_shift INTEGER,
 			ADD COLUMN IF NOT EXISTS max_unpaid_breaks_per_shift INTEGER
 	`;
-  })().catch((error) => {
-    breakSettingsTableReady = null;
-    throw error;
-  });
-  return breakSettingsTableReady;
+  })();
+  breakSettingsTableReady = true;
 }
 
 /** Test-only: forget that the table check ran. */
 export function resetBreakSettingsTableCheck() {
-  breakSettingsTableReady = null;
+  breakSettingsTableReady = false;
 }
 
 export async function dbGetBreakSettings(orgId: string) {
@@ -401,7 +408,7 @@ export async function dbUpdateBreakSettings(
 
 /* --------------------------------------------------------- overtime -- */
 
-let overtimeSettingsTableReady: Promise<void> | null = null;
+let overtimeSettingsTableReady = false;
 
 /**
  * Overtime thresholds are free for every admin. Production databases that
@@ -409,8 +416,9 @@ let overtimeSettingsTableReady: Promise<void> | null = null;
  * it on first use, the same way `ensureBreakSettingsTable` does. Runs once
  * per server instance; a failure is not cached, so the next call retries.
  */
-export function ensureOvertimeSettingsTable(): Promise<void> {
-  overtimeSettingsTableReady ??= (async () => {
+export async function ensureOvertimeSettingsTable(): Promise<void> {
+  if (overtimeSettingsTableReady) return;
+  await (async () => {
     await sql`
 		CREATE TABLE IF NOT EXISTS settings (
 			org_id TEXT PRIMARY KEY,
@@ -433,16 +441,13 @@ export function ensureOvertimeSettingsTable(): Promise<void> {
 		ALTER TABLE overtime_settings
 			ADD COLUMN IF NOT EXISTS bank_after_overtime_hours DOUBLE PRECISION
 	`;
-  })().catch((error) => {
-    overtimeSettingsTableReady = null;
-    throw error;
-  });
-  return overtimeSettingsTableReady;
+  })();
+  overtimeSettingsTableReady = true;
 }
 
 /** Test-only: forget that the table check ran. */
 export function resetOvertimeSettingsTableCheck() {
-  overtimeSettingsTableReady = null;
+  overtimeSettingsTableReady = false;
 }
 
 export async function dbGetOvertimeSettings(orgId: string) {
@@ -509,7 +514,7 @@ export async function dbUpdateOvertimeSettings(
 
 /* -------------------------------------------------------- pay periods -- */
 
-let payPeriodSettingsTableReady: Promise<void> | null = null;
+let payPeriodSettingsTableReady = false;
 
 /**
  * Pay period settings (paydays and hold-back) are free for every admin.
@@ -517,8 +522,9 @@ let payPeriodSettingsTableReady: Promise<void> | null = null;
  * databases that predate it. A failure is not cached, so the next call
  * retries.
  */
-export function ensurePayPeriodSettingsTable(): Promise<void> {
-  payPeriodSettingsTableReady ??= (async () => {
+export async function ensurePayPeriodSettingsTable(): Promise<void> {
+  if (payPeriodSettingsTableReady) return;
+  await (async () => {
     await sql`
 		CREATE TABLE IF NOT EXISTS settings (
 			org_id TEXT PRIMARY KEY,
@@ -535,16 +541,13 @@ export function ensurePayPeriodSettingsTable(): Promise<void> {
 			updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 		)
 	`;
-  })().catch((error) => {
-    payPeriodSettingsTableReady = null;
-    throw error;
-  });
-  return payPeriodSettingsTableReady;
+  })();
+  payPeriodSettingsTableReady = true;
 }
 
 /** Test-only: forget that the table check ran. */
 export function resetPayPeriodSettingsTableCheck() {
-  payPeriodSettingsTableReady = null;
+  payPeriodSettingsTableReady = false;
 }
 
 export async function dbGetPayPeriodSettings(orgId: string) {
@@ -591,15 +594,16 @@ export async function dbUpdatePayPeriodSettings(
 
 /* -------------------------------------------------------- pay rates -- */
 
-let payRatesTableReady: Promise<void> | null = null;
+let payRatesTableReady = false;
 
 /**
  * Production databases that predate `member_pay_rates` in schema.sql don't
  * have the table, so create it on first use, like the overtime table. Runs
  * once per server instance; a failure is not cached, so the next call retries.
  */
-export function ensurePayRatesTable(): Promise<void> {
-  payRatesTableReady ??= (async () => {
+export async function ensurePayRatesTable(): Promise<void> {
+  if (payRatesTableReady) return;
+  await (async () => {
     await sql`
 		CREATE TABLE IF NOT EXISTS member_pay_rates (
 			org_id TEXT NOT NULL,
@@ -610,16 +614,13 @@ export function ensurePayRatesTable(): Promise<void> {
 			PRIMARY KEY (org_id, user_id)
 		)
 	`;
-  })().catch((error) => {
-    payRatesTableReady = null;
-    throw error;
-  });
-  return payRatesTableReady;
+  })();
+  payRatesTableReady = true;
 }
 
 /** Test-only: forget that the table check ran. */
 export function resetPayRatesTableCheck() {
-  payRatesTableReady = null;
+  payRatesTableReady = false;
 }
 
 export async function dbGetPayRates(orgId: string) {
@@ -665,7 +666,7 @@ export async function dbDeletePayRate(orgId: string, userId: string) {
 
 /* ----------------------------------------------------------- breaks -- */
 
-let timeEntryBreaksTableReady: Promise<void> | null = null;
+let timeEntryBreaksTableReady = false;
 
 /**
  * Break records live in their own table. Production databases that predate
@@ -673,8 +674,9 @@ let timeEntryBreaksTableReady: Promise<void> | null = null;
  * (same approach as `ensureBreakSettingsTable`). Runs once per server
  * instance; a failure is not cached, so the next call retries.
  */
-export function ensureTimeEntryBreaksTable(): Promise<void> {
-  timeEntryBreaksTableReady ??= (async () => {
+export async function ensureTimeEntryBreaksTable(): Promise<void> {
+  if (timeEntryBreaksTableReady) return;
+  await (async () => {
     await sql`
 		CREATE TABLE IF NOT EXISTS time_entry_breaks (
 			id SERIAL PRIMARY KEY,
@@ -723,16 +725,13 @@ export function ensureTimeEntryBreaksTable(): Promise<void> {
 			END IF;
 		END $$
 	`;
-  })().catch((error) => {
-    timeEntryBreaksTableReady = null;
-    throw error;
-  });
-  return timeEntryBreaksTableReady;
+  })();
+  timeEntryBreaksTableReady = true;
 }
 
 /** Test-only: forget that the table check ran. */
 export function resetTimeEntryBreaksTableCheck() {
-  timeEntryBreaksTableReady = null;
+  timeEntryBreaksTableReady = false;
 }
 
 export async function dbGetBreaksForEntries(entryIds: number[]) {
@@ -928,7 +927,7 @@ export async function dbDeleteBreak(id: number, orgId: string) {
   return deleted as unknown as TimeEntryBreak | undefined;
 }
 
-let locationTablesReady: Promise<void> | null = null;
+let locationTablesReady = false;
 
 /**
  * Location capture is opt-in per org. Production databases that predate
@@ -937,8 +936,9 @@ let locationTablesReady: Promise<void> | null = null;
  * way `ensureBreakSettingsTable` does. Runs once per server instance; a
  * failure is not cached, so the next call retries.
  */
-export function ensureLocationTables(): Promise<void> {
-  locationTablesReady ??= (async () => {
+export async function ensureLocationTables(): Promise<void> {
+  if (locationTablesReady) return;
+  await (async () => {
     await sql`
 		CREATE TABLE IF NOT EXISTS settings (
 			org_id TEXT PRIMARY KEY,
@@ -983,16 +983,13 @@ export function ensureLocationTables(): Promise<void> {
 			ADD COLUMN IF NOT EXISTS clock_out_site_name TEXT,
 			ADD COLUMN IF NOT EXISTS clock_out_address TEXT
 	`;
-  })().catch((error) => {
-    locationTablesReady = null;
-    throw error;
-  });
-  return locationTablesReady;
+  })();
+  locationTablesReady = true;
 }
 
 /** Test-only: forget that the table check ran. */
 export function resetLocationTablesCheck() {
-  locationTablesReady = null;
+  locationTablesReady = false;
 }
 
 export async function dbGetLocationSettings(orgId: string) {
@@ -1113,15 +1110,16 @@ export async function dbDeleteSite(id: number, orgId: string) {
 
 /* ------------------------------------------------- scheduled shifts -- */
 
-let scheduledShiftsTableReady: Promise<void> | null = null;
+let scheduledShiftsTableReady = false;
 
 /**
  * Production databases that predate `scheduled_shifts` in schema.sql don't
  * have it, so create it on first use (same approach as the other optional
  * tables). Runs once per server instance; a failure is not cached.
  */
-export function ensureScheduledShiftsTable(): Promise<void> {
-  scheduledShiftsTableReady ??= (async () => {
+export async function ensureScheduledShiftsTable(): Promise<void> {
+  if (scheduledShiftsTableReady) return;
+  await (async () => {
     await sql`
 		CREATE TABLE IF NOT EXISTS scheduled_shifts (
 			id SERIAL PRIMARY KEY,
@@ -1146,16 +1144,13 @@ export function ensureScheduledShiftsTable(): Promise<void> {
 			ADD COLUMN IF NOT EXISTS location TEXT,
 			ADD COLUMN IF NOT EXISTS location_address TEXT
 	`;
-  })().catch((error) => {
-    scheduledShiftsTableReady = null;
-    throw error;
-  });
-  return scheduledShiftsTableReady;
+  })();
+  scheduledShiftsTableReady = true;
 }
 
 /** Test-only: forget that the table check ran. */
 export function resetScheduledShiftsTableCheck() {
-  scheduledShiftsTableReady = null;
+  scheduledShiftsTableReady = false;
 }
 
 /**
@@ -1251,15 +1246,16 @@ export async function dbDeleteScheduledShift(id: number, orgId: string) {
 
 /* ------------------------------------------------------------ time off -- */
 
-let timeOffTableReady: Promise<void> | null = null;
+let timeOffTableReady = false;
 
 /**
  * Production databases that predate `time_off_requests` in schema.sql don't
  * have it, so create it on first use (same approach as the other optional
  * tables). Runs once per server instance; a failure is not cached.
  */
-export function ensureTimeOffTable(): Promise<void> {
-  timeOffTableReady ??= (async () => {
+export async function ensureTimeOffTable(): Promise<void> {
+  if (timeOffTableReady) return;
+  await (async () => {
     await sql`
 		CREATE TABLE IF NOT EXISTS time_off_requests (
 			id SERIAL PRIMARY KEY,
@@ -1319,16 +1315,13 @@ export function ensureTimeOffTable(): Promise<void> {
 			PRIMARY KEY (org_id, user_id)
 		)
 	`;
-  })().catch((error) => {
-    timeOffTableReady = null;
-    throw error;
-  });
-  return timeOffTableReady;
+  })();
+  timeOffTableReady = true;
 }
 
 /** Test-only: forget that the table check ran. */
 export function resetTimeOffTableCheck() {
-  timeOffTableReady = null;
+  timeOffTableReady = false;
 }
 
 // Dates are read back as text so a DATE never turns into a midnight-UTC

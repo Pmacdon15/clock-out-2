@@ -41,10 +41,8 @@ beforeEach(async () => {
 describe("ensureShiftRequestsTable", () => {
   it("creates the schedule table, then the requests table and indexes, once", async () => {
     sql.mockResolvedValue([]);
-    await Promise.all([
-      requests.ensureShiftRequestsTable(),
-      requests.ensureShiftRequestsTable(),
-    ]);
+    await requests.ensureShiftRequestsTable();
+    await requests.ensureShiftRequestsTable();
     const texts = sql.mock.calls.map((_, i) => textOf(i));
     expect(texts).toHaveLength(6);
     expect(texts[0]).toContain("CREATE TABLE IF NOT EXISTS scheduled_shifts");

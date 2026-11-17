@@ -9,7 +9,7 @@ import {
 /** Cache tag for the shared rate table (one for every org). */
 export const PAYROLL_RATES_TAG = "payroll-rates";
 
-let payrollTablesReady: Promise<void> | null = null;
+let payrollTablesReady = false;
 
 /**
  * Payroll deduction settings (per org) and CRA rate rows (shared). Production
@@ -17,8 +17,9 @@ let payrollTablesReady: Promise<void> | null = null;
  * them on first use, like the overtime table. Runs once per server instance;
  * a failure is not cached, so the next call retries.
  */
-export function ensurePayrollTables(): Promise<void> {
-  payrollTablesReady ??= (async () => {
+export async function ensurePayrollTables(): Promise<void> {
+  if (payrollTablesReady) return;
+  await (async () => {
     await sql`
 		CREATE TABLE IF NOT EXISTS settings (
 			org_id TEXT PRIMARY KEY,
@@ -43,16 +44,13 @@ export function ensurePayrollTables(): Promise<void> {
 			PRIMARY KEY (jurisdiction, effective_from)
 		)
 	`;
-  })().catch((error) => {
-    payrollTablesReady = null;
-    throw error;
-  });
-  return payrollTablesReady;
+  })();
+  payrollTablesReady = true;
 }
 
 /** Test-only: forget that the table check ran. */
 export function resetPayrollTablesCheck() {
-  payrollTablesReady = null;
+  payrollTablesReady = false;
 }
 
 export async function dbGetPayrollSettings(orgId: string) {

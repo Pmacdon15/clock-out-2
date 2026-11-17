@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   dbGetSitesForEnforcement: vi.fn(),
 }));
 
+vi.mock("next/server", () => ({ connection: () => Promise.resolve() }));
 vi.mock("@clerk/nextjs/server", () => ({
   auth: { protect: mocks.protect },
   clerkClient: vi.fn(async () => ({
