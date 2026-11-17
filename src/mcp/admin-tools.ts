@@ -73,6 +73,14 @@ import {
   SHIFT_STATUS_LABELS,
 } from "@/lib/schedule-utils";
 import {
+  findSiteByName,
+  MAX_SHIFT_LOCATION_LENGTH,
+  NO_SHIFT_LOCATION,
+  type ShiftLocation,
+  shiftLocationOf,
+  shiftLocationText,
+} from "@/lib/shift-location";
+import {
   DEFAULT_TIME_OFF_HOURS_PER_DAY,
   formatTimeOffDates,
   invalidTimeOffReason,
@@ -175,6 +183,13 @@ export const manageScheduleInputSchema = z.object({
     .optional()
     .describe(
       "Note shown with the shift (e.g. 'Front desk'), up to 500 characters. For 'update', pass an empty string or null to clear it; omit to keep it.",
+    ),
+  location: z
+    .string()
+    .nullable()
+    .optional()
+    .describe(
+      "Where the shift is. The name of one of the organization's saved work sites (see manage_location_settings; matched ignoring case) links the shift to that site and its address; any other text (e.g. an address or 'Client site') is saved as typed, up to 200 characters. For 'update', pass an empty string or null to clear it; omit to keep it.",
     ),
   start_date: dateField(
     "For 'list': first day to show (defaults to two weeks ago).",
@@ -548,6 +563,9 @@ function formatShift(
     shift_end_local: formatTimestampInTz(end, tz),
     hours: Number(((end.getTime() - start.getTime()) / 3_600_000).toFixed(2)),
     note: shift.note,
+    location: shift.location ?? null,
+    location_address: shift.location_address ?? null,
+    site_id: shift.site_id ?? null,
     ...(shift.status
       ? {
           status: shift.status,
@@ -560,7 +578,38 @@ function formatShift(
 function describeShift(shift: ScheduledShift, tz: string) {
   const start = new Date(shift.shift_start);
   const end = new Date(shift.shift_end);
-  return `${formatInTimeZone(start, tz, "EEE, MMM d, h:mm a")} – ${formatInTimeZone(end, tz, "h:mm a zzz")}`;
+  const where = shift.location ? ` at ${shift.location}` : "";
+  return `${formatInTimeZone(start, tz, "EEE, MMM d, h:mm a")} – ${formatInTimeZone(end, tz, "h:mm a zzz")}${where}`;
+}
+
+/**
+ * The `location` input as columns to store: a saved site's name (matched
+ * ignoring case) links that site and its address; other text is kept as
+ * typed; empty clears it.
+ */
+async function resolveMcpShiftLocation(
+  orgId: string,
+  location: string | null,
+): Promise<{ ok: true; value: ShiftLocation } | { ok: false; reason: string }> {
+  const typed = location?.trim() || null;
+  if (!typed) return { ok: true, value: NO_SHIFT_LOCATION };
+  if (typed.length > MAX_SHIFT_LOCATION_LENGTH) {
+    return {
+      ok: false,
+      reason: `Location is too long (${MAX_SHIFT_LOCATION_LENGTH} characters at most).`,
+    };
+  }
+  const site = findSiteByName(await dbGetSites(orgId), typed);
+  return {
+    ok: true,
+    value: site
+      ? {
+          site_id: site.id,
+          location: site.name,
+          location_address: site.address?.trim() || null,
+        }
+      : { site_id: null, location: typed, location_address: null },
+  };
 }
 
 /**
@@ -696,6 +745,11 @@ export async function manageScheduleTool(
     if (note && note.length > MAX_SHIFT_NOTE_LENGTH) {
       return invalid("Note is too long (500 characters at most).");
     }
+    const location = await resolveMcpShiftLocation(
+      org.orgId,
+      input.location ?? null,
+    );
+    if (!location.ok) return invalid(location.reason);
     const conflict = await timeOffConflict(
       member.userId,
       org.orgId,
@@ -717,6 +771,7 @@ export async function manageScheduleTool(
       times.end,
       note,
       caller.userId,
+      location.value,
     );
     revalidate(`scheduled-shifts-${org.orgId}`);
     await notifyScheduleChange("added", created, tz);
@@ -810,10 +865,11 @@ export async function manageScheduleTool(
     input.date === undefined &&
     input.start_time === undefined &&
     input.end_time === undefined &&
-    input.note === undefined
+    input.note === undefined &&
+    input.location === undefined
   ) {
     return invalid(
-      "Nothing to change. Pass date, start_time, end_time and/or note.",
+      "Nothing to change. Pass date, start_time, end_time, note and/or location.",
     );
   }
   const times = resolveShiftTimes(
@@ -831,6 +887,12 @@ export async function manageScheduleTool(
     input.note === undefined ? existing.note : input.note?.trim() || null;
   if (note && note.length > MAX_SHIFT_NOTE_LENGTH) {
     return invalid("Note is too long (500 characters at most).");
+  }
+  let location = shiftLocationOf(existing);
+  if (input.location !== undefined) {
+    const resolved = await resolveMcpShiftLocation(org.orgId, input.location);
+    if (!resolved.ok) return invalid(resolved.reason);
+    location = resolved.value;
   }
   const conflict = await timeOffConflict(
     existing.user_id,
@@ -852,6 +914,7 @@ export async function manageScheduleTool(
     times.start,
     times.end,
     note,
+    location,
   );
   if (!updated) {
     return {
@@ -904,6 +967,7 @@ function calendarEvent(
 ) {
   const tag = calendarShiftTag(shift);
   const title = `${forEveryone ? `${memberName}: ` : ""}Shift · ${orgName}`;
+  const location = shiftLocationText(shift);
   const description = [
     ...(shift.note ? [shift.note, ""] : []),
     `Scheduled in Clock Out for ${memberName}. Changes made here are overwritten on the next sync.`,
@@ -920,6 +984,7 @@ function calendarEvent(
     end: isoInTz(new Date(shift.shift_end), tz),
     timezone: tz,
     note: shift.note,
+    location,
     updated_at: shift.updated_at
       ? new Date(shift.updated_at).toISOString()
       : null,

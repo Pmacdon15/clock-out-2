@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type {
   ScheduledShiftWithStatus,
   ShiftStatus,
+  SiteData,
   TimeOffRequest,
 } from "@/lib/types";
 import { renderWithClient, resolved } from "../utils";
@@ -35,6 +36,8 @@ vi.mock("@clerk/nextjs", () => ({
 import Schedule, {
   buildShiftTimes,
   findTimeOffConflict,
+  locationChoiceFor,
+  locationInputFor,
 } from "@/components/Schedule";
 
 let nextId = 1;
@@ -68,16 +71,47 @@ function renderSchedule(
   isAdmin = true,
   withMembers = true,
   timeOff: TimeOffRequest[] = [],
+  sites?: SiteData[] | "error",
 ) {
   renderWithClient(
     <Schedule
       isAdmin={isAdmin}
       membersPromise={withMembers ? resolved(members) : undefined}
       schedulePromise={resolved({ ok: true as const, value: shifts })}
+      sitesPromise={
+        sites === undefined
+          ? undefined
+          : resolved(
+              sites === "error"
+                ? { ok: false as const, error: { reason: "nope" } }
+                : { ok: true as const, value: sites },
+            )
+      }
       timeOffPromise={resolved({ ok: true as const, value: timeOff })}
     />,
   );
 }
+
+const sites: SiteData[] = [
+  {
+    id: 7,
+    org_id: "org_1",
+    name: "Warehouse",
+    latitude: 1,
+    longitude: 2,
+    radius_meters: 150,
+    address: "1 King St",
+  },
+  {
+    id: 8,
+    org_id: "org_1",
+    name: "Shop",
+    latitude: 3,
+    longitude: 4,
+    radius_meters: 150,
+    address: null,
+  },
+];
 
 function timeOff(overrides: Partial<TimeOffRequest> = {}): TimeOffRequest {
   return {
@@ -102,6 +136,31 @@ const section = (heading: string) =>
   screen
     .getByRole("heading", { name: heading })
     .closest("[class*='rounded-xl border']") as HTMLElement;
+
+describe("locationChoiceFor / locationInputFor", () => {
+  it("starts from the shift's saved site, its typed location, or nothing", () => {
+    expect(
+      locationChoiceFor({ site_id: 7, location: "Warehouse" }, sites),
+    ).toEqual({ choice: "7", typed: "" });
+    // A site removed since falls back to its name, as a typed location.
+    expect(
+      locationChoiceFor({ site_id: 99, location: "Old yard" }, sites),
+    ).toEqual({ choice: "other", typed: "Old yard" });
+    expect(locationChoiceFor({ location: "Client" }, sites)).toEqual({
+      choice: "other",
+      typed: "Client",
+    });
+    expect(locationChoiceFor({}, sites)).toEqual({ choice: "", typed: "" });
+  });
+
+  it("sends a site id, the typed text, or nothing", () => {
+    expect(locationInputFor({ choice: "7", typed: "" })).toEqual({ siteId: 7 });
+    expect(locationInputFor({ choice: "other", typed: "Client" })).toEqual({
+      location: "Client",
+    });
+    expect(locationInputFor({ choice: "", typed: "x" })).toEqual({});
+  });
+});
 
 describe("findTimeOffConflict", () => {
   it("finds the member's approved time off the shift lands on", () => {
@@ -258,6 +317,7 @@ describe("Schedule", () => {
       // The admin's zone, so the member's notice words the times locally.
       Intl.DateTimeFormat().resolvedOptions().timeZone,
       { start: "2026-01-07", end: "2026-01-08" },
+      {},
     );
     expect(screen.getByLabelText("Note (optional)")).toHaveValue("");
   });
@@ -443,6 +503,7 @@ describe("Schedule", () => {
       "Till",
       Intl.DateTimeFormat().resolvedOptions().timeZone,
       { start: "2026-01-06", end: "2026-01-06" },
+      {},
     );
     expect(screen.queryByRole("button", { name: "Save shift" })).toBeNull();
   });
@@ -628,5 +689,125 @@ describe("Schedule", () => {
     expect(
       await screen.findByText("Use Apple Calendar or Outlook instead?"),
     ).toBeVisible();
+  });
+});
+
+describe("Schedule locations", () => {
+  it("publishes a shift at a saved site", async () => {
+    mocks.createScheduledShiftAction.mockResolvedValue({
+      success: true,
+      data: {},
+    });
+    renderSchedule([], true, true, [], sites);
+    fireEvent.change(screen.getByLabelText("Member"), {
+      target: { value: "user_2" },
+    });
+    fireEvent.change(screen.getByLabelText("Date"), {
+      target: { value: "2026-01-07" },
+    });
+    const picker = screen.getByLabelText("Location (optional)");
+    expect(
+      within(picker)
+        .getAllByRole("option")
+        .map((o) => o.textContent),
+    ).toEqual(["No location", "Warehouse", "Shop", "Other location…"]);
+    // No free-text box until "Other location…" is picked.
+    expect(screen.queryByLabelText("Other location")).toBeNull();
+    fireEvent.change(picker, { target: { value: "7" } });
+    fireEvent.click(screen.getByRole("button", { name: "Publish shift" }));
+    await waitFor(() =>
+      expect(mocks.createScheduledShiftAction).toHaveBeenCalled(),
+    );
+    expect(mocks.createScheduledShiftAction.mock.calls[0][6]).toEqual({
+      siteId: 7,
+    });
+  });
+
+  it("publishes a shift at a location typed in", async () => {
+    mocks.createScheduledShiftAction.mockResolvedValue({
+      success: true,
+      data: {},
+    });
+    renderSchedule([], true, true, [], sites);
+    fireEvent.change(screen.getByLabelText("Member"), {
+      target: { value: "user_2" },
+    });
+    fireEvent.change(screen.getByLabelText("Date"), {
+      target: { value: "2026-01-07" },
+    });
+    fireEvent.change(screen.getByLabelText("Location (optional)"), {
+      target: { value: "other" },
+    });
+    fireEvent.change(screen.getByLabelText("Other location"), {
+      target: { value: "Client site" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Publish shift" }));
+    await waitFor(() =>
+      expect(mocks.createScheduledShiftAction).toHaveBeenCalled(),
+    );
+    expect(mocks.createScheduledShiftAction.mock.calls[0][6]).toEqual({
+      location: "Client site",
+    });
+  });
+
+  it("offers just a text box when there are no saved sites (or they fail to load)", () => {
+    renderSchedule([], true, true, [], "error");
+    const input = screen.getByLabelText("Location (optional)");
+    expect(input.tagName).toBe("INPUT");
+    fireEvent.change(input, { target: { value: "Depot" } });
+    expect(input).toHaveValue("Depot");
+  });
+
+  it("shows the shift's location with a map link and its address", () => {
+    renderSchedule(
+      [
+        shift("scheduled", {
+          site_id: 7,
+          location: "Warehouse",
+          location_address: "1 King St",
+        }),
+        shift("scheduled", { location: "Client site" }),
+      ],
+      false,
+    );
+    const warehouse = screen.getByRole("link", { name: "Warehouse" });
+    expect(warehouse).toHaveAttribute(
+      "href",
+      "https://www.google.com/maps/search/?api=1&query=1%20King%20St",
+    );
+    expect(screen.getByText("· 1 King St", { exact: false })).toBeVisible();
+    expect(screen.getByRole("link", { name: "Client site" })).toHaveAttribute(
+      "href",
+      "https://www.google.com/maps/search/?api=1&query=Client%20site",
+    );
+  });
+
+  it("edits a shift's location, starting from its saved site", async () => {
+    mocks.updateScheduledShiftAction.mockResolvedValue({
+      success: true,
+      data: {},
+    });
+    renderSchedule(
+      [shift("scheduled", { site_id: 7, location: "Warehouse" })],
+      true,
+      true,
+      [],
+      sites,
+    );
+    fireEvent.click(screen.getByLabelText("Edit shift"));
+    const row = screen
+      .getByRole("button", { name: "Save shift" })
+      .closest("li") as HTMLElement;
+    const scoped = within(row);
+    const picker = scoped.getByLabelText("Location (optional)");
+    expect(picker).toHaveValue("7");
+    fireEvent.change(picker, { target: { value: "8" } });
+    fireEvent.click(scoped.getByRole("button", { name: "Save shift" }));
+    await waitFor(() =>
+      expect(mocks.updateScheduledShiftAction).toHaveBeenCalled(),
+    );
+    expect(mocks.updateScheduledShiftAction.mock.calls[0][6]).toEqual({
+      siteId: 8,
+    });
   });
 });

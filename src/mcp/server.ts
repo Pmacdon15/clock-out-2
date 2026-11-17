@@ -586,7 +586,7 @@ export function registerClockOutTools(server: McpServer) {
     {
       title: "View, schedule, change, or cancel shifts",
       description:
-        "Lists scheduled shifts with how each went (on time, late, not clocked in, no-show), or, for admins ('org:admin'), schedules a shift for any member (action: 'create' with member, date, start_time, end_time, optional note), moves a shift or changes its note (action: 'update' with shift_id), or cancels a shift (action: 'cancel' with shift_id, or member and date). Shifts can't be scheduled on a member's approved time off, and the member is notified of changes when schedule notices are on. Members can list only their own shifts. Only change or cancel a shift when the user explicitly asks.",
+        "Lists scheduled shifts with how each went (on time, late, not clocked in, no-show), or, for admins ('org:admin'), schedules a shift for any member (action: 'create' with member, date, start_time, end_time, optional note and location — a saved work site's name or any text), moves a shift or changes its note or location (action: 'update' with shift_id), or cancels a shift (action: 'cancel' with shift_id, or member and date). Shifts can't be scheduled on a member's approved time off, and the member is notified of changes when schedule notices are on. Members can list only their own shifts. Only change or cancel a shift when the user explicitly asks.",
       inputSchema: portable(manageScheduleInputSchema),
       annotations: {
         readOnlyHint: false,
@@ -606,7 +606,7 @@ export function registerClockOutTools(server: McpServer) {
     {
       title: "Get scheduled shifts for a calendar sync",
       description:
-        "Returns scheduled shifts as calendar-ready events for syncing into the user's own calendar (e.g. Google Calendar through another connector): title, start and end with timezone offset, description, and a sync_tag per shift. Defaults to your own shifts for today plus 14 days (at most 93 days); admins can pass a member or 'all'. Store each event's sync_tag on the calendar event (in its description, and as a private extended property when the calendar tool supports it). To sync, create events for new shifts, update tagged events that differ, and delete events in the window whose tag starts with sync_scope_prefix but isn't in the result (cancelled shifts). Never touch other events. Needs a plan with Scheduling.",
+        "Returns scheduled shifts as calendar-ready events for syncing into the user's own calendar (e.g. Google Calendar through another connector): title, start and end with timezone offset, description, location (when the shift has one, for the event's location field), and a sync_tag per shift. Defaults to your own shifts for today plus 14 days (at most 93 days); admins can pass a member or 'all'. Store each event's sync_tag on the calendar event (in its description, and as a private extended property when the calendar tool supports it). To sync, create events for new shifts, update tagged events that differ, and delete events in the window whose tag starts with sync_scope_prefix but isn't in the result (cancelled shifts). Never touch other events. Needs a plan with Scheduling.",
       inputSchema: portable(getCalendarShiftsInputSchema),
       annotations: { readOnlyHint: true, openWorldHint: false },
     },

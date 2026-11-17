@@ -302,6 +302,15 @@ export type ScheduledShift = {
   shift_start: Date;
   shift_end: Date;
   note: string | null;
+  /** Saved work site the shift is at, if it was picked from the site list. */
+  site_id?: number | null;
+  /**
+   * Where the shift is: the picked site's name (snapshotted, so renaming or
+   * removing the site never rewrites the schedule) or a location typed in.
+   */
+  location?: string | null;
+  /** The picked site's street address at the time, if it had one. */
+  location_address?: string | null;
   created_by: string;
   created_at?: Date;
   updated_at?: Date;

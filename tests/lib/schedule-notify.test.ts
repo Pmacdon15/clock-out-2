@@ -158,6 +158,18 @@ describe("describeShiftChange", () => {
     });
   });
 
+  it("says where the shift is", () => {
+    const at = { ...s, location: "Warehouse", location_address: "1 King St" };
+    expect(describeShiftChange("added", at, REGINA).body).toBe(
+      "You're scheduled Mon, Nov 2, 9:00 AM – 5:00 PM. Location: Warehouse, 1 King St. Note: Front desk",
+    );
+    expect(
+      describeShiftChange("changed", { ...at, note: null }, REGINA).body,
+    ).toBe(
+      "Your shift is now Mon, Nov 2, 9:00 AM – 5:00 PM. Location: Warehouse, 1 King St.",
+    );
+  });
+
   it("announces a removed shift", () => {
     expect(
       describeShiftChange("removed", { ...s, note: null }, REGINA),
@@ -306,6 +318,25 @@ describe("describeWeeklyDigest", () => {
         shift("2026-11-03T15:00:00Z", "2026-11-03T22:30:00Z"),
       ],
     });
+    const located = describeWeeklyDigest({
+      orgId: "org_1",
+      userId: "u1",
+      zone: REGINA,
+      weekOf: "2026-11-02",
+      shifts: [
+        shift("2026-11-02T15:00:00Z", "2026-11-02T23:00:00Z", {
+          note: "Opening",
+          location: "Shop",
+        }),
+        shift("2026-11-03T15:00:00Z", "2026-11-03T22:30:00Z", {
+          location: "Depot",
+        }),
+      ],
+    });
+    expect(located.lines).toEqual([
+      "Mon, Nov 2, 9:00 AM – 5:00 PM at Shop (Opening)",
+      "Tue, Nov 3, 9:00 AM – 4:30 PM at Depot",
+    ]);
     expect(message).toEqual({
       title: "Your schedule for Nov 2 – Nov 8",
       body: "2 shifts, 15.5h scheduled next week. First up: Mon, Nov 2, 9:00 AM – 5:00 PM (Opening).",
@@ -472,6 +503,11 @@ describe("upcoming shift reminders", () => {
     );
     expect(msg.title).toBe("Your shift starts at 3:00 PM UTC");
     expect(msg.body).toContain("starting in 45 minutes. Note: Front desk");
+    expect(
+      describeUpcomingShift({ ...soon, location: "Shop" }, REGINA, now).body,
+    ).toBe(
+      "Heads up: you're scheduled Mon, Nov 2, 9:00 AM – 5:00 PM, starting in 1 hour. Location: Shop.",
+    );
     expect(
       describeUpcomingShift(soon, REGINA, new Date("2026-11-02T14:59:10Z"))
         .body,

@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   dbGetOrgTimeEntries: vi.fn(),
   dbGetTimeEntries: vi.fn(),
   dbGetApprovedTimeOffForPeriod: vi.fn(),
+  dbGetSitesForEnforcement: vi.fn(),
 }));
 
 vi.mock("next/server", () => ({ connection: () => Promise.resolve() }));
@@ -44,6 +45,7 @@ vi.mock("@/lib/db", () => ({
   dbGetOrgTimeEntries: mocks.dbGetOrgTimeEntries,
   dbGetTimeEntries: mocks.dbGetTimeEntries,
   dbGetApprovedTimeOffForPeriod: mocks.dbGetApprovedTimeOffForPeriod,
+  dbGetSitesForEnforcement: mocks.dbGetSitesForEnforcement,
 }));
 
 import { verifyFeedToken } from "@/lib/calendar-feed";
@@ -243,7 +245,96 @@ describe("createScheduledShiftDal", () => {
       shiftEnd,
       "Front desk",
       "admin_1",
+      { site_id: null, location: null, location_address: null },
     );
+  });
+
+  const sites = [
+    { id: 7, name: "Warehouse", address: " 1 King St " },
+    { id: 8, name: "Shop", address: null },
+  ];
+
+  it("publishes the shift at a saved site, snapshotting its name and address", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbCreateScheduledShift.mockResolvedValue(shift);
+    mocks.dbGetSitesForEnforcement.mockResolvedValue(sites);
+    await createScheduledShiftDal("user_1", shiftStart, shiftEnd, null, null, {
+      siteId: 7,
+    });
+    expect(mocks.dbGetSitesForEnforcement).toHaveBeenCalledWith("org_1");
+    expect(mocks.dbCreateScheduledShift.mock.calls[0][6]).toEqual({
+      site_id: 7,
+      location: "Warehouse",
+      location_address: "1 King St",
+    });
+  });
+
+  it("publishes the shift at a typed location without reading sites", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbCreateScheduledShift.mockResolvedValue(shift);
+    await createScheduledShiftDal("user_1", shiftStart, shiftEnd, null, null, {
+      location: "  Client site ",
+    });
+    expect(mocks.dbGetSitesForEnforcement).not.toHaveBeenCalled();
+    expect(mocks.dbCreateScheduledShift.mock.calls[0][6]).toEqual({
+      site_id: null,
+      location: "Client site",
+      location_address: null,
+    });
+  });
+
+  it("rejects a site from another org or a location that is too long", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbGetSitesForEnforcement.mockResolvedValue(sites);
+    expect(
+      (
+        await createScheduledShiftDal(
+          "user_1",
+          shiftStart,
+          shiftEnd,
+          null,
+          null,
+          {
+            siteId: 99,
+          },
+        )
+      )._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Location not found" });
+    expect(
+      (
+        await createScheduledShiftDal(
+          "user_1",
+          shiftStart,
+          shiftEnd,
+          null,
+          null,
+          {
+            location: "x".repeat(201),
+          },
+        )
+      )._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Location is too long" });
+    expect(mocks.dbCreateScheduledShift).not.toHaveBeenCalled();
+  });
+
+  it("reports a failed site lookup", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.dbGetSitesForEnforcement.mockRejectedValue(new Error("db"));
+    expect(
+      (
+        await createScheduledShiftDal(
+          "user_1",
+          shiftStart,
+          shiftEnd,
+          null,
+          null,
+          {
+            siteId: 7,
+          },
+        )
+      )._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Failed to create shift" });
   });
 
   it("stores a blank or missing note as null", async () => {
@@ -420,9 +511,40 @@ describe("updateScheduledShiftDal", () => {
       later,
       laterEnd,
       "Desk",
+      undefined,
     );
     await updateScheduledShiftDal(1, later, laterEnd);
     expect(mocks.dbUpdateScheduledShift.mock.calls[1][4]).toBeNull();
+  });
+
+  it("changes, clears or rejects the shift's location", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbUpdateScheduledShift.mockResolvedValue(shift);
+    mocks.dbGetSitesForEnforcement.mockResolvedValue([
+      { id: 8, name: "Shop", address: null },
+    ]);
+    await updateScheduledShiftDal(1, later, laterEnd, null, null, {
+      siteId: 8,
+    });
+    expect(mocks.dbUpdateScheduledShift.mock.calls[0][5]).toEqual({
+      site_id: 8,
+      location: "Shop",
+      location_address: null,
+    });
+    await updateScheduledShiftDal(1, later, laterEnd, null, null, {});
+    expect(mocks.dbUpdateScheduledShift.mock.calls[1][5]).toEqual({
+      site_id: null,
+      location: null,
+      location_address: null,
+    });
+    expect(
+      (
+        await updateScheduledShiftDal(1, later, laterEnd, null, null, {
+          siteId: 99,
+        })
+      )._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Location not found" });
+    expect(mocks.dbUpdateScheduledShift).toHaveBeenCalledTimes(2);
   });
 
   it("reports a shift that is not in this org", async () => {

@@ -7,6 +7,7 @@ import {
   CalendarClock,
   CalendarPlus,
   Loader2,
+  MapPin,
   Pencil,
   Trash2,
 } from "lucide-react";
@@ -29,6 +30,11 @@ import {
   SHIFT_STATUS_LABELS,
 } from "@/lib/schedule-utils";
 import {
+  MAX_SHIFT_LOCATION_LENGTH,
+  type ShiftLocationInput,
+  shiftLocationMapUrl,
+} from "@/lib/shift-location";
+import {
   approvedTimeOffOverlapping,
   formatTimeOffDates,
   TIME_OFF_TYPE_LABELS,
@@ -37,6 +43,7 @@ import type {
   ScheduledShiftWithStatus,
   SerializableResult,
   ShiftStatus,
+  SiteData,
   TimeOffRequest,
 } from "@/lib/types";
 import {
@@ -48,6 +55,7 @@ import LocalTime from "./LocalTime";
 import { Button, Card } from "./ui";
 
 type Member = { id: string; name: string };
+type Site = Pick<SiteData, "id" | "name" | "address">;
 
 interface ScheduleProps {
   schedulePromise: Promise<
@@ -59,6 +67,8 @@ interface ScheduleProps {
   >;
   /** Path of the member's private calendar feed, for subscribing. */
   calendarFeedPromise?: Promise<string | null>;
+  /** The org's saved work sites, offered as shift locations (admins). */
+  sitesPromise?: Promise<SerializableResult<SiteData[], { reason: string }>>;
   isAdmin: boolean;
 }
 
@@ -134,12 +144,100 @@ export function findTimeOffConflict(
   )[0];
 }
 
+/** The location picker's value for "a location typed in". */
+const OTHER_LOCATION = "other";
+
+/** What the location picker holds: "" (none), a site id, or OTHER_LOCATION. */
+type LocationChoice = { choice: string; typed: string };
+
+/** The picker's starting value for a shift that is already published. */
+export function locationChoiceFor(
+  shift: Pick<ScheduledShiftWithStatus, "site_id" | "location">,
+  sites: Site[],
+): LocationChoice {
+  if (shift.site_id != null && sites.some((s) => s.id === shift.site_id)) {
+    return { choice: String(shift.site_id), typed: "" };
+  }
+  if (shift.location) {
+    return { choice: OTHER_LOCATION, typed: shift.location };
+  }
+  return { choice: "", typed: "" };
+}
+
+/** What to send the server for the picker's value. */
+export function locationInputFor({
+  choice,
+  typed,
+}: LocationChoice): ShiftLocationInput {
+  if (choice === OTHER_LOCATION) return { location: typed };
+  if (choice) return { siteId: Number(choice) };
+  return {};
+}
+
+/**
+ * Where the shift is: one of the org's saved sites (from Settings), or a
+ * location typed in for a one-off. With no saved sites it's just a text box.
+ */
+function LocationField({
+  id,
+  sites,
+  value,
+  onChange,
+  labelClassName,
+}: {
+  id: string;
+  sites: Site[];
+  value: LocationChoice;
+  onChange: (value: LocationChoice) => void;
+  labelClassName: string;
+}) {
+  const typing = sites.length === 0 || value.choice === OTHER_LOCATION;
+  return (
+    <div className="space-y-1">
+      <label className={labelClassName} htmlFor={id}>
+        Location (optional)
+      </label>
+      {sites.length > 0 && (
+        <select
+          className={inputClass}
+          id={id}
+          onChange={(e) => onChange({ ...value, choice: e.target.value })}
+          value={value.choice}
+        >
+          <option value="">No location</option>
+          {sites.map((site) => (
+            <option key={site.id} value={site.id}>
+              {site.name}
+            </option>
+          ))}
+          <option value={OTHER_LOCATION}>Other location…</option>
+        </select>
+      )}
+      {typing && (
+        <input
+          aria-label={sites.length > 0 ? "Other location" : undefined}
+          className={inputClass}
+          id={sites.length > 0 ? `${id}Other` : id}
+          maxLength={MAX_SHIFT_LOCATION_LENGTH}
+          onChange={(e) =>
+            onChange({ choice: OTHER_LOCATION, typed: e.target.value })
+          }
+          placeholder="e.g. 12 King St W, or Client site"
+          value={value.typed}
+        />
+      )}
+    </div>
+  );
+}
+
 /** Admin form to move a published shift or change its note. */
 function EditShiftForm({
   shift,
+  sites,
   onDone,
 }: {
   shift: ScheduledShiftWithStatus;
+  sites: Site[];
   onDone: () => void;
 }) {
   const start = new Date(shift.shift_start);
@@ -148,6 +246,9 @@ function EditShiftForm({
   const [startTime, setStartTime] = useState(format(start, "HH:mm"));
   const [endTime, setEndTime] = useState(format(end, "HH:mm"));
   const [note, setNote] = useState(shift.note ?? "");
+  const [location, setLocation] = useState(() =>
+    locationChoiceFor(shift, sites),
+  );
 
   const { mutate, isPending } = useMutation({
     mutationFn: () => {
@@ -163,6 +264,7 @@ function EditShiftForm({
         note,
         browserTimezone(),
         shiftLocalDays(shiftStart, shiftEnd),
+        locationInputFor(location),
       );
     },
     onSuccess: (res) => {
@@ -230,6 +332,15 @@ function EditShiftForm({
           maxLength={500}
           onChange={(e) => setNote(e.target.value)}
           value={note}
+        />
+      </div>
+      <div className="sm:col-span-2 lg:col-span-4">
+        <LocationField
+          id={`${id}Location`}
+          labelClassName="font-medium text-xs"
+          onChange={setLocation}
+          sites={sites}
+          value={location}
         />
       </div>
       <div className="flex gap-2 sm:col-span-2 lg:col-span-4">
@@ -323,11 +434,13 @@ function ShiftRow({
   memberName,
   isAdmin,
   canAddToCalendar,
+  sites,
 }: {
   shift: ScheduledShiftWithStatus;
   memberName?: string;
   isAdmin: boolean;
   canAddToCalendar: boolean;
+  sites: Site[];
 }) {
   const [confirming, setConfirming] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -349,6 +462,7 @@ function ShiftRow({
   const end = new Date(shift.shift_end);
   const actualIn = shift.actual_clock_in;
   const actualOut = shift.actual_clock_out;
+  const mapUrl = shiftLocationMapUrl(shift);
 
   return (
     <li className="flex flex-col gap-1.5 border-zinc-100 border-b py-4 last:border-0 dark:border-zinc-800">
@@ -434,6 +548,24 @@ function ShiftRow({
           )}
         </p>
       )}
+      {shift.location && (
+        <p className="flex items-start gap-1 text-muted-foreground text-xs">
+          <MapPin aria-hidden="true" className="mt-px h-3.5 w-3.5 shrink-0" />
+          <span>
+            <a
+              className="font-medium text-foreground underline-offset-2 hover:underline"
+              href={mapUrl as string}
+              rel="noopener noreferrer"
+              target="_blank"
+            >
+              {shift.location}
+            </a>
+            {shift.location_address &&
+              shift.location_address !== shift.location &&
+              ` · ${shift.location_address}`}
+          </span>
+        </p>
+      )}
       {shift.note && (
         <p className="text-muted-foreground text-xs italic">{shift.note}</p>
       )}
@@ -441,7 +573,11 @@ function ShiftRow({
         <AddToCalendarLinks memberName={memberName} shift={shift} />
       )}
       {isAdmin && editing && (
-        <EditShiftForm onDone={() => setEditing(false)} shift={shift} />
+        <EditShiftForm
+          onDone={() => setEditing(false)}
+          shift={shift}
+          sites={sites}
+        />
       )}
     </li>
   );
@@ -449,9 +585,11 @@ function ShiftRow({
 
 function ShiftForm({
   members,
+  sites,
   timeOff,
 }: {
   members: Member[];
+  sites: Site[];
   timeOff: TimeOffRequest[];
 }) {
   const [memberId, setMemberId] = useState("");
@@ -459,6 +597,10 @@ function ShiftForm({
   const [start, setStart] = useState("09:00");
   const [end, setEnd] = useState("17:00");
   const [note, setNote] = useState("");
+  const [location, setLocation] = useState<LocationChoice>({
+    choice: "",
+    typed: "",
+  });
 
   const { mutate, isPending } = useMutation({
     mutationFn: () => {
@@ -470,6 +612,7 @@ function ShiftForm({
         note,
         browserTimezone(),
         shiftLocalDays(shiftStart, shiftEnd),
+        locationInputFor(location),
       );
     },
     onSuccess: (res) => {
@@ -564,6 +707,15 @@ function ShiftForm({
         />
       </div>
       <div className="sm:col-span-2 lg:col-span-4">
+        <LocationField
+          id="shiftLocation"
+          labelClassName="font-medium text-sm"
+          onChange={setLocation}
+          sites={sites}
+          value={location}
+        />
+      </div>
+      <div className="sm:col-span-2 lg:col-span-4">
         {conflict && (
           <p
             className="mb-3 rounded-xl bg-amber-100 p-3 font-medium text-amber-800 text-sm dark:bg-amber-950 dark:text-amber-200"
@@ -602,9 +754,12 @@ export default function Schedule({
   membersPromise,
   timeOffPromise,
   calendarFeedPromise,
+  sitesPromise,
   isAdmin,
 }: ScheduleProps) {
   const result = use(schedulePromise);
+  const sitesResult = sitesPromise ? use(sitesPromise) : null;
+  const sites = sitesResult?.ok ? sitesResult.value : [];
   const members = membersPromise ? use(membersPromise) : [];
   const timeOffResult = timeOffPromise ? use(timeOffPromise) : null;
   const timeOff = timeOffResult?.ok ? timeOffResult.value : [];
@@ -646,6 +801,7 @@ export default function Schedule({
             key={shift.id}
             memberName={nameFor(shift)}
             shift={shift}
+            sites={sites}
           />
         ))}
       </ul>
@@ -689,7 +845,9 @@ export default function Schedule({
           </div>
         )}
 
-        {isAdmin && <ShiftForm members={members} timeOff={timeOff} />}
+        {isAdmin && (
+          <ShiftForm members={members} sites={sites} timeOff={timeOff} />
+        )}
       </Card>
 
       <Card className="p-6 sm:p-8">

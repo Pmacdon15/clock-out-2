@@ -85,6 +85,7 @@ Schedule (manage_schedule):
 - "Schedule Sam tomorrow 9 to 5" → action 'create' with member, date (YYYY-MM-DD), start_time and end_time (pass timezone when known). An end time at or before the start runs past midnight.
 - "Move Sam's Friday shift to 10–6" or "change the note" → call action 'list' to find the shift_id, then action 'update' with only the fields that change.
 - "Cancel Sam's shift on Friday" → action 'cancel' with shift_id, or member and date when they have exactly one shift that day.
+- "Schedule Sam at the warehouse" → pass location. Use a saved work site's name (manage_location_settings action 'get' lists them) to link the shift to that site and its address; any other text (an address, "Client site") is saved as typed. On 'update', an empty string clears it. Shifts list their location, location_address and site_id.
 - Shifts can't be scheduled on a member's approved time off (status "time_off_conflict"): tell the admin and suggest another day.
 - Only create, update, or cancel shifts when the admin explicitly asks or confirms.
 - Needs a plan with Scheduling; if it returns status "scheduling_not_enabled", tell the user their organization's plan needs the Scheduling feature.

@@ -8,6 +8,7 @@ import ShiftRequests from "@/components/ShiftRequests";
 import {
   getCalendarFeedPath,
   getOrgMembers,
+  getOrgSites,
   getSchedule,
   getTimeOffRequests,
 } from "@/lib/dal";
@@ -31,6 +32,7 @@ export default function SchedulePage() {
                   isAdmin={admin}
                   membersPromise={getOrgMembers()}
                   schedulePromise={getSchedule()}
+                  sitesPromise={admin ? getOrgSites() : undefined}
                   timeOffPromise={getTimeOffRequests()}
                 />
                 <div className="mt-6">

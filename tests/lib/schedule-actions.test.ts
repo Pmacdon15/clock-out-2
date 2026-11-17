@@ -63,6 +63,7 @@ describe("createScheduledShiftAction", () => {
         "Desk",
         "America/Regina",
         { start: "2026-01-05", end: "2026-01-05" },
+        { siteId: 7 },
       ),
     ).resolves.toEqual({ success: true, data: shift });
     // The member is told after the response, in the admin's zone as a fallback.
@@ -81,6 +82,7 @@ describe("createScheduledShiftAction", () => {
       new Date("2026-01-05T17:00:00.000Z"),
       "Desk",
       { start: "2026-01-05", end: "2026-01-05" },
+      { siteId: 7 },
     );
     expect(mocks.updateTag).toHaveBeenCalledWith("scheduled-shifts-org_1");
   });
@@ -130,6 +132,7 @@ describe("updateScheduledShiftAction", () => {
         "Desk",
         "UTC",
         { start: "2026-01-06", end: "2026-01-06" },
+        { location: "Client site" },
       ),
     ).resolves.toEqual({ success: true, data: shift });
     expect(mocks.updateScheduledShiftDal).toHaveBeenCalledWith(
@@ -138,6 +141,7 @@ describe("updateScheduledShiftAction", () => {
       new Date("2026-01-06T17:00:00.000Z"),
       "Desk",
       { start: "2026-01-06", end: "2026-01-06" },
+      { location: "Client site" },
     );
     expect(mocks.updateTag).toHaveBeenCalledWith("scheduled-shifts-org_1");
     expect(mocks.notifyScheduleChange).toHaveBeenCalledWith(
