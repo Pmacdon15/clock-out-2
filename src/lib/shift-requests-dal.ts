@@ -1,5 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
-import { addDays } from "date-fns";
+import { addDays, startOfDay } from "date-fns";
+import { connection } from "next/server";
 import { loadOrgMembers } from "./alerts-runner";
 import { dbGetScheduledShifts } from "./db";
 import { SCHEDULING_FEATURE, SCHEDULING_UPGRADE_REASON } from "./plan-features";
@@ -76,22 +77,33 @@ export async function getShiftRequestsView(): Promise<
   if (!signedIn.ok) return { ok: false, error: { reason: signedIn.reason } };
   const { actor } = signedIn;
   try {
+    // Reads the clock, so it can't be part of a prerender.
+    await connection();
     const now = new Date();
+    // Whole days keep the cached shift query's key stable across requests;
+    // shifts that already started are dropped below.
+    const today = startOfDay(now);
     const [requests, members, scheduled] = await Promise.all([
       dbListShiftRequests(actor.orgId, ACTIVE_SHIFT_REQUEST_STATUSES, now),
       loadOrgMembers(actor.orgId),
       dbGetScheduledShifts(
         actor.orgId,
         null,
-        now,
-        addDays(now, TRADEABLE_SHIFT_DAYS),
+        today,
+        addDays(today, TRADEABLE_SHIFT_DAYS + 1),
       ),
     ]);
     const taken = new Set(
       requests.flatMap((r) => [r.shift_id, r.swap_shift_id]),
     );
+    const horizon = addDays(now, TRADEABLE_SHIFT_DAYS);
     const shifts = scheduled
-      .filter((s) => !taken.has(s.id))
+      .filter(
+        (s) =>
+          new Date(s.shift_start) >= now &&
+          new Date(s.shift_start) < horizon &&
+          !taken.has(s.id),
+      )
       .map(({ id, user_id, shift_start, shift_end }) => ({
         id,
         user_id,

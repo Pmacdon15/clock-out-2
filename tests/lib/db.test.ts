@@ -270,10 +270,8 @@ describe("break settings", () => {
 
   it("ensureBreakSettingsTable only runs once per instance", async () => {
     sql.mockResolvedValue([]);
-    await Promise.all([
-      db.ensureBreakSettingsTable(),
-      db.ensureBreakSettingsTable(),
-    ]);
+    await db.ensureBreakSettingsTable();
+    await db.ensureBreakSettingsTable();
     await db.ensureBreakSettingsTable();
     expect(sql).toHaveBeenCalledTimes(3);
   });
@@ -556,10 +554,8 @@ describe("breaks", () => {
 
   it("ensureTimeEntryBreaksTable only runs once, and retries after a failure", async () => {
     sql.mockResolvedValue([]);
-    await Promise.all([
-      db.ensureTimeEntryBreaksTable(),
-      db.ensureTimeEntryBreaksTable(),
-    ]);
+    await db.ensureTimeEntryBreaksTable();
+    await db.ensureTimeEntryBreaksTable();
     expect(sql).toHaveBeenCalledTimes(4);
 
     db.resetTimeEntryBreaksTableCheck();
@@ -765,7 +761,8 @@ describe("location settings and sites", () => {
 
   it("ensureLocationTables only runs once per instance", async () => {
     sql.mockResolvedValue([]);
-    await Promise.all([db.ensureLocationTables(), db.ensureLocationTables()]);
+    await db.ensureLocationTables();
+    await db.ensureLocationTables();
     await db.ensureLocationTables();
     expect(sql).toHaveBeenCalledTimes(5);
   });
@@ -1009,10 +1006,8 @@ describe("overtime settings", () => {
 
   it("ensureOvertimeSettingsTable only runs once per instance", async () => {
     sql.mockResolvedValue([]);
-    await Promise.all([
-      db.ensureOvertimeSettingsTable(),
-      db.ensureOvertimeSettingsTable(),
-    ]);
+    await db.ensureOvertimeSettingsTable();
+    await db.ensureOvertimeSettingsTable();
     await db.ensureOvertimeSettingsTable();
     expect(sql).toHaveBeenCalledTimes(4);
   });
@@ -1106,10 +1101,8 @@ describe("pay period settings", () => {
 
   it("ensurePayPeriodSettingsTable only runs once per instance", async () => {
     sql.mockResolvedValue([]);
-    await Promise.all([
-      db.ensurePayPeriodSettingsTable(),
-      db.ensurePayPeriodSettingsTable(),
-    ]);
+    await db.ensurePayPeriodSettingsTable();
+    await db.ensurePayPeriodSettingsTable();
     await db.ensurePayPeriodSettingsTable();
     expect(sql).toHaveBeenCalledTimes(2);
   });
@@ -1171,7 +1164,8 @@ describe("pay rates", () => {
 
   it("ensurePayRatesTable creates member_pay_rates once", async () => {
     sql.mockResolvedValue([]);
-    await Promise.all([db.ensurePayRatesTable(), db.ensurePayRatesTable()]);
+    await db.ensurePayRatesTable();
+    await db.ensurePayRatesTable();
     await db.ensurePayRatesTable();
     expect(sql).toHaveBeenCalledTimes(1);
     expect(textOf(0)).toContain("CREATE TABLE IF NOT EXISTS member_pay_rates");
@@ -1225,14 +1219,21 @@ describe("scheduled shifts", () => {
 
   it("ensureScheduledShiftsTable creates the table and its index once", async () => {
     sql.mockResolvedValue([]);
-    await Promise.all([
-      db.ensureScheduledShiftsTable(),
-      db.ensureScheduledShiftsTable(),
-    ]);
+    await db.ensureScheduledShiftsTable();
+    await db.ensureScheduledShiftsTable();
     expect(sql).toHaveBeenCalledTimes(2);
     expect(textOf(0)).toContain("CREATE TABLE IF NOT EXISTS scheduled_shifts");
     expect(textOf(0)).toContain("CHECK (shift_end > shift_start)");
     expect(textOf(1)).toContain("idx_scheduled_shifts_org_start");
+  });
+
+  it("ensureScheduledShiftsTable never waits on another caller's check", async () => {
+    // A check started by a prefetch prerender can hang until that prerender
+    // ends; a concurrent cached read must not be stuck behind it.
+    sql.mockReturnValueOnce(new Promise(() => {}));
+    void db.ensureScheduledShiftsTable();
+    sql.mockResolvedValue([]);
+    await expect(db.ensureScheduledShiftsTable()).resolves.toBeUndefined();
   });
 
   it("ensureScheduledShiftsTable retries after a failure", async () => {
@@ -1328,7 +1329,8 @@ describe("time off requests", () => {
 
   it("ensureTimeOffTable creates the tables and index once", async () => {
     sql.mockResolvedValue([]);
-    await Promise.all([db.ensureTimeOffTable(), db.ensureTimeOffTable()]);
+    await db.ensureTimeOffTable();
+    await db.ensureTimeOffTable();
     expect(sql).toHaveBeenCalledTimes(6);
     expect(textOf(0)).toContain("CREATE TABLE IF NOT EXISTS time_off_requests");
     expect(textOf(0)).toContain("CHECK (end_date >= start_date)");
