@@ -5,6 +5,7 @@ import { Briefcase, ShieldCheck, User } from "lucide-react";
 import type { Route } from "next";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { use, useState } from "react";
+import { getSelectableYears } from "@/lib/date-utils";
 import {
   type JobEntryRow,
   type JobsHoursView,
@@ -97,7 +98,7 @@ export default function JobsPanel({
   return (
     <div className="space-y-8">
       <TimeframeSelector
-        availableYears={[new Date().getFullYear()]}
+        availableYears={getSelectableYears()}
         endDate={endDate}
         startDate={startDate}
         timeframe={timeframe}
