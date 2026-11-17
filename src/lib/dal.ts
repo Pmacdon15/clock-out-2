@@ -2,6 +2,7 @@ import { auth, clerkClient } from "@clerk/nextjs/server";
 import { addDays, format, startOfDay, subDays } from "date-fns";
 import { fromZonedTime } from "date-fns-tz";
 import { errAsync, okAsync, type ResultAsync } from "neverthrow";
+import { connection } from "next/server";
 import { isValidTimeZone } from "./alerts";
 import {
   BREAK_TYPE_VALUES,
@@ -1488,6 +1489,8 @@ export async function getSchedule(): Promise<
   }
 
   const isAdmin = orgRole === "org:admin";
+  // The ranges depend on the clock, so this can't be part of a prerender.
+  await connection();
   const now = new Date();
   // Whole days keep the cache keys stable across requests.
   const rangeStart = startOfDay(subDays(now, SCHEDULE_PAST_DAYS));
@@ -1709,6 +1712,8 @@ export async function getTimeOffRequests(): Promise<
     return { value: [], ok: true };
   }
 
+  // Reads the clock, so it can't be part of a prerender.
+  await connection();
   const since = format(
     subDays(new Date(), TIME_OFF_LOOKBACK_DAYS),
     "yyyy-MM-dd",
