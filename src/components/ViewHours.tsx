@@ -2,6 +2,7 @@
 
 import { useUser } from "@clerk/nextjs";
 import { use, useMemo, useState } from "react";
+import { getSelectableYears } from "@/lib/date-utils";
 import { computeEntryOvertime, isOvertimeEnabled } from "@/lib/overtime";
 import { payRateMap } from "@/lib/pay";
 import type { ViewHoursProps } from "@/lib/types";
@@ -98,14 +99,7 @@ export default function ViewHours({
     }
   };
 
-  // Derive available years
-  const availableYears = useMemo(() => {
-    const years = new Set<number>();
-    years.add(new Date().getFullYear());
-    // Only the current year is listed for now, so the comparator never runs.
-    /* v8 ignore next -- @preserve */
-    return Array.from(years).sort((a, b) => b - a);
-  }, []);
+  const availableYears = useMemo(() => getSelectableYears(), []);
 
   // Since the entries are already filtered by the server, we use them directly.
   const displayEntries = isViewingAll ? orgEntries : entries;

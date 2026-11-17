@@ -48,3 +48,16 @@ export function parseFilterDate(
   }
   return fromZonedTime(dateStr, tz);
 }
+
+/** The first year Clock Out has time entries for. */
+export const FIRST_ENTRY_YEAR = 2025;
+
+/**
+ * Years the timeframe pickers offer, newest first: every year from the
+ * first entry year through the current one.
+ */
+export function getSelectableYears(now: Date = new Date()): number[] {
+  const years: number[] = [];
+  for (let y = now.getFullYear(); y >= FIRST_ENTRY_YEAR; y--) years.push(y);
+  return years;
+}

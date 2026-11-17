@@ -171,6 +171,21 @@ describe("TimeframeSelector range pickers", () => {
     expect(pushed().get("end")).toBe("2025-12-31T23:59:59.999");
   });
 
+  it("keeps the selected range's year listed when it is outside the list", () => {
+    renderSelector({
+      availableYears: [2026],
+      timeframe: "year",
+      startDate: "2024-01-01T00:00:00.000",
+    });
+    const [year] = screen.getAllByRole("combobox");
+    expect(
+      Array.from((year as HTMLSelectElement).options, (o) => o.text),
+    ).toEqual(["2026", "2024"]);
+    expect((year as HTMLSelectElement).value).toBe(
+      "2024-01-01T00:00:00.000|2024-12-31T23:59:59.999",
+    );
+  });
+
   it("custom view edits start and end dates", () => {
     const { container } = renderSelector({
       timeframe: "custom",

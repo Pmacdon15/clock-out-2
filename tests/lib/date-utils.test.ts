@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  FIRST_ENTRY_YEAR,
   getMonthRange,
+  getSelectableYears,
   getWeekRange,
   getYearRange,
   toLocalISO,
@@ -50,5 +52,19 @@ describe("getYearRange", () => {
     expect(getYearRange(2026)).toBe(
       "2026-01-01T00:00:00.000|2026-12-31T23:59:59.999",
     );
+  });
+});
+
+describe("getSelectableYears", () => {
+  it("lists every year from the current one back to the first entry year", () => {
+    expect(getSelectableYears(new Date(2027, 5, 1))).toEqual([
+      2027, 2026, 2025,
+    ]);
+  });
+
+  it("still offers the first entry year in that year", () => {
+    expect(getSelectableYears(new Date(FIRST_ENTRY_YEAR, 0, 1))).toEqual([
+      FIRST_ENTRY_YEAR,
+    ]);
   });
 });

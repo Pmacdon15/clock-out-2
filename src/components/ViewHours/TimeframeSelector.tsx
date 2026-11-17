@@ -76,6 +76,10 @@ export function TimeframeSelector({
     ? new Date(startDate.includes("T") ? startDate : `${startDate}T00:00:00`)
     : new Date();
   const currentYear = currentStart.getFullYear();
+  // Keep the selected range's year pickable even if it falls outside the list.
+  const years = availableYears.includes(currentYear)
+    ? availableYears
+    : [...availableYears, currentYear].sort((a, b) => b - a);
   const currentMonth = currentStart.getMonth();
   const currentDate = currentStart.getDate();
   const currentWeek = Math.min(4, Math.ceil(currentDate / 7));
@@ -238,7 +242,7 @@ export function TimeframeSelector({
               onChange={handleDropdownChange}
               value={getWeekRange(currentYear, currentMonth, currentWeek)}
             >
-              {availableYears.map((y) => (
+              {years.map((y) => (
                 <option
                   key={y}
                   value={getWeekRange(y, currentMonth, currentWeek)}
@@ -301,7 +305,7 @@ export function TimeframeSelector({
               onChange={handleDropdownChange}
               value={getMonthRange(currentYear, currentMonth)}
             >
-              {availableYears.map((y) => (
+              {years.map((y) => (
                 <option key={y} value={getMonthRange(y, currentMonth)}>
                   {y}
                 </option>
@@ -318,7 +322,7 @@ export function TimeframeSelector({
               onChange={handleDropdownChange}
               value={getYearRange(currentYear)}
             >
-              {availableYears.map((y) => (
+              {years.map((y) => (
                 <option key={y} value={getYearRange(y)}>
                   {y}
                 </option>

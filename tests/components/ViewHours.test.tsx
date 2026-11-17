@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { Suspense } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getSelectableYears } from "@/lib/date-utils";
 import type { ViewHoursProps } from "@/lib/types";
 import { makeEntry, resolved } from "../utils";
 
@@ -94,7 +95,7 @@ describe("ViewHours for the current user", () => {
   it("passes the user's own entries and filters to every panel", () => {
     renderView();
     expect(latest("TimeframeSelector")).toMatchObject({
-      availableYears: [new Date().getFullYear()],
+      availableYears: getSelectableYears(),
       currentUserId: "me",
       startDate: "2026-03-08",
       endDate: "2026-03-14",
