@@ -44,6 +44,7 @@ import {
 } from "./rate-limit";
 import { sendWeeklyReports } from "./reports";
 import { notifyScheduleChange } from "./schedule-notify";
+import type { ShiftLocationInput } from "./shift-location";
 import type {
   BreakCountLimits,
   BreakLimits,
@@ -498,6 +499,8 @@ export async function createScheduledShiftAction(
   timezone?: string | null,
   /** The shift's days on the admin's calendar, for the time off check. */
   localDays?: { start: string; end: string } | null,
+  /** A saved site by id, or a location typed in. */
+  location?: ShiftLocationInput | null,
 ) {
   const result = await dalCreateScheduledShift(
     memberId,
@@ -505,6 +508,7 @@ export async function createScheduledShiftAction(
     new Date(shiftEnd),
     note,
     localDays,
+    location,
   );
 
   return result.match(
@@ -530,6 +534,8 @@ export async function updateScheduledShiftAction(
   note?: string | null,
   timezone?: string | null,
   localDays?: { start: string; end: string } | null,
+  /** Omit to keep the shift's location; `{}` clears it. */
+  location?: ShiftLocationInput | null,
 ) {
   const result = await dalUpdateScheduledShift(
     id,
@@ -537,6 +543,7 @@ export async function updateScheduledShiftAction(
     new Date(shiftEnd),
     note,
     localDays,
+    location,
   );
 
   return result.match(

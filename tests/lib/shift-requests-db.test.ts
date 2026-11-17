@@ -46,12 +46,13 @@ describe("ensureShiftRequestsTable", () => {
       requests.ensureShiftRequestsTable(),
     ]);
     const texts = sql.mock.calls.map((_, i) => textOf(i));
-    expect(texts).toHaveLength(5);
+    expect(texts).toHaveLength(6);
     expect(texts[0]).toContain("CREATE TABLE IF NOT EXISTS scheduled_shifts");
-    expect(texts[2]).toContain("CREATE TABLE IF NOT EXISTS shift_requests");
-    expect(texts[2]).toContain("REFERENCES scheduled_shifts(id)");
-    expect(texts[3]).toContain("idx_shift_requests_org_status");
-    expect(texts[4]).toContain("idx_shift_requests_one_active");
+    expect(texts[2]).toContain("ALTER TABLE scheduled_shifts");
+    expect(texts[3]).toContain("CREATE TABLE IF NOT EXISTS shift_requests");
+    expect(texts[3]).toContain("REFERENCES scheduled_shifts(id)");
+    expect(texts[4]).toContain("idx_shift_requests_org_status");
+    expect(texts[5]).toContain("idx_shift_requests_one_active");
   });
 
   it("retries after a failure", async () => {

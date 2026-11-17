@@ -1,6 +1,7 @@
 import { neon } from "@neondatabase/serverless";
 import { cacheLife, cacheTag } from "next/cache";
 import type { StoredLocation } from "./geo";
+import { NO_SHIFT_LOCATION, type ShiftLocation } from "./shift-location";
 import type {
   BreakCountLimits,
   BreakLimits,
@@ -1139,6 +1140,12 @@ export function ensureScheduledShiftsTable(): Promise<void> {
 		CREATE INDEX IF NOT EXISTS idx_scheduled_shifts_org_start
 			ON scheduled_shifts (org_id, shift_start)
 	`;
+    await sql`
+		ALTER TABLE scheduled_shifts
+			ADD COLUMN IF NOT EXISTS site_id INTEGER,
+			ADD COLUMN IF NOT EXISTS location TEXT,
+			ADD COLUMN IF NOT EXISTS location_address TEXT
+	`;
   })().catch((error) => {
     scheduledShiftsTableReady = null;
     throw error;
@@ -1182,11 +1189,14 @@ export async function dbCreateScheduledShift(
   shiftEnd: Date,
   note: string | null,
   createdBy: string,
+  location: ShiftLocation = NO_SHIFT_LOCATION,
 ) {
   await ensureScheduledShiftsTable();
   const [created] = await sql`
-		INSERT INTO scheduled_shifts (org_id, user_id, shift_start, shift_end, note, created_by)
-		VALUES (${orgId}, ${userId}, ${shiftStart}, ${shiftEnd}, ${note}, ${createdBy})
+		INSERT INTO scheduled_shifts (org_id, user_id, shift_start, shift_end, note, created_by,
+			site_id, location, location_address)
+		VALUES (${orgId}, ${userId}, ${shiftStart}, ${shiftEnd}, ${note}, ${createdBy},
+			${location.site_id}, ${location.location}, ${location.location_address})
 		RETURNING *
 	`;
   return created as unknown as ScheduledShift;
@@ -1200,19 +1210,30 @@ export async function dbGetScheduledShiftById(id: number, orgId: string) {
   return row as unknown as ScheduledShift | undefined;
 }
 
-/** Moves a shift to new times and/or changes its note. */
+/**
+ * Moves a shift to new times and/or changes its note. Its location is
+ * replaced when `location` is given and kept when it is left out.
+ */
 export async function dbUpdateScheduledShift(
   id: number,
   orgId: string,
   shiftStart: Date,
   shiftEnd: Date,
   note: string | null,
+  location?: ShiftLocation,
 ) {
   await ensureScheduledShiftsTable();
+  const keep = location === undefined;
+  const next = location ?? NO_SHIFT_LOCATION;
   const [updated] = await sql`
 		UPDATE scheduled_shifts
 		SET shift_start = ${shiftStart}, shift_end = ${shiftEnd},
-			note = ${note}, updated_at = NOW()
+			note = ${note},
+			site_id = CASE WHEN ${keep} THEN site_id ELSE ${next.site_id}::INTEGER END,
+			location = CASE WHEN ${keep} THEN location ELSE ${next.location}::TEXT END,
+			location_address = CASE WHEN ${keep} THEN location_address
+				ELSE ${next.location_address}::TEXT END,
+			updated_at = NOW()
 		WHERE id = ${id} AND org_id = ${orgId}
 		RETURNING *
 	`;

@@ -215,6 +215,7 @@ describe("manage_schedule", () => {
       new Date("2026-11-03T23:00:00Z"),
       "Front desk",
       "user_admin",
+      { site_id: null, location: null, location_address: null },
     );
     expect(m.dbGetApprovedTimeOffForPeriod).toHaveBeenCalledWith(
       "user_sam",
@@ -306,8 +307,85 @@ describe("manage_schedule", () => {
       new Date("2026-11-03T16:00:00Z"),
       new Date("2026-11-03T23:00:00Z"),
       "Desk",
+      { site_id: null, location: null, location_address: null },
     );
     expect(m.notifyScheduleChange).toHaveBeenCalledWith("changed", shift, TZ);
+  });
+
+  it("schedules a shift at a saved site by name, or at a typed location", async () => {
+    m.dbCreateScheduledShift.mockResolvedValue(shift);
+    m.dbGetSites.mockResolvedValue([
+      { id: 3, name: "Main Warehouse", address: "1 King St" },
+    ]);
+    const base = {
+      action: "create" as const,
+      member: "Sam",
+      date: "2026-11-03",
+      start_time: "09:00",
+      end_time: "17:00",
+      timezone: TZ,
+    };
+    await manageScheduleTool(admin, { ...base, location: " main warehouse " });
+    expect(m.dbCreateScheduledShift.mock.calls[0][6]).toEqual({
+      site_id: 3,
+      location: "Main Warehouse",
+      location_address: "1 King St",
+    });
+    await manageScheduleTool(admin, { ...base, location: "Client site" });
+    expect(m.dbCreateScheduledShift.mock.calls[1][6]).toEqual({
+      site_id: null,
+      location: "Client site",
+      location_address: null,
+    });
+    const tooLong = await manageScheduleTool(admin, {
+      ...base,
+      location: "x".repeat(201),
+    });
+    expect(tooLong.data.status).toBe("invalid_input");
+    expect(m.dbCreateScheduledShift).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps, changes or clears a shift's location on update", async () => {
+    const atSite = {
+      ...shift,
+      site_id: 3,
+      location: "Main Warehouse",
+      location_address: "1 King St",
+    };
+    m.dbGetScheduledShiftById.mockResolvedValue(atSite);
+    m.dbUpdateScheduledShift.mockResolvedValue(atSite);
+    // Only the time changes: the location is kept.
+    await manageScheduleTool(admin, {
+      action: "update",
+      shift_id: 7,
+      start_time: "10:00",
+      timezone: TZ,
+    });
+    expect(m.dbUpdateScheduledShift.mock.calls[0][5]).toEqual({
+      site_id: 3,
+      location: "Main Warehouse",
+      location_address: "1 King St",
+    });
+    // Only the location changes.
+    const res = await manageScheduleTool(admin, {
+      action: "update",
+      shift_id: 7,
+      location: "",
+      timezone: TZ,
+    });
+    expect(res.data.status).toBe("updated");
+    expect(m.dbUpdateScheduledShift.mock.calls[1][5]).toEqual({
+      site_id: null,
+      location: null,
+      location_address: null,
+    });
+    const tooLong = await manageScheduleTool(admin, {
+      action: "update",
+      shift_id: 7,
+      location: "x".repeat(201),
+    });
+    expect(tooLong.data.status).toBe("invalid_input");
+    expect(res.summary).toContain("at Main Warehouse");
   });
 
   it("asks what to change on an empty update", async () => {
@@ -436,6 +514,7 @@ describe("get_calendar_shifts", () => {
       end: "2026-11-03T17:00:00-06:00",
       timezone: TZ,
       note: "Front desk",
+      location: null,
       updated_at: "2026-10-30T12:00:00.000Z",
     });
     // No note: the description starts with the Clock Out line.

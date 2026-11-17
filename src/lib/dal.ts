@@ -108,6 +108,12 @@ import {
   SCHEDULE_PAST_DAYS,
 } from "./schedule-utils";
 import {
+  NO_SHIFT_LOCATION,
+  resolveShiftLocation,
+  type ShiftLocation,
+  type ShiftLocationInput,
+} from "./shift-location";
+import {
   formatTimeOffDates,
   invalidAllowanceReason,
   invalidTimeOffReason,
@@ -1468,6 +1474,19 @@ export async function deleteSiteDal(id: number) {
 const MAX_SHIFT_NOTE_LENGTH = 500;
 
 /**
+ * Resolves the schedule form's location against the org's saved sites.
+ * Errors are the user-facing reason; a database failure throws.
+ */
+async function shiftLocationFor(
+  orgId: string,
+  input: ShiftLocationInput,
+): Promise<ReturnType<typeof resolveShiftLocation>> {
+  const needsSites = input.siteId !== undefined && input.siteId !== null;
+  const sites = needsSites ? await dbGetSitesForEnforcement(orgId) : [];
+  return resolveShiftLocation(input, sites);
+}
+
+/**
  * The schedule from two weeks back to four weeks ahead, each shift compared
  * with the member's actual clock times. Admins see every member's shifts;
  * members see their own.
@@ -1519,6 +1538,7 @@ export async function createScheduledShiftDal(
   shiftEnd: Date,
   note?: string | null,
   localDays?: { start: string; end: string } | null,
+  location?: ShiftLocationInput | null,
 ) {
   const { userId, orgId, orgRole, has } = await auth.protect();
   if (!userId || !orgId || orgRole !== "org:admin") {
@@ -1535,6 +1555,21 @@ export async function createScheduledShiftDal(
   const trimmedNote = note?.trim() || null;
   if (trimmedNote && trimmedNote.length > MAX_SHIFT_NOTE_LENGTH) {
     return errAsync({ reason: "Note is too long" } as const);
+  }
+
+  let shiftLocation: ShiftLocation = NO_SHIFT_LOCATION;
+  if (location) {
+    let resolved: ReturnType<typeof resolveShiftLocation>;
+    try {
+      resolved = await shiftLocationFor(orgId, location);
+    } catch (e) {
+      console.error("Error checking shift location: ", e);
+      return errAsync({ reason: "Failed to create shift" } as const);
+    }
+    if (!resolved.ok) {
+      return errAsync({ reason: resolved.reason });
+    }
+    shiftLocation = resolved.value;
   }
 
   const members = await getOrgMembers();
@@ -1570,6 +1605,7 @@ export async function createScheduledShiftDal(
     shiftEnd,
     trimmedNote,
     userId,
+    shiftLocation,
   )
     .then((created) => okAsync(created))
     .catch((e) => {
@@ -1588,6 +1624,8 @@ export async function updateScheduledShiftDal(
   shiftEnd: Date,
   note?: string | null,
   localDays?: { start: string; end: string } | null,
+  /** Omit to keep the shift's location; `{}` clears it. */
+  location?: ShiftLocationInput | null,
 ) {
   const { userId, orgId, orgRole, has } = await auth.protect();
   if (!userId || !orgId || orgRole !== "org:admin") {
@@ -1607,10 +1645,18 @@ export async function updateScheduledShiftDal(
   }
 
   let timeOff: TimeOffRequest[];
+  let shiftLocation: ShiftLocation | undefined;
   try {
     const existing = await dbGetScheduledShiftById(id, orgId);
     if (!existing) {
       return errAsync({ reason: "Shift not found" } as const);
+    }
+    if (location) {
+      const resolved = await shiftLocationFor(orgId, location);
+      if (!resolved.ok) {
+        return errAsync({ reason: resolved.reason });
+      }
+      shiftLocation = resolved.value;
     }
     const days = shiftCalendarDays(shiftStart, shiftEnd, localDays);
     timeOff = await dbGetApprovedTimeOffForPeriod(
@@ -1635,6 +1681,7 @@ export async function updateScheduledShiftDal(
     shiftStart,
     shiftEnd,
     trimmedNote,
+    shiftLocation,
   )
     .then(
       (

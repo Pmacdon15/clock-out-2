@@ -46,6 +46,8 @@ const eventBody = (event: CalendarShiftEvent, id: string) => ({
   id,
   summary: event.title,
   description: event.description,
+  // Updates are a PUT (a full replace), so a cleared location goes away too.
+  ...(event.location ? { location: event.location } : {}),
   start: { dateTime: event.start.toISOString() },
   end: { dateTime: event.end.toISOString() },
   // Brings back an event the user deleted when the shift is added again.

@@ -220,6 +220,13 @@ CREATE TABLE IF NOT EXISTS scheduled_shifts (
 );
 CREATE INDEX IF NOT EXISTS idx_scheduled_shifts_org_start
     ON scheduled_shifts (org_id, shift_start);
+-- Where the shift is. `site_id` is the saved site it was picked from (if
+-- any); `location` / `location_address` snapshot that site's name and address
+-- (or hold a location typed in), so renaming or removing a site never
+-- rewrites the schedule.
+ALTER TABLE scheduled_shifts ADD COLUMN IF NOT EXISTS site_id INTEGER;
+ALTER TABLE scheduled_shifts ADD COLUMN IF NOT EXISTS location TEXT;
+ALTER TABLE scheduled_shifts ADD COLUMN IF NOT EXISTS location_address TEXT;
 
 -- Paid time off requested by members and approved by admins. Dates are
 -- whole calendar days (inclusive). Approved time off is shown alongside

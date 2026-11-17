@@ -1,3 +1,4 @@
+import { shiftLocationText } from "./shift-location";
 import type { ScheduledShift } from "./types";
 
 /**
@@ -10,6 +11,8 @@ export type CalendarShiftEvent = {
   uid: string;
   title: string;
   description: string;
+  /** Where the shift is, when it has a location. */
+  location?: string;
   start: Date;
   end: Date;
 };
@@ -36,9 +39,15 @@ export function shiftToCalendarEvent(
         ? `Scheduled in Clock Out for ${memberName}.`
         : "Scheduled in Clock Out.",
     ].join("\n"),
+    ...locationField(shift),
     start: new Date(shift.shift_start),
     end: new Date(shift.shift_end),
   };
+}
+
+function locationField(shift: ScheduledShift): { location?: string } {
+  const location = shiftLocationText(shift);
+  return location ? { location } : {};
 }
 
 /** UTC in the compact iCalendar / Google form: 20260105T090000Z. */
@@ -52,6 +61,7 @@ export function googleCalendarUrl(event: CalendarShiftEvent): string {
     text: event.title,
     dates: `${formatUtcStamp(event.start)}/${formatUtcStamp(event.end)}`,
     details: event.description,
+    ...(event.location ? { location: event.location } : {}),
   });
   return `https://calendar.google.com/calendar/render?${params.toString()}`;
 }
@@ -65,6 +75,7 @@ export function outlookCalendarUrl(event: CalendarShiftEvent): string {
     startdt: event.start.toISOString(),
     enddt: event.end.toISOString(),
     body: event.description,
+    ...(event.location ? { location: event.location } : {}),
   });
   return `https://outlook.live.com/calendar/0/deeplink/compose?${params.toString()}`;
 }
@@ -123,6 +134,7 @@ export function buildIcsCalendar(
       `DTEND:${formatUtcStamp(event.end)}`,
       `SUMMARY:${escapeIcsText(event.title)}`,
       `DESCRIPTION:${escapeIcsText(event.description)}`,
+      ...(event.location ? [`LOCATION:${escapeIcsText(event.location)}`] : []),
       "END:VEVENT",
     ]),
     "END:VCALENDAR",

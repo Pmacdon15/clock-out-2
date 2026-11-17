@@ -89,6 +89,38 @@ describe("calendar export", () => {
     );
   });
 
+  it("carries the shift's location into links and the iCalendar file", () => {
+    const at = {
+      ...shift,
+      location: "Warehouse",
+      location_address: "1 King St, Regina",
+    };
+    const event = shiftToCalendarEvent(at);
+    expect(event.location).toBe("Warehouse, 1 King St, Regina");
+    expect("location" in shiftToCalendarEvent(shift)).toBe(false);
+    expect(new URL(googleCalendarUrl(event)).searchParams.get("location")).toBe(
+      "Warehouse, 1 King St, Regina",
+    );
+    expect(
+      new URL(outlookCalendarUrl(event)).searchParams.get("location"),
+    ).toBe("Warehouse, 1 King St, Regina");
+    expect(
+      new URL(googleCalendarUrl(shiftToCalendarEvent(shift))).searchParams.has(
+        "location",
+      ),
+    ).toBe(false);
+    expect(
+      new URL(outlookCalendarUrl(shiftToCalendarEvent(shift))).searchParams.has(
+        "location",
+      ),
+    ).toBe(false);
+    const ics = buildIcsCalendar([event], new Date("2026-01-01T00:00:00Z"));
+    expect(ics).toContain("LOCATION:Warehouse\\, 1 King St\\, Regina");
+    expect(buildIcsCalendar([shiftToCalendarEvent(shift)])).not.toContain(
+      "LOCATION:",
+    );
+  });
+
   it("builds an Outlook link with the shift's times", () => {
     const url = new URL(outlookCalendarUrl(shiftToCalendarEvent(shift)));
     expect(url.origin).toBe("https://outlook.live.com");

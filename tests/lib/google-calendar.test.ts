@@ -71,6 +71,18 @@ describe("writeGoogleCalendarEvent", () => {
     });
   });
 
+  it("sends the shift's location when it has one", async () => {
+    const fetch = stubFetch(res(200, "{}"));
+    await writeGoogleCalendarEvent(
+      "tok",
+      { ...event, location: "Warehouse, 1 King St" },
+      "abc123",
+    );
+    expect(JSON.parse(fetch.mock.calls[0][1].body).location).toBe(
+      "Warehouse, 1 King St",
+    );
+  });
+
   it("updates the event when it already exists", async () => {
     const fetch = stubFetch(res(409), res(200, "{}"));
     expect(await writeGoogleCalendarEvent("tok", event, "abc123")).toEqual({

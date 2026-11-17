@@ -19,6 +19,7 @@ import {
 } from "./billing";
 import { deliver } from "./notify";
 import { orgHasPlanFeature, SCHEDULING_FEATURE } from "./plan-features";
+import { shiftLocationText } from "./shift-location";
 import type { ScheduledShift } from "./types";
 
 const DAY_MS = 86_400_000;
@@ -68,16 +69,25 @@ export function formatShiftRange(
 
 export type ScheduleChange = "added" | "changed" | "removed";
 
+/** " Location: Main warehouse, 12 King St." — or nothing without a location. */
+function atLocation(
+  shift: Partial<Pick<ScheduledShift, "location" | "location_address">>,
+) {
+  const where = shiftLocationText(shift);
+  return where ? ` Location: ${where}.` : "";
+}
+
 export function describeShiftChange(
   change: ScheduleChange,
-  shift: Pick<ScheduledShift, "id" | "shift_start" | "shift_end" | "note">,
+  shift: Pick<ScheduledShift, "id" | "shift_start" | "shift_end" | "note"> &
+    Partial<Pick<ScheduledShift, "location" | "location_address">>,
   zone: { tz: string; known: boolean },
 ): NotificationMessage {
   const start = new Date(shift.shift_start);
   const end = new Date(shift.shift_end);
   const day = formatInTimeZone(start, zone.tz, "EEE, MMM d");
   const range = formatShiftRange(start, end, zone);
-  const note = shift.note ? ` Note: ${shift.note}` : "";
+  const note = `${atLocation(shift)}${shift.note ? ` Note: ${shift.note}` : ""}`;
   if (change === "changed") {
     return {
       title: `Shift changed: ${day}`,
@@ -234,7 +244,8 @@ export function describeWeeklyDigest(
       new Date(s.shift_end),
       zone,
     );
-    return s.note ? `${range} (${s.note})` : range;
+    const where = s.location ? ` at ${s.location}` : "";
+    return s.note ? `${range}${where} (${s.note})` : `${range}${where}`;
   });
   return {
     title: `Your schedule for ${label}`,
@@ -338,7 +349,8 @@ export function planUpcomingShiftReminders(
 }
 
 export function describeUpcomingShift(
-  shift: Pick<ScheduledShift, "id" | "shift_start" | "shift_end" | "note">,
+  shift: Pick<ScheduledShift, "id" | "shift_start" | "shift_end" | "note"> &
+    Partial<Pick<ScheduledShift, "location" | "location_address">>,
   zone: { tz: string; known: boolean },
   now: Date,
 ): NotificationMessage {
@@ -353,7 +365,7 @@ export function describeUpcomingShift(
     minutes >= 60 ? "1 hour" : `${minutes} minute${minutes === 1 ? "" : "s"}`;
   const time = `${formatInTimeZone(start, zone.tz, "h:mm a")}${zone.known ? "" : ` ${zone.tz}`}`;
   const range = formatShiftRange(start, end, zone);
-  const note = shift.note ? ` Note: ${shift.note}` : "";
+  const note = `${atLocation(shift)}${shift.note ? ` Note: ${shift.note}` : ""}`;
   return {
     title: `Your shift starts at ${time}`,
     body: `Heads up: you're scheduled ${range}, starting in ${startsIn}.${note}`,

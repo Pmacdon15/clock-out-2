@@ -1229,10 +1229,16 @@ describe("scheduled shifts", () => {
       db.ensureScheduledShiftsTable(),
       db.ensureScheduledShiftsTable(),
     ]);
-    expect(sql).toHaveBeenCalledTimes(2);
+    expect(sql).toHaveBeenCalledTimes(3);
     expect(textOf(0)).toContain("CREATE TABLE IF NOT EXISTS scheduled_shifts");
     expect(textOf(0)).toContain("CHECK (shift_end > shift_start)");
     expect(textOf(1)).toContain("idx_scheduled_shifts_org_start");
+    // Older tables get the location columns.
+    expect(textOf(2)).toContain("ADD COLUMN IF NOT EXISTS site_id INTEGER");
+    expect(textOf(2)).toContain("ADD COLUMN IF NOT EXISTS location TEXT");
+    expect(textOf(2)).toContain(
+      "ADD COLUMN IF NOT EXISTS location_address TEXT",
+    );
   });
 
   it("ensureScheduledShiftsTable retries after a failure", async () => {
@@ -1241,7 +1247,7 @@ describe("scheduled shifts", () => {
     sql.mockReset();
     sql.mockResolvedValue([]);
     await db.ensureScheduledShiftsTable();
-    expect(sql).toHaveBeenCalledTimes(2);
+    expect(sql).toHaveBeenCalledTimes(3);
   });
 
   it("dbGetScheduledShifts reads the range, optionally for one member, and tags the cache", async () => {
@@ -1277,7 +1283,28 @@ describe("scheduled shifts", () => {
       shiftEnd,
       "Desk",
       "a1",
+      null,
+      null,
+      null,
     ]);
+  });
+
+  it("dbCreateScheduledShift stores the shift's location", async () => {
+    sql.mockResolvedValue([]);
+    await db.ensureScheduledShiftsTable();
+    sql.mockReset();
+    sql.mockResolvedValue([{ id: 4 }]);
+    await db.dbCreateScheduledShift(
+      "o1",
+      "u1",
+      shiftStart,
+      shiftEnd,
+      null,
+      "a1",
+      { site_id: 7, location: "Warehouse", location_address: "1 King St" },
+    );
+    expect(textOf(0)).toContain("site_id, location, location_address");
+    expect(valuesOf(0).slice(-3)).toEqual([7, "Warehouse", "1 King St"]);
   });
 
   it("dbGetScheduledShiftById reads one shift within the org", async () => {
@@ -1301,7 +1328,46 @@ describe("scheduled shifts", () => {
       db.dbUpdateScheduledShift(3, "o1", shiftStart, shiftEnd, null),
     ).resolves.toEqual({ id: 3 });
     expect(textOf(0)).toContain("UPDATE scheduled_shifts");
-    expect(valuesOf(0)).toEqual([shiftStart, shiftEnd, null, 3, "o1"]);
+    // No location given: the flag keeps the shift's current location.
+    expect(valuesOf(0)).toEqual([
+      shiftStart,
+      shiftEnd,
+      null,
+      true,
+      null,
+      true,
+      null,
+      true,
+      null,
+      3,
+      "o1",
+    ]);
+  });
+
+  it("dbUpdateScheduledShift replaces the location when one is given", async () => {
+    sql.mockResolvedValue([]);
+    await db.ensureScheduledShiftsTable();
+    sql.mockReset();
+    sql.mockResolvedValue([{ id: 3 }]);
+    await db.dbUpdateScheduledShift(3, "o1", shiftStart, shiftEnd, "Desk", {
+      site_id: null,
+      location: "Client site",
+      location_address: null,
+    });
+    expect(textOf(0)).toContain("location = CASE WHEN");
+    expect(valuesOf(0)).toEqual([
+      shiftStart,
+      shiftEnd,
+      "Desk",
+      false,
+      null,
+      false,
+      "Client site",
+      false,
+      null,
+      3,
+      "o1",
+    ]);
   });
 
   it("dbDeleteScheduledShift deletes within the org", async () => {

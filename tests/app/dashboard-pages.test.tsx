@@ -237,6 +237,7 @@ describe("SchedulePage", () => {
       isAdmin: true,
       membersPromise: "members",
       schedulePromise: "schedule",
+      sitesPromise: "sites",
       timeOffPromise: "time_off",
     });
     // Swap and pickup requests sit under the schedule.
@@ -244,6 +245,16 @@ describe("SchedulePage", () => {
     expect(latest("shift-requests")).toEqual({
       viewPromise: "shift_requests",
     });
+  });
+
+  it("only loads the saved sites (shift locations) for admins", async () => {
+    mocks.features.add("scheduling");
+    mocks.admin = false;
+    await renderOnce(SchedulePage);
+    expect(await screen.findByTestId("schedule")).toBeVisible();
+    expect(latest("schedule")).toMatchObject({ isAdmin: false });
+    expect(latest("schedule").sitesPromise).toBeUndefined();
+    expect(mocks.dal.getOrgSites).not.toHaveBeenCalled();
   });
 
   it("offers an upgrade on plans without it", async () => {
