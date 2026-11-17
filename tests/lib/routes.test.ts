@@ -13,6 +13,7 @@ describe("dashboard routes", () => {
     expect(DASHBOARD_ROUTES).toEqual({
       "time-clock": "/",
       view: "/hours",
+      jobs: "/jobs",
       notifications: "/notifications",
       schedule: "/schedule",
       "time-off": "/time-off",
@@ -23,6 +24,7 @@ describe("dashboard routes", () => {
   it("lists every page but the time clock as signed-in only", () => {
     expect(SIGNED_IN_ROUTES).toEqual([
       "/hours",
+      "/jobs",
       "/notifications",
       "/schedule",
       "/time-off",

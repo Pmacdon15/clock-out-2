@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => {
     getShiftRequestsView: vi.fn(() => "shift_requests"),
     getOrgPayroll: vi.fn(),
     getOrgAlertSettings: vi.fn(() => "alert_settings"),
+    getJobsHours: vi.fn(async (...args: unknown[]) => ({ jobs: args })),
     getMyNotificationSettings: vi.fn(() => "notification_settings"),
   };
 });
@@ -77,6 +78,10 @@ vi.mock("@/components/DashboardSync", () => ({
 vi.mock("@/components/TimeClockPanel", () => ({
   default: mocks.capture("time-clock"),
 }));
+vi.mock("@/lib/jobs-dal", () => ({ getJobsHours: mocks.getJobsHours }));
+vi.mock("@/components/JobsPanel", () => ({
+  default: mocks.capture("jobs"),
+}));
 vi.mock("@/components/HoursPanel", () => ({
   default: mocks.capture("hours"),
 }));
@@ -97,6 +102,7 @@ vi.mock("@/components/OrgSettings", () => ({
 }));
 
 import HoursPage from "@/app/(dashboard)/hours/page";
+import JobsPage from "@/app/(dashboard)/jobs/page";
 import DashboardLayout from "@/app/(dashboard)/layout";
 import NotificationsPage from "@/app/(dashboard)/notifications/page";
 import TimeClockPage from "@/app/(dashboard)/page";
@@ -213,6 +219,35 @@ describe("HoursPage", () => {
       payPeriodSettingsPromise: "pay_period_settings",
       timeOffPromise: "time_off",
     });
+  });
+});
+
+describe("JobsPage", () => {
+  it("reads the chosen jobs for the range in the URL", async () => {
+    const searchParams = Promise.resolve({
+      jobs: ["org_a,org_b", "ignored"],
+      start: "2026-03-01",
+      end: "2026-03-31",
+      timezone: "America/Regina",
+      timeframe: "month",
+    });
+    render(
+      <JobsPage
+        params={Promise.resolve({})}
+        searchParams={searchParams as never}
+      />,
+    );
+    const props = latest("jobs");
+    expect(screen.getByTestId("jobs")).toBeInTheDocument();
+    await expect(props?.viewPromise).resolves.toEqual({
+      jobs: [
+        "org_a,org_b",
+        { start: "2026-03-01", end: "2026-03-31", timezone: "America/Regina" },
+      ],
+    });
+    await expect(props?.startDatePromise).resolves.toBe("2026-03-01");
+    await expect(props?.endDatePromise).resolves.toBe("2026-03-31");
+    await expect(props?.timeframePromise).resolves.toBe("month");
   });
 });
 

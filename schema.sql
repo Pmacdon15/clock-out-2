@@ -108,6 +108,9 @@ ALTER TABLE time_entries ADD COLUMN IF NOT EXISTS clock_out_site_name TEXT;
 ALTER TABLE time_entries ADD COLUMN IF NOT EXISTS clock_out_address TEXT;
 
 CREATE INDEX idx_time_entries_user_org ON time_entries (user_id, org_id);
+-- Org-wide reads by date range (an admin's Hours and the Jobs page, which
+-- reads every selected organization's entries for the chosen range).
+CREATE INDEX IF NOT EXISTS idx_time_entries_org_clock_in ON time_entries (org_id, clock_in);
 
 -- Break / meal-period records for a single shift. `break_type` distinguishes
 -- paid breaks (recorded only) from unpaid ones (subtracted from worked hours);

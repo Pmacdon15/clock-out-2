@@ -19,6 +19,7 @@ export default function DashboardNav() {
         Time Clock
       </DashboardNavLink>
       <DashboardNavLink href={DASHBOARD_ROUTES.view}>Hours</DashboardNavLink>
+      <DashboardNavLink href={DASHBOARD_ROUTES.jobs}>Jobs</DashboardNavLink>
       <DashboardNavLink href={DASHBOARD_ROUTES.notifications}>
         Notifications
       </DashboardNavLink>
