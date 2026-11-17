@@ -14,6 +14,38 @@ export const LATE_GRACE_MINUTES = 5;
  */
 export const EARLY_MATCH_MINUTES = 120;
 
+/** Why a shift can't go where the member already has one. */
+export const OVERLAPPING_SHIFT_REASON =
+  "This member already has a shift that overlaps this time";
+
+/**
+ * The member's shift that [start, end) would overlap, ignoring `excludeId`
+ * (the shift being moved). Shifts that only touch end-to-start don't count.
+ */
+export function findOverlappingShift<
+  T extends Pick<
+    ScheduledShift,
+    "id" | "user_id" | "shift_start" | "shift_end"
+  >,
+>(
+  shifts: T[],
+  memberId: string,
+  start: Date,
+  end: Date,
+  excludeId?: number,
+): T | undefined {
+  const from = start.getTime();
+  const to = end.getTime();
+  if (Number.isNaN(from) || Number.isNaN(to)) return undefined;
+  return shifts.find(
+    (shift) =>
+      shift.user_id === memberId &&
+      shift.id !== excludeId &&
+      new Date(shift.shift_start).getTime() < to &&
+      new Date(shift.shift_end).getTime() > from,
+  );
+}
+
 /** Longest shift an admin can publish. */
 export const MAX_SHIFT_HOURS = 24;
 

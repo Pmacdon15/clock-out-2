@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   dbGetOrgTimeEntries: vi.fn(),
   dbGetTimeEntries: vi.fn(),
   dbGetApprovedTimeOffForPeriod: vi.fn(),
+  dbGetOverlappingScheduledShift: vi.fn(),
   dbGetSitesForEnforcement: vi.fn(),
 }));
 
@@ -45,6 +46,7 @@ vi.mock("@/lib/db", () => ({
   dbGetOrgTimeEntries: mocks.dbGetOrgTimeEntries,
   dbGetTimeEntries: mocks.dbGetTimeEntries,
   dbGetApprovedTimeOffForPeriod: mocks.dbGetApprovedTimeOffForPeriod,
+  dbGetOverlappingScheduledShift: mocks.dbGetOverlappingScheduledShift,
   dbGetSitesForEnforcement: mocks.dbGetSitesForEnforcement,
 }));
 
@@ -101,6 +103,7 @@ beforeEach(() => {
   mocks.fetchAllPages.mockResolvedValue([]);
   mocks.getProcessedMembers.mockResolvedValue([{ id: "user_1", name: "Sam" }]);
   mocks.dbGetApprovedTimeOffForPeriod.mockResolvedValue([]);
+  mocks.dbGetOverlappingScheduledShift.mockResolvedValue(undefined);
 });
 
 describe("getSchedule", () => {
@@ -372,6 +375,25 @@ describe("createScheduledShiftDal", () => {
     expect(mocks.dbCreateScheduledShift).not.toHaveBeenCalled();
   });
 
+  it("rejects a shift that overlaps one the member already has", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbGetOverlappingScheduledShift.mockResolvedValue(shift);
+    expect(
+      (
+        await createScheduledShiftDal("user_1", shiftStart, shiftEnd)
+      )._unsafeUnwrapErr(),
+    ).toEqual({
+      reason: "This member already has a shift that overlaps this time",
+    });
+    expect(mocks.dbGetOverlappingScheduledShift).toHaveBeenCalledWith(
+      "org_1",
+      "user_1",
+      shiftStart,
+      shiftEnd,
+    );
+    expect(mocks.dbCreateScheduledShift).not.toHaveBeenCalled();
+  });
+
   it("checks time off on the scheduler's local days", async () => {
     mocks.protect.mockResolvedValue(admin);
     mocks.dbCreateScheduledShift.mockResolvedValue(shift);
@@ -394,6 +416,18 @@ describe("createScheduledShiftDal", () => {
   it("reports a failed time off check", async () => {
     mocks.protect.mockResolvedValue(admin);
     mocks.dbGetApprovedTimeOffForPeriod.mockRejectedValue(new Error("db"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(
+      (
+        await createScheduledShiftDal("user_1", shiftStart, shiftEnd)
+      )._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Failed to create shift" });
+    expect(mocks.dbCreateScheduledShift).not.toHaveBeenCalled();
+  });
+
+  it("reports a failed overlap check", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbGetOverlappingScheduledShift.mockRejectedValue(new Error("db"));
     vi.spyOn(console, "error").mockImplementation(() => {});
     expect(
       (
@@ -459,6 +493,24 @@ describe("updateScheduledShiftDal", () => {
 
   beforeEach(() => {
     mocks.dbGetScheduledShiftById.mockResolvedValue(shift);
+  });
+
+  it("rejects a move onto another of the member's shifts", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbGetOverlappingScheduledShift.mockResolvedValue({ ...shift, id: 2 });
+    expect(
+      (await updateScheduledShiftDal(1, later, laterEnd))._unsafeUnwrapErr(),
+    ).toEqual({
+      reason: "This member already has a shift that overlaps this time",
+    });
+    expect(mocks.dbGetOverlappingScheduledShift).toHaveBeenCalledWith(
+      "org_1",
+      shift.user_id,
+      later,
+      laterEnd,
+      1,
+    );
+    expect(mocks.dbUpdateScheduledShift).not.toHaveBeenCalled();
   });
 
   it.each([

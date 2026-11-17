@@ -1,16 +1,8 @@
 "use client";
 
-import { useOrganization } from "@clerk/nextjs";
 import { useMutation } from "@tanstack/react-query";
 import { format } from "date-fns";
-import {
-  CalendarClock,
-  CalendarPlus,
-  Loader2,
-  MapPin,
-  Pencil,
-  Trash2,
-} from "lucide-react";
+import { CalendarClock, Loader2, MapPin, Pencil, Trash2 } from "lucide-react";
 import { use, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -19,12 +11,8 @@ import {
   updateScheduledShiftAction,
 } from "@/lib/actions";
 import {
-  googleCalendarUrl,
-  outlookCalendarUrl,
-  shiftToCalendarEvent,
-} from "@/lib/calendar-export";
-import {
   countShiftStatuses,
+  findOverlappingShift,
   isFlaggedStatus,
   LATE_GRACE_MINUTES,
   SHIFT_STATUS_LABELS,
@@ -46,12 +34,9 @@ import type {
   SiteData,
   TimeOffRequest,
 } from "@/lib/types";
-import {
-  GoogleCalendarResume,
-  useAddToGoogleCalendar,
-} from "./AddToGoogleCalendar";
-import CalendarSubscribe from "./CalendarSubscribe";
+import { GoogleCalendarResume } from "./AddToGoogleCalendar";
 import LocalTime from "./LocalTime";
+import ScheduleCalendar from "./ScheduleCalendar";
 import { Button, Card } from "./ui";
 
 type Member = { id: string; name: string };
@@ -67,6 +52,8 @@ interface ScheduleProps {
   >;
   /** Path of the member's private calendar feed, for subscribing. */
   calendarFeedPromise?: Promise<string | null>;
+  /** Whether the viewer allowed Google Calendar access (for disconnecting). */
+  googleConnectedPromise?: Promise<boolean>;
   /** The org's saved work sites, offered as shift locations (admins). */
   sitesPromise?: Promise<SerializableResult<SiteData[], { reason: string }>>;
   isAdmin: boolean;
@@ -366,85 +353,19 @@ function EditShiftForm({
   );
 }
 
-/** Links to put one shift on the user's own calendar. */
-function AddToCalendarLinks({
-  shift,
-  memberName,
-}: {
-  shift: ScheduledShiftWithStatus;
-  memberName?: string;
-}) {
-  const { organization } = useOrganization();
-  const event = shiftToCalendarEvent(shift, memberName, organization?.name);
-  const { add, pending } = useAddToGoogleCalendar();
-  return (
-    <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
-      <button
-        className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 px-2.5 py-1 font-semibold hover:bg-zinc-100 disabled:opacity-60 dark:border-zinc-800 dark:hover:bg-zinc-800"
-        disabled={pending}
-        onClick={() =>
-          add([shift.id], { fallbackUrl: googleCalendarUrl(event) })
-        }
-        type="button"
-      >
-        {pending && <Loader2 className="h-3 w-3 animate-spin" />}
-        {pending ? "Adding…" : "Google Calendar"}
-      </button>
-      <a
-        className="rounded-lg border border-zinc-200 px-2.5 py-1 font-semibold hover:bg-zinc-100 dark:border-zinc-800 dark:hover:bg-zinc-800"
-        href={outlookCalendarUrl(event)}
-        rel="noopener noreferrer"
-        target="_blank"
-      >
-        Outlook
-      </a>
-    </div>
-  );
-}
-
-/** One tap to put every upcoming shift on the member's Google Calendar. */
-function AddAllToGoogleCalendar({ shiftIds }: { shiftIds: number[] }) {
-  const { add, pending } = useAddToGoogleCalendar();
-  return (
-    <div className="mb-2">
-      <Button
-        className="w-full sm:w-auto"
-        disabled={pending}
-        onClick={() => add(shiftIds)}
-        type="button"
-        variant="outline"
-      >
-        {pending ? (
-          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-        ) : (
-          <CalendarPlus className="mr-2 h-4 w-4" />
-        )}
-        {pending ? "Adding…" : "Add all to Google Calendar"}
-      </Button>
-      <p className="mt-2 text-muted-foreground text-xs">
-        Adds them to your own Google Calendar. After that, new, moved and
-        cancelled shifts update there by themselves.
-      </p>
-    </div>
-  );
-}
-
 function ShiftRow({
   shift,
   memberName,
   isAdmin,
-  canAddToCalendar,
   sites,
 }: {
   shift: ScheduledShiftWithStatus;
   memberName?: string;
   isAdmin: boolean;
-  canAddToCalendar: boolean;
   sites: Site[];
 }) {
   const [confirming, setConfirming] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [addingToCalendar, setAddingToCalendar] = useState(false);
   const { mutate, isPending } = useMutation({
     mutationFn: (id: number) =>
       deleteScheduledShiftAction(id, browserTimezone()),
@@ -483,18 +404,6 @@ function ShiftRow({
           >
             {SHIFT_STATUS_LABELS[shift.status]}
           </span>
-          {canAddToCalendar && (
-            <button
-              aria-expanded={addingToCalendar}
-              aria-label="Add shift to calendar"
-              className="p-1 text-muted-foreground transition-colors hover:text-foreground"
-              onClick={() => setAddingToCalendar((open) => !open)}
-              title="Add to calendar"
-              type="button"
-            >
-              <CalendarPlus className="h-3.5 w-3.5" />
-            </button>
-          )}
           {isAdmin &&
             (confirming ? (
               <span className="flex items-center gap-1 text-xs">
@@ -569,9 +478,6 @@ function ShiftRow({
       {shift.note && (
         <p className="text-muted-foreground text-xs italic">{shift.note}</p>
       )}
-      {canAddToCalendar && addingToCalendar && (
-        <AddToCalendarLinks memberName={memberName} shift={shift} />
-      )}
       {isAdmin && editing && (
         <EditShiftForm
           onDone={() => setEditing(false)}
@@ -587,10 +493,13 @@ function ShiftForm({
   members,
   sites,
   timeOff,
+  shifts,
 }: {
   members: Member[];
   sites: Site[];
   timeOff: TimeOffRequest[];
+  /** Shifts already published, so the same slot isn't booked twice. */
+  shifts: ScheduledShiftWithStatus[];
 }) {
   const [memberId, setMemberId] = useState("");
   const [date, setDate] = useState("");
@@ -629,7 +538,11 @@ function ShiftForm({
   const conflict = filled
     ? findTimeOffConflict(timeOff, memberId, date, start, end)
     : undefined;
-  const canSubmit = filled && !conflict && !isPending;
+  const times = filled ? buildShiftTimes(date, start, end) : undefined;
+  const overlap = times
+    ? findOverlappingShift(shifts, memberId, times.shiftStart, times.shiftEnd)
+    : undefined;
+  const canSubmit = filled && !conflict && !overlap && !isPending;
 
   return (
     <form
@@ -731,6 +644,18 @@ function ShiftForm({
             clock in if they choose to work.
           </p>
         )}
+        {!conflict && overlap && (
+          <p
+            className="mb-3 rounded-xl bg-amber-100 p-3 font-medium text-amber-800 text-sm dark:bg-amber-950 dark:text-amber-200"
+            role="alert"
+          >
+            {new Map(members.map((m) => [m.id, m.name])).get(memberId)} is
+            already scheduled{" "}
+            {format(new Date(overlap.shift_start), "EEE, MMM d, h:mm a")} –{" "}
+            {format(new Date(overlap.shift_end), "h:mm a")}. Edit that shift or
+            pick a time that doesn't overlap it.
+          </p>
+        )}
         <Button
           className="w-full sm:w-auto"
           disabled={!canSubmit}
@@ -754,6 +679,7 @@ export default function Schedule({
   membersPromise,
   timeOffPromise,
   calendarFeedPromise,
+  googleConnectedPromise,
   sitesPromise,
   isAdmin,
 }: ScheduleProps) {
@@ -785,18 +711,13 @@ export default function Schedule({
   const nameFor = (shift: ScheduledShiftWithStatus) =>
     isAdmin ? (memberNames.get(shift.user_id) ?? "Unknown member") : undefined;
 
-  const renderList = (
-    list: ScheduledShiftWithStatus[],
-    empty: string,
-    canAddToCalendar = false,
-  ) =>
+  const renderList = (list: ScheduledShiftWithStatus[], empty: string) =>
     list.length === 0 ? (
       <p className="py-4 text-muted-foreground text-sm">{empty}</p>
     ) : (
       <ul>
         {list.map((shift) => (
           <ShiftRow
-            canAddToCalendar={canAddToCalendar}
             isAdmin={isAdmin}
             key={shift.id}
             memberName={nameFor(shift)}
@@ -846,7 +767,12 @@ export default function Schedule({
         )}
 
         {isAdmin && (
-          <ShiftForm members={members} sites={sites} timeOff={timeOff} />
+          <ShiftForm
+            members={members}
+            shifts={result.value}
+            sites={sites}
+            timeOff={timeOff}
+          />
         )}
       </Card>
 
@@ -864,18 +790,14 @@ export default function Schedule({
             </label>
           )}
         </div>
-        {!isAdmin && upcoming.length > 0 && (
-          <AddAllToGoogleCalendar
-            shiftIds={upcoming.map((shift) => shift.id)}
-          />
-        )}
-        {renderList(upcoming, "No upcoming shifts.", true)}
-        {calendarFeedPromise && (
-          <div className="mt-4 border-zinc-100 border-t pt-4 dark:border-zinc-800">
-            <CalendarSubscribe feedPathPromise={calendarFeedPromise} />
-          </div>
-        )}
+        {renderList(upcoming, "No upcoming shifts.")}
       </Card>
+
+      <ScheduleCalendar
+        calendarFeedPromise={calendarFeedPromise}
+        googleConnectedPromise={googleConnectedPromise}
+        upcoming={result.value.filter(isCurrentOrUpcoming)}
+      />
 
       <Card className="p-6 sm:p-8">
         <h4 className="mb-2 font-bold text-lg">Past two weeks</h4>

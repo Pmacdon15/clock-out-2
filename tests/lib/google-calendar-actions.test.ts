@@ -6,7 +6,10 @@ const mocks = vi.hoisted(() => ({
   getUser: vi.fn(),
   getOrganization: vi.fn(async () => ({ name: "Acme" })),
   dbGetScheduledShiftById: vi.fn(),
+  dbGetScheduledShifts: vi.fn(),
   write: vi.fn(),
+  del: vi.fn(),
+  revoke: vi.fn(),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({
@@ -21,14 +24,21 @@ vi.mock("@clerk/nextjs/server", () => ({
 }));
 vi.mock("@/lib/db", () => ({
   dbGetScheduledShiftById: mocks.dbGetScheduledShiftById,
+  dbGetScheduledShifts: mocks.dbGetScheduledShifts,
 }));
 vi.mock("@/lib/google-calendar", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/google-calendar")>()),
   googleShiftEventId: (s: { id: number }) => `id${s.id}`,
   writeGoogleCalendarEvent: mocks.write,
+  deleteGoogleCalendarEvent: mocks.del,
+  revokeGoogleToken: mocks.revoke,
 }));
 
-import { addShiftsToGoogleCalendarAction } from "@/lib/google-calendar-actions";
+import {
+  addShiftsToGoogleCalendarAction,
+  disconnectGoogleCalendarAction,
+  googleCalendarConnectedAction,
+} from "@/lib/google-calendar-actions";
 import { GOOGLE_CALENDAR_SCOPE } from "@/lib/google-calendar-scope";
 import { SCHEDULING_UPGRADE_REASON } from "@/lib/plan-features";
 
@@ -202,5 +212,90 @@ describe("addShiftsToGoogleCalendarAction", () => {
     expect(mocks.getOrganization).toHaveBeenCalledWith({
       organizationId: "org_1",
     });
+  });
+});
+
+describe("googleCalendarConnectedAction", () => {
+  it("is true only with a calendar-scoped token", async () => {
+    await expect(googleCalendarConnectedAction()).resolves.toBe(true);
+    mocks.getUserOauthAccessToken.mockResolvedValue({
+      data: [{ token: "basic", scopes: ["openid"] }],
+    });
+    await expect(googleCalendarConnectedAction()).resolves.toBe(false);
+  });
+});
+
+describe("disconnectGoogleCalendarAction", () => {
+  it("removes the user's upcoming shifts and revokes access", async () => {
+    mocks.dbGetScheduledShifts.mockResolvedValue([shift(1), shift(2)]);
+    mocks.del.mockResolvedValue(true);
+    mocks.revoke.mockResolvedValue(true);
+    await expect(disconnectGoogleCalendarAction()).resolves.toEqual({
+      status: "ok",
+      removed: 2,
+    });
+    expect(mocks.dbGetScheduledShifts.mock.calls[0].slice(0, 2)).toEqual([
+      "org_1",
+      "user_1",
+    ]);
+    expect(mocks.del).toHaveBeenCalledWith("cal", "id1");
+    expect(mocks.del).toHaveBeenCalledWith("cal", "id2");
+    expect(mocks.revoke).toHaveBeenCalledWith("cal");
+  });
+
+  it("can keep the events and only revoke access", async () => {
+    mocks.revoke.mockResolvedValue(true);
+    await expect(disconnectGoogleCalendarAction(false)).resolves.toEqual({
+      status: "ok",
+      removed: 0,
+    });
+    expect(mocks.del).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when calendar access was never allowed", async () => {
+    mocks.getUserOauthAccessToken.mockResolvedValue({ data: [] });
+    await expect(disconnectGoogleCalendarAction()).resolves.toEqual({
+      status: "ok",
+      removed: 0,
+    });
+    expect(mocks.revoke).not.toHaveBeenCalled();
+  });
+
+  it("rejects a signed-out caller", async () => {
+    session({ userId: null });
+    await expect(disconnectGoogleCalendarAction()).resolves.toEqual({
+      status: "error",
+      error: "Unauthorized",
+    });
+    await expect(googleCalendarConnectedAction()).resolves.toBe(false);
+  });
+
+  it("still revokes when shifts can't be loaded or removed", async () => {
+    mocks.dbGetScheduledShifts.mockRejectedValueOnce(new Error("db"));
+    mocks.revoke.mockResolvedValue(true);
+    await expect(disconnectGoogleCalendarAction()).resolves.toEqual({
+      status: "ok",
+      removed: 0,
+    });
+    mocks.dbGetScheduledShifts.mockResolvedValue([shift(1), shift(2)]);
+    mocks.del.mockRejectedValueOnce(new Error("net")).mockResolvedValue(true);
+    await expect(disconnectGoogleCalendarAction()).resolves.toEqual({
+      status: "ok",
+      removed: 1,
+    });
+    expect(mocks.revoke).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports a revoke that can't reach Google", async () => {
+    mocks.dbGetScheduledShifts.mockResolvedValue([]);
+    mocks.revoke.mockRejectedValue(new Error("net"));
+    expect((await disconnectGoogleCalendarAction()).status).toBe("error");
+  });
+
+  it("reports a failed revoke", async () => {
+    mocks.dbGetScheduledShifts.mockResolvedValue([]);
+    mocks.revoke.mockResolvedValue(false);
+    const res = await disconnectGoogleCalendarAction();
+    expect(res.status).toBe("error");
   });
 });

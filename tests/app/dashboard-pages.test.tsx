@@ -43,6 +43,9 @@ vi.mock("@/lib/session", () => ({
   hasFeature: (feature: string) => Promise.resolve(mocks.features.has(feature)),
 }));
 vi.mock("@/lib/dal", () => mocks.dal);
+vi.mock("@/lib/google-calendar-actions", () => ({
+  googleCalendarConnectedAction: () => "google_connected",
+}));
 vi.mock("@/lib/shift-requests-dal", () => ({
   getShiftRequestsView: mocks.getShiftRequestsView,
 }));
@@ -234,6 +237,7 @@ describe("SchedulePage", () => {
     expect(await screen.findByTestId("schedule")).toBeVisible();
     expect(latest("schedule")).toEqual({
       calendarFeedPromise: "calendar_feed",
+      googleConnectedPromise: "google_connected",
       isAdmin: true,
       membersPromise: "members",
       schedulePromise: "schedule",

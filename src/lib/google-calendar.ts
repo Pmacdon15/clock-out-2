@@ -132,6 +132,20 @@ export async function deleteGoogleCalendarEvent(
 }
 
 /**
+ * Revokes Clock Out's Google access for this token, so Google Calendar stops
+ * accepting writes from us until the user allows access again. An already
+ * revoked or expired token counts as revoked.
+ */
+export async function revokeGoogleToken(accessToken: string): Promise<boolean> {
+  const res = await fetch("https://oauth2.googleapis.com/revoke", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ token: accessToken }).toString(),
+  });
+  return res.ok || res.status === 400;
+}
+
+/**
  * Keeps a member's Google Calendar in step when an admin adds, moves or
  * cancels one of their shifts. Only for members who allowed calendar access
  * (by tapping a Google Calendar button); does nothing for anyone else.

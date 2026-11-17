@@ -1308,6 +1308,25 @@ describe("scheduled shifts", () => {
     expect(valuesOf(0).slice(-3)).toEqual([7, "Warehouse", "1 King St"]);
   });
 
+  it("dbGetOverlappingScheduledShift finds the member's clashing shift", async () => {
+    sql.mockResolvedValue([]);
+    await db.ensureScheduledShiftsTable();
+    sql.mockReset();
+    const start = new Date("2026-01-05T09:00:00Z");
+    const end = new Date("2026-01-05T17:00:00Z");
+    sql.mockResolvedValue([{ id: 4 }]);
+    await expect(
+      db.dbGetOverlappingScheduledShift("o1", "u1", start, end),
+    ).resolves.toEqual({ id: 4 });
+    expect(textOf(0)).toContain("shift_start <");
+    expect(valuesOf(0)).toEqual(["o1", "u1", end, start, null, null]);
+    sql.mockResolvedValue([]);
+    await expect(
+      db.dbGetOverlappingScheduledShift("o1", "u1", start, end, 4),
+    ).resolves.toBeUndefined();
+    expect(valuesOf(1)).toEqual(["o1", "u1", end, start, 4, 4]);
+  });
+
   it("dbGetScheduledShiftById reads one shift within the org", async () => {
     sql.mockResolvedValue([]);
     await db.ensureScheduledShiftsTable();

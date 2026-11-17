@@ -2,15 +2,18 @@
 
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { shiftToCalendarEvent } from "./calendar-export";
-import { dbGetScheduledShiftById } from "./db";
+import { dbGetScheduledShiftById, dbGetScheduledShifts } from "./db";
 import {
+  deleteGoogleCalendarEvent,
   type GoogleCalendarFailure,
   googleCalendarToken,
   googleShiftEventId,
   organizationName,
+  revokeGoogleToken,
   writeGoogleCalendarEvent,
 } from "./google-calendar";
 import { SCHEDULING_FEATURE, SCHEDULING_UPGRADE_REASON } from "./plan-features";
+import { SCHEDULE_FUTURE_DAYS } from "./schedule-utils";
 import type { ScheduledShift } from "./types";
 
 /** Most shifts one tap can add; the schedule shows four weeks at most. */
@@ -96,4 +99,60 @@ export async function addShiftsToGoogleCalendarAction(
     else updated++;
   }
   return { status: "ok", added, updated };
+}
+
+/** Whether the signed-in user has allowed Clock Out to use their Google Calendar. */
+export async function googleCalendarConnectedAction(): Promise<boolean> {
+  const { userId } = await auth.protect();
+  if (!userId) return false;
+  return (await googleCalendarToken(userId)) !== null;
+}
+
+export type DisconnectGoogleCalendarResult =
+  | { status: "ok"; removed: number }
+  | { status: "error"; error: string };
+
+/**
+ * Takes the signed-in user's upcoming shifts off their Google Calendar (when
+ * `removeShifts`) and revokes Clock Out's Google access, so shifts stop
+ * syncing there. Signing in with Google keeps working; adding shifts again
+ * asks for calendar access again.
+ */
+export async function disconnectGoogleCalendarAction(
+  removeShifts = true,
+): Promise<DisconnectGoogleCalendarResult> {
+  const { userId, orgId } = await auth.protect();
+  if (!userId || !orgId) {
+    return { status: "error", error: "Unauthorized" };
+  }
+  const token = await googleCalendarToken(userId);
+  if (!token) return { status: "ok", removed: 0 };
+
+  let removed = 0;
+  if (removeShifts) {
+    const now = new Date();
+    const shifts = await dbGetScheduledShifts(
+      orgId,
+      userId,
+      now,
+      new Date(now.getTime() + SCHEDULE_FUTURE_DAYS * 86_400_000),
+    ).catch(() => [] as ScheduledShift[]);
+    for (const shift of shifts) {
+      const ok = await deleteGoogleCalendarEvent(
+        token,
+        googleShiftEventId(shift),
+      ).catch(() => false);
+      if (ok) removed++;
+    }
+  }
+
+  const revoked = await revokeGoogleToken(token).catch(() => false);
+  if (!revoked) {
+    return {
+      status: "error",
+      error:
+        "Couldn't remove Google Calendar access. Try again, or remove Clock Out at myaccount.google.com/permissions.",
+    };
+  }
+  return { status: "ok", removed };
 }
