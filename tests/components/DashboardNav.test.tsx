@@ -36,6 +36,7 @@ describe("DashboardNav", () => {
     );
     expect(link("Time Clock")).toHaveAttribute("href", "/");
     expect(link("Hours")).toHaveAttribute("href", "/hours");
+    expect(link("Jobs")).toHaveAttribute("href", "/jobs");
     expect(link("Notifications")).toHaveAttribute("href", "/notifications");
     expect(link("Schedule")).toHaveAttribute("href", "/schedule");
     expect(link("Time Off")).toHaveAttribute("href", "/time-off");

@@ -6,6 +6,7 @@
 export const DASHBOARD_ROUTES = {
   "time-clock": "/",
   view: "/hours",
+  jobs: "/jobs",
   notifications: "/notifications",
   schedule: "/schedule",
   "time-off": "/time-off",

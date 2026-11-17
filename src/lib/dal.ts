@@ -1,6 +1,5 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { addDays, format, startOfDay, subDays } from "date-fns";
-import { fromZonedTime } from "date-fns-tz";
 import { errAsync, okAsync, type ResultAsync } from "neverthrow";
 import { connection } from "next/server";
 import { isValidTimeZone } from "./alerts";
@@ -25,6 +24,7 @@ import {
   newFeedNonce,
 } from "./calendar-feed";
 import { fetchAllPages } from "./clerk-pagination";
+import { parseFilterDate } from "./date-utils";
 import {
   dbCancelTimeOffRequest,
   dbCheckActiveEntry,
@@ -219,19 +219,6 @@ async function resolvePunchLocation(
       address,
     },
   };
-}
-
-function parseFilterDate(
-  dateStr: string | undefined,
-  tz: string,
-  isEnd: boolean = false,
-) {
-  if (!dateStr) return undefined;
-  // If the date is just YYYY-MM-DD, and it's the end date, make it the end of that day.
-  if (isEnd && dateStr.length === 10) {
-    return fromZonedTime(`${dateStr}T23:59:59.999`, tz);
-  }
-  return fromZonedTime(dateStr, tz);
 }
 
 export async function getOrgMembers() {
