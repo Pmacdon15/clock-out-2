@@ -16,6 +16,7 @@ import {
   type PlannedAlert,
   pendingAlertKeys,
   planShiftAlerts,
+  sanitizeFcmToken,
   validateAlertSettings,
 } from "@/lib/alerts";
 import type { OpenShift, OpenShiftBreak } from "@/lib/alerts-db";
@@ -682,5 +683,30 @@ describe("pendingAlertKeys", () => {
       "break:7",
       "break-over:7",
     ]);
+  });
+});
+
+describe("sanitizeFcmToken", () => {
+  const token = "dGVzdA:APA91bH-abc_123456789";
+
+  it("keeps the token and drops endpoints it doesn't recognise", () => {
+    expect(
+      sanitizeFcmToken({
+        token,
+        endpoint: "https://fcm.googleapis.com/fcm/send/x",
+        replacedEndpoint: "https://permanently-removed.invalid/fcm/send/y",
+      }),
+    ).toEqual({
+      token,
+      endpoint: "https://fcm.googleapis.com/fcm/send/x",
+      replacedEndpoint: null,
+    });
+  });
+
+  it("refuses a missing or malformed token", () => {
+    expect(sanitizeFcmToken(null)).toBeNull();
+    expect(sanitizeFcmToken("token")).toBeNull();
+    expect(sanitizeFcmToken({ token: 5 })).toBeNull();
+    expect(sanitizeFcmToken({ token: "bad token here!!" })).toBeNull();
   });
 });

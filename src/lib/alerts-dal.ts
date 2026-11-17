@@ -1,12 +1,12 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { err, ok, type Result } from "neverthrow";
 import {
-  isValidFcmToken,
   isValidNotificationPreferences,
   isValidPushSubscription,
   isValidTimeZone,
   normalizeAlertSettings,
   normalizeNotificationPreferences,
+  sanitizeFcmToken,
   validateAlertSettings,
 } from "./alerts";
 import {
@@ -218,19 +218,21 @@ export async function saveFcmTokenDal(
   if (!has({ feature: NOTIFICATIONS_FEATURE })) {
     return err({ reason: UPGRADE_REASON });
   }
-  if (!isValidFcmToken(input)) {
+  const registration = sanitizeFcmToken(input);
+  if (!registration) {
     return err({ reason: "Invalid device registration" });
   }
+  const sent = input as Partial<FcmTokenInput>;
+  for (const [field, value] of [
+    ["endpoint", sent.endpoint],
+    ["replacedEndpoint", sent.replacedEndpoint],
+  ] as const) {
+    if (value && !registration[field]) {
+      console.warn(`Ignored unrecognised FCM ${field} host:`, hostOf(value));
+    }
+  }
   const agent = typeof userAgent === "string" ? userAgent.slice(0, 512) : null;
-  return await dbSaveFcmToken(
-    userId,
-    {
-      token: input.token,
-      endpoint: input.endpoint ?? null,
-      replacedEndpoint: input.replacedEndpoint ?? null,
-    },
-    agent,
-  )
+  return await dbSaveFcmToken(userId, registration, agent)
     .then(() => ok(true as const))
     .catch((e) => {
       console.error("Save FCM token error: ", e);
@@ -289,5 +291,14 @@ export async function sendTestNotificationDal(): Promise<
   } catch (e) {
     console.error("Test notification error: ", e);
     return err({ reason: "Failed to send test notification" });
+  }
+}
+
+/** Just the host of a URL, for logs (paths can carry device secrets). */
+function hostOf(value: unknown) {
+  try {
+    return new URL(String(value)).host;
+  } catch {
+    return "(not a URL)";
   }
 }

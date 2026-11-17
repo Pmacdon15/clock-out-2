@@ -300,6 +300,40 @@ describe("saveFcmTokenDal", () => {
     ).toEqual({ reason: "Invalid device registration" });
   });
 
+  it("keeps the device when the browser reports an unknown endpoint", async () => {
+    mocks.dbSaveFcmToken.mockResolvedValue({ token: reg.token });
+    const result = await saveFcmTokenDal({
+      token: reg.token,
+      endpoint: reg.endpoint,
+      replacedEndpoint: "https://permanently-removed.invalid/fcm/send/old",
+    });
+    expect(result.isOk()).toBe(true);
+    expect(mocks.dbSaveFcmToken).toHaveBeenLastCalledWith(
+      "u1",
+      { token: reg.token, endpoint: reg.endpoint, replacedEndpoint: null },
+      null,
+    );
+  });
+
+  it("logs only the host of an endpoint it ignores", async () => {
+    mocks.dbSaveFcmToken.mockResolvedValue({ token: reg.token });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await saveFcmTokenDal({ token: reg.token, endpoint: "not a url" });
+    await saveFcmTokenDal({
+      token: reg.token,
+      endpoint: "https://push.example.com/secret-path",
+    });
+    expect(warn).toHaveBeenCalledWith(
+      "Ignored unrecognised FCM endpoint host:",
+      "(not a URL)",
+    );
+    expect(warn).toHaveBeenCalledWith(
+      "Ignored unrecognised FCM endpoint host:",
+      "push.example.com",
+    );
+    warn.mockRestore();
+  });
+
   it("saves the token with a trimmed user agent", async () => {
     mocks.dbSaveFcmToken.mockResolvedValue({ token: reg.token });
     expect((await saveFcmTokenDal(reg, "A".repeat(600))).isOk()).toBe(true);
