@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { JobsPanelProps } from "@/components/JobsPanel";
 import type { JobHours, JobsHoursView } from "@/lib/jobs";
@@ -281,5 +282,26 @@ describe("JobsPanel", () => {
 
     fireEvent.click(job.getByRole("button", { name: /Shifts \(25\)/ }));
     expect(job.queryAllByRole("listitem")).toHaveLength(0);
+  });
+
+  it("labels weeks and switches back to bars", () => {
+    renderPanel(view());
+    const admin = within(screen.getByRole("region", { name: "Acme" }));
+    fireEvent.click(admin.getByRole("button", { name: "Line" }));
+    fireEvent.click(admin.getByRole("button", { name: "Week" }));
+    const rows = JSON.parse(
+      admin.getByTestId("line-chart").dataset.chart ?? "[]",
+    );
+    expect(rows[0].name).toMatch(/^Wk of /);
+    expect(rows[0].fullLabel).toMatch(/^Week of /);
+
+    fireEvent.click(admin.getByRole("button", { name: "Bar" }));
+    expect(admin.getByTestId("bar-chart")).toBeInTheDocument();
+  });
+
+  it("leaves the chart empty on the server, where the time zone is unknown", async () => {
+    const { default: JobsChart } = await import("@/components/JobsChart");
+    const html = renderToString(<JobsChart job={acme} />);
+    expect(html).toContain('data-chart="[]"');
   });
 });
