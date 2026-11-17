@@ -12,6 +12,7 @@ import {
   getSchedule,
   getTimeOffRequests,
 } from "@/lib/dal";
+import { googleCalendarConnectedAction } from "@/lib/google-calendar-actions";
 import { SCHEDULING_FEATURE } from "@/lib/plan-features";
 import { hasFeature, isAdmin } from "@/lib/session";
 import { getShiftRequestsView } from "@/lib/shift-requests-dal";
@@ -29,6 +30,7 @@ export default function SchedulePage() {
               <>
                 <Schedule
                   calendarFeedPromise={getCalendarFeedPath()}
+                  googleConnectedPromise={googleCalendarConnectedAction()}
                   isAdmin={admin}
                   membersPromise={getOrgMembers()}
                   schedulePromise={getSchedule()}
