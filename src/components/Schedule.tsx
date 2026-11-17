@@ -2,20 +2,31 @@
 
 import { useMutation } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { CalendarClock, Loader2, MapPin, Pencil, Trash2 } from "lucide-react";
+import {
+  CalendarClock,
+  Loader2,
+  MapPin,
+  Pencil,
+  Repeat,
+  Trash2,
+} from "lucide-react";
 import { use, useState } from "react";
 import { toast } from "sonner";
 import {
   createScheduledShiftAction,
+  createWeeklyScheduledShiftsAction,
   deleteScheduledShiftAction,
   updateScheduledShiftAction,
 } from "@/lib/actions";
 import {
   countShiftStatuses,
+  DEFAULT_REPEAT_WEEKS,
   findOverlappingShift,
   isFlaggedStatus,
   LATE_GRACE_MINUTES,
+  MAX_REPEAT_WEEKS,
   SHIFT_STATUS_LABELS,
+  weeklyOccurrences,
 } from "@/lib/schedule-utils";
 import {
   MAX_SHIFT_LOCATION_LENGTH,
@@ -130,6 +141,42 @@ export function findTimeOffConflict(
     days.end,
   )[0];
 }
+
+/** What the weekly repeat action is sent for each week's copy of a shift. */
+export function weeklyShiftOccurrences(
+  shiftStart: Date,
+  shiftEnd: Date,
+  weeks: number,
+  fromWeek = 0,
+) {
+  return weeklyOccurrences(shiftStart, shiftEnd, weeks, fromWeek).map(
+    (week) => ({
+      shiftStart: week.shiftStart.toISOString(),
+      shiftEnd: week.shiftEnd.toISOString(),
+      localDays: shiftLocalDays(week.shiftStart, week.shiftEnd),
+    }),
+  );
+}
+
+/** "Shifts published" plus the weeks skipped (time off, another shift). */
+function toastWeeklyResult(
+  created: number,
+  skipped: { shiftStart: string; reason: string }[],
+) {
+  const published = `${created} weekly shift${created === 1 ? "" : "s"} published`;
+  if (skipped.length === 0) {
+    toast.success(published);
+    return;
+  }
+  const days = skipped
+    .map((week) => format(new Date(week.shiftStart), "MMM d"))
+    .join(", ");
+  toast.warning(`${published}. Skipped ${days}: ${skipped[0].reason}.`);
+}
+
+/** Keeps a typed week count within what the repeat action accepts. */
+const clampWeeks = (value: string) =>
+  Math.max(1, Math.min(MAX_REPEAT_WEEKS, Math.floor(Number(value)) || 1));
 
 /** The location picker's value for "a location typed in". */
 const OTHER_LOCATION = "other";
@@ -353,6 +400,92 @@ function EditShiftForm({
   );
 }
 
+/** Admin form to copy a published shift to the same weekday in later weeks. */
+function RepeatShiftForm({
+  shift,
+  sites,
+  onDone,
+}: {
+  shift: ScheduledShiftWithStatus;
+  sites: Site[];
+  onDone: () => void;
+}) {
+  const [weeks, setWeeks] = useState(DEFAULT_REPEAT_WEEKS);
+  const start = new Date(shift.shift_start);
+  const end = new Date(shift.shift_end);
+  const last = weeklyOccurrences(start, end, weeks, 1).at(-1);
+
+  const { mutate, isPending } = useMutation({
+    mutationFn: () =>
+      createWeeklyScheduledShiftsAction(
+        shift.user_id,
+        weeklyShiftOccurrences(start, end, weeks, 1),
+        shift.note,
+        browserTimezone(),
+        locationInputFor(locationChoiceFor(shift, sites)),
+      ),
+    onSuccess: (res) => {
+      if (res.success) {
+        toastWeeklyResult(res.data.length, res.skipped);
+        onDone();
+      } else {
+        toast.error(res.error);
+      }
+    },
+  });
+
+  const id = `repeatShift${shift.id}`;
+  return (
+    <form
+      className="flex flex-wrap items-end gap-3 pt-2"
+      onSubmit={(e) => {
+        e.preventDefault();
+        mutate();
+      }}
+    >
+      <div className="space-y-1">
+        <label className="font-medium text-xs" htmlFor={`${id}Weeks`}>
+          Repeat every {format(start, "EEEE")} for the next
+        </label>
+        <div className="flex items-center gap-2">
+          <input
+            className={`${inputClass} w-24`}
+            id={`${id}Weeks`}
+            max={MAX_REPEAT_WEEKS}
+            min={1}
+            onChange={(e) => setWeeks(clampWeeks(e.target.value))}
+            type="number"
+            value={weeks}
+          />
+          <span className="text-sm">weeks</span>
+        </div>
+      </div>
+      <div className="flex gap-2">
+        <Button disabled={isPending} size="sm" type="submit">
+          {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          Repeat weekly
+        </Button>
+        <Button
+          disabled={isPending}
+          onClick={onDone}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          Cancel
+        </Button>
+      </div>
+      {last && (
+        <p className="w-full text-muted-foreground text-xs">
+          Same time and location, through{" "}
+          {format(last.shiftStart, "EEE, MMM d")}. Weeks with time off or
+          another shift are skipped.
+        </p>
+      )}
+    </form>
+  );
+}
+
 function ShiftRow({
   shift,
   memberName,
@@ -366,6 +499,7 @@ function ShiftRow({
 }) {
   const [confirming, setConfirming] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [repeating, setRepeating] = useState(false);
   const { mutate, isPending } = useMutation({
     mutationFn: (id: number) =>
       deleteScheduledShiftAction(id, browserTimezone()),
@@ -429,11 +563,29 @@ function ShiftRow({
                 <button
                   aria-label="Edit shift"
                   className="p-1 text-muted-foreground transition-colors hover:text-foreground"
-                  onClick={() => setEditing((open) => !open)}
+                  onClick={() => {
+                    setRepeating(false);
+                    setEditing((open) => !open);
+                  }}
                   type="button"
                 >
                   <Pencil className="h-3.5 w-3.5" />
                 </button>
+                {isCurrentOrUpcoming(shift) && (
+                  <button
+                    aria-label="Repeat shift weekly"
+                    aria-pressed={repeating}
+                    className="p-1 text-muted-foreground transition-colors hover:text-foreground"
+                    onClick={() => {
+                      setEditing(false);
+                      setRepeating((open) => !open);
+                    }}
+                    title="Repeat weekly"
+                    type="button"
+                  >
+                    <Repeat className="h-3.5 w-3.5" />
+                  </button>
+                )}
                 <button
                   aria-label="Remove shift"
                   className="p-1 text-muted-foreground transition-colors hover:text-red-500"
@@ -485,6 +637,13 @@ function ShiftRow({
           sites={sites}
         />
       )}
+      {isAdmin && repeating && (
+        <RepeatShiftForm
+          onDone={() => setRepeating(false)}
+          shift={shift}
+          sites={sites}
+        />
+      )}
     </li>
   );
 }
@@ -510,8 +669,32 @@ function ShiftForm({
     choice: "",
     typed: "",
   });
+  const [weekly, setWeekly] = useState(false);
+  const [weeks, setWeeks] = useState(DEFAULT_REPEAT_WEEKS);
 
-  const { mutate, isPending } = useMutation({
+  const { mutate: publishWeekly, isPending: weeklyPending } = useMutation({
+    mutationFn: () => {
+      const { shiftStart, shiftEnd } = buildShiftTimes(date, start, end);
+      return createWeeklyScheduledShiftsAction(
+        memberId,
+        weeklyShiftOccurrences(shiftStart, shiftEnd, weeks),
+        note,
+        browserTimezone(),
+        locationInputFor(location),
+      );
+    },
+    onSuccess: (res) => {
+      if (res.success) {
+        toastWeeklyResult(res.data.length, res.skipped);
+        setDate("");
+        setNote("");
+      } else {
+        toast.error(res.error);
+      }
+    },
+  });
+
+  const { mutate: publishOnce, isPending: oncePending } = useMutation({
     mutationFn: () => {
       const { shiftStart, shiftEnd } = buildShiftTimes(date, start, end);
       return createScheduledShiftAction(
@@ -537,6 +720,7 @@ function ShiftForm({
     },
   });
 
+  const isPending = oncePending || weeklyPending;
   const filled = Boolean(memberId && date && start && end);
   const conflict = filled
     ? findTimeOffConflict(timeOff, memberId, date, start, end)
@@ -546,13 +730,18 @@ function ShiftForm({
     ? findOverlappingShift(shifts, memberId, times.shiftStart, times.shiftEnd)
     : undefined;
   const canSubmit = filled && !conflict && !overlap && !isPending;
+  const lastWeek =
+    weekly && times
+      ? weeklyOccurrences(times.shiftStart, times.shiftEnd, weeks).at(-1)
+      : undefined;
 
   return (
     <form
       className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4"
       onSubmit={(e) => {
         e.preventDefault();
-        mutate();
+        if (weekly) publishWeekly();
+        else publishOnce();
       }}
     >
       <div className="space-y-1.5 sm:col-span-2 lg:col-span-4">
@@ -631,6 +820,44 @@ function ShiftForm({
           value={location}
         />
       </div>
+      <div className="flex flex-wrap items-center gap-3 sm:col-span-2 lg:col-span-4">
+        <button
+          aria-pressed={weekly}
+          className={`flex h-11 items-center gap-2 rounded-xl border-2 px-4 font-semibold text-sm transition-colors ${
+            weekly
+              ? "border-blue-600 bg-blue-50 text-blue-700 dark:border-zinc-100 dark:bg-zinc-800 dark:text-zinc-100"
+              : "border-zinc-200 text-muted-foreground hover:text-foreground dark:border-zinc-800"
+          }`}
+          onClick={() => setWeekly((on) => !on)}
+          type="button"
+        >
+          <Repeat className="h-4 w-4" />
+          Weekly
+        </button>
+        {weekly && (
+          <span className="flex items-center gap-2 text-sm">
+            <label htmlFor="shiftWeeks">
+              Every {times ? format(times.shiftStart, "EEEE") : "week"} for
+            </label>
+            <input
+              className={`${inputClass} w-24`}
+              id="shiftWeeks"
+              max={MAX_REPEAT_WEEKS}
+              min={1}
+              onChange={(e) => setWeeks(clampWeeks(e.target.value))}
+              type="number"
+              value={weeks}
+            />
+            weeks
+          </span>
+        )}
+        {lastWeek && (
+          <span className="text-muted-foreground text-xs">
+            Through {format(lastWeek.shiftStart, "EEE, MMM d")}. Weeks with time
+            off or another shift are skipped.
+          </span>
+        )}
+      </div>
       <div className="sm:col-span-2 lg:col-span-4">
         {conflict && (
           <p
@@ -665,7 +892,9 @@ function ShiftForm({
           type="submit"
         >
           {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          Publish shift
+          {weekly
+            ? `Publish ${weeks} weekly shift${weeks === 1 ? "" : "s"}`
+            : "Publish shift"}
         </Button>
         <p className="mt-2 text-muted-foreground text-xs">
           An end time earlier than the start runs past midnight. Members are

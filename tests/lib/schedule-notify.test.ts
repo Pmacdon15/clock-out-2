@@ -40,10 +40,12 @@ import {
   describeShiftChange,
   describeUpcomingShift,
   describeWeeklyDigest,
+  describeWeeklyShiftsAdded,
   FALLBACK_TIMEZONE,
   formatHours,
   formatShiftRange,
   notifyScheduleChange,
+  notifyWeeklyShiftsAdded,
   planUpcomingShiftReminders,
   planWeeklyDigests,
   resolveTimezone,
@@ -602,5 +604,51 @@ describe("upcoming shift reminders", () => {
     mocks.dbGetScheduledShiftsBetween.mockResolvedValue([]);
     await runUpcomingShiftReminders();
     expect(mocks.dbGetScheduledShiftsBetween).toHaveBeenCalled();
+  });
+});
+
+describe("weekly shifts added", () => {
+  const now = new Date("2026-11-01T12:00:00Z");
+  const weekly = [
+    shift("2026-11-16T15:00:00Z", "2026-11-16T23:00:00Z"),
+    shift("2026-11-02T15:00:00Z", "2026-11-02T23:00:00Z", {
+      location: "Warehouse",
+      note: "Desk",
+    }),
+    shift("2026-11-09T15:00:00Z", "2026-11-09T23:00:00Z"),
+  ];
+
+  it("sums the weeks up in one notice, from the first shift", () => {
+    const message = describeWeeklyShiftsAdded(weekly, REGINA);
+    expect(message.title).toBe("New weekly shift: Mondays");
+    expect(message.body).toBe(
+      "You're scheduled Mon, Nov 2, 9:00 AM – 5:00 PM, then every Monday through Nov 16 (3 shifts). Location: Warehouse. Note: Desk",
+    );
+    expect(message.tag).toBe(`shifts-added:${weekly[1].id}`);
+  });
+
+  it("words a single week as a new shift", () => {
+    expect(describeWeeklyShiftsAdded([weekly[1]], REGINA).title).toBe(
+      "New shift: Mon, Nov 2",
+    );
+  });
+
+  it("sends the member one notice for the shifts still to come", async () => {
+    const past = shift("2026-10-26T15:00:00Z", "2026-10-26T23:00:00Z");
+    await expect(
+      notifyWeeklyShiftsAdded([past, ...weekly], "America/Regina", now),
+    ).resolves.toBe(true);
+    expect(mocks.deliver).toHaveBeenCalledTimes(1);
+    expect(mocks.deliver.mock.calls[0][0][0].message.body).toContain(
+      "(3 shifts)",
+    );
+  });
+
+  it("sends nothing when every shift is over", async () => {
+    const past = shift("2026-10-26T15:00:00Z", "2026-10-26T23:00:00Z");
+    await expect(notifyWeeklyShiftsAdded([past], null, now)).resolves.toBe(
+      false,
+    );
+    expect(mocks.deliver).not.toHaveBeenCalled();
   });
 });

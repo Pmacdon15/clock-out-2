@@ -77,6 +77,14 @@ function atLocation(
   return where ? ` Location: ${where}.` : "";
 }
 
+/** The shift's location and note, for the end of a notice. */
+function shiftDetails(
+  shift: Pick<ScheduledShift, "note"> &
+    Partial<Pick<ScheduledShift, "location" | "location_address">>,
+) {
+  return `${atLocation(shift)}${shift.note ? ` Note: ${shift.note}` : ""}`;
+}
+
 export function describeShiftChange(
   change: ScheduleChange,
   shift: Pick<ScheduledShift, "id" | "shift_start" | "shift_end" | "note"> &
@@ -87,7 +95,7 @@ export function describeShiftChange(
   const end = new Date(shift.shift_end);
   const day = formatInTimeZone(start, zone.tz, "EEE, MMM d");
   const range = formatShiftRange(start, end, zone);
-  const note = `${atLocation(shift)}${shift.note ? ` Note: ${shift.note}` : ""}`;
+  const note = shiftDetails(shift);
   if (change === "changed") {
     return {
       title: `Shift changed: ${day}`,
@@ -127,9 +135,73 @@ export async function notifyScheduleChange(
   actorTimezone?: string | null,
   now: Date = new Date(),
 ): Promise<boolean> {
-  try {
-    if (new Date(shift.shift_end).getTime() <= now.getTime()) return false;
+  if (new Date(shift.shift_end).getTime() <= now.getTime()) return false;
+  return deliverScheduleNotice(shift, actorTimezone, (zone) =>
+    describeShiftChange(change, shift, zone),
+  );
+}
 
+/**
+ * "New weekly shift: Mondays" — one notice for a shift repeated over several
+ * weeks, so the member isn't sent a message for every week.
+ */
+export function describeWeeklyShiftsAdded(
+  shifts: (Pick<ScheduledShift, "id" | "shift_start" | "shift_end" | "note"> &
+    Partial<Pick<ScheduledShift, "location" | "location_address">>)[],
+  zone: { tz: string; known: boolean },
+): NotificationMessage {
+  if (shifts.length === 1) return describeShiftChange("added", shifts[0], zone);
+  const sorted = [...shifts].sort(
+    (a, b) =>
+      new Date(a.shift_start).getTime() - new Date(b.shift_start).getTime(),
+  );
+  const first = sorted[0];
+  const last = sorted[sorted.length - 1];
+  const weekday = formatInTimeZone(
+    new Date(first.shift_start),
+    zone.tz,
+    "EEEE",
+  );
+  const range = formatShiftRange(
+    new Date(first.shift_start),
+    new Date(first.shift_end),
+    zone,
+  );
+  const until = formatInTimeZone(new Date(last.shift_start), zone.tz, "MMM d");
+  const note = shiftDetails(first);
+  return {
+    title: `New weekly shift: ${weekday}s`,
+    body: `You're scheduled ${range}, then every ${weekday} through ${until} (${sorted.length} shifts).${note}`,
+    url: SCHEDULE_URL,
+    tag: `shifts-added:${first.id}`,
+  };
+}
+
+/** Tells a member about shifts repeated weekly, in one notice. */
+export async function notifyWeeklyShiftsAdded(
+  shifts: ScheduledShift[],
+  actorTimezone?: string | null,
+  now: Date = new Date(),
+): Promise<boolean> {
+  const upcoming = shifts.filter(
+    (shift) => new Date(shift.shift_end).getTime() > now.getTime(),
+  );
+  if (upcoming.length === 0) return false;
+  return deliverScheduleNotice(upcoming[0], actorTimezone, (zone) =>
+    describeWeeklyShiftsAdded(upcoming, zone),
+  );
+}
+
+/**
+ * Sends a schedule notice to the shift's member, unless their org switched
+ * schedule notices off or doesn't have the paid feature. Never throws.
+ */
+async function deliverScheduleNotice(
+  shift: Pick<ScheduledShift, "org_id" | "user_id">,
+  actorTimezone: string | null | undefined,
+  message: (zone: { tz: string; known: boolean }) => NotificationMessage,
+): Promise<boolean> {
+  try {
     const [settingsRows, prefRows, members] = await Promise.all([
       dbGetAlertSettingsFor([shift.org_id]),
       dbGetNotificationPreferencesFor([shift.user_id]),
@@ -149,7 +221,7 @@ export async function notifyScheduleChange(
       {
         recipient: { userId: member.userId, email: member.email },
         category: "schedule_alerts",
-        message: describeShiftChange(change, shift, zone),
+        message: message(zone),
       },
     ]);
     return true;
@@ -365,7 +437,7 @@ export function describeUpcomingShift(
     minutes >= 60 ? "1 hour" : `${minutes} minute${minutes === 1 ? "" : "s"}`;
   const time = `${formatInTimeZone(start, zone.tz, "h:mm a")}${zone.known ? "" : ` ${zone.tz}`}`;
   const range = formatShiftRange(start, end, zone);
-  const note = `${atLocation(shift)}${shift.note ? ` Note: ${shift.note}` : ""}`;
+  const note = shiftDetails(shift);
   return {
     title: `Your shift starts at ${time}`,
     body: `Heads up: you're scheduled ${range}, starting in ${startsIn}.${note}`,

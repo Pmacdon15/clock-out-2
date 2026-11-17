@@ -10,14 +10,16 @@ import { renderWithClient, resolved } from "../utils";
 
 const mocks = vi.hoisted(() => ({
   createScheduledShiftAction: vi.fn(),
+  createWeeklyScheduledShiftsAction: vi.fn(),
   deleteScheduledShiftAction: vi.fn(),
   updateScheduledShiftAction: vi.fn(),
-  toast: { success: vi.fn(), error: vi.fn() },
+  toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
   addShiftsToGoogleCalendarAction: vi.fn(),
 }));
 
 vi.mock("@/lib/actions", () => ({
   createScheduledShiftAction: mocks.createScheduledShiftAction,
+  createWeeklyScheduledShiftsAction: mocks.createWeeklyScheduledShiftsAction,
   deleteScheduledShiftAction: mocks.deleteScheduledShiftAction,
   updateScheduledShiftAction: mocks.updateScheduledShiftAction,
 }));
@@ -38,6 +40,7 @@ import Schedule, {
   findTimeOffConflict,
   locationChoiceFor,
   locationInputFor,
+  weeklyShiftOccurrences,
 } from "@/components/Schedule";
 
 let nextId = 1;
@@ -718,5 +721,207 @@ describe("Schedule locations", () => {
     expect(mocks.updateScheduledShiftAction.mock.calls[0][6]).toEqual({
       siteId: 8,
     });
+  });
+});
+
+describe("weeklyShiftOccurrences", () => {
+  it("sends each week's times and local days", () => {
+    expect(
+      weeklyShiftOccurrences(
+        new Date("2026-01-05T22:00:00Z"),
+        new Date("2026-01-06T06:00:00Z"),
+        2,
+        1,
+      ),
+    ).toEqual([
+      {
+        shiftStart: "2026-01-12T22:00:00.000Z",
+        shiftEnd: "2026-01-13T06:00:00.000Z",
+        localDays: { start: "2026-01-12", end: "2026-01-13" },
+      },
+      {
+        shiftStart: "2026-01-19T22:00:00.000Z",
+        shiftEnd: "2026-01-20T06:00:00.000Z",
+        localDays: { start: "2026-01-19", end: "2026-01-20" },
+      },
+    ]);
+  });
+});
+
+describe("Schedule weekly shifts", () => {
+  function fillForm() {
+    fireEvent.change(screen.getByLabelText("Member"), {
+      target: { value: "user_2" },
+    });
+    fireEvent.change(screen.getByLabelText("Date"), {
+      target: { value: "2026-01-07" },
+    });
+  }
+
+  it("publishes a shift every week from the form", async () => {
+    mocks.createWeeklyScheduledShiftsAction.mockResolvedValue({
+      success: true,
+      data: [{}, {}, {}],
+      skipped: [],
+    });
+    renderSchedule([]);
+    fillForm();
+    fireEvent.change(screen.getByLabelText("Note (optional)"), {
+      target: { value: "Desk" },
+    });
+    const weekly = screen.getByRole("button", { name: "Weekly" });
+    expect(weekly).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(weekly);
+    expect(weekly).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText("Every Wednesday for")).toHaveValue(4);
+    expect(screen.getByText(/Through Wed, Jan 28/)).toBeVisible();
+
+    fireEvent.change(screen.getByLabelText("Every Wednesday for"), {
+      target: { value: "3" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Publish 3 weekly shifts" }),
+    );
+
+    await waitFor(() =>
+      expect(mocks.toast.success).toHaveBeenCalledWith(
+        "3 weekly shifts published",
+      ),
+    );
+    const [memberId, weeks, note, , location] =
+      mocks.createWeeklyScheduledShiftsAction.mock.calls[0];
+    expect(memberId).toBe("user_2");
+    expect(weeks.map((w: { shiftStart: string }) => w.shiftStart)).toEqual([
+      "2026-01-07T09:00:00.000Z",
+      "2026-01-14T09:00:00.000Z",
+      "2026-01-21T09:00:00.000Z",
+    ]);
+    expect(note).toBe("Desk");
+    expect(location).toEqual({});
+    expect(screen.getByLabelText("Note (optional)")).toHaveValue("");
+    expect(mocks.createScheduledShiftAction).not.toHaveBeenCalled();
+  });
+
+  it("keeps the week count in range and words a single week", () => {
+    renderSchedule([]);
+    fireEvent.click(screen.getByRole("button", { name: "Weekly" }));
+    // No date yet: no weekday to name.
+    const weeks = screen.getByLabelText("Every week for");
+    fireEvent.change(weeks, { target: { value: "99" } });
+    expect(weeks).toHaveValue(26);
+    fireEvent.change(weeks, { target: { value: "" } });
+    expect(weeks).toHaveValue(1);
+    expect(
+      screen.getByRole("button", { name: "Publish 1 weekly shift" }),
+    ).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Weekly" }));
+    expect(screen.getByRole("button", { name: "Publish shift" })).toBeVisible();
+  });
+
+  it("warns about skipped weeks and shows errors", async () => {
+    mocks.createWeeklyScheduledShiftsAction
+      .mockResolvedValueOnce({
+        success: true,
+        data: [{}],
+        skipped: [
+          { shiftStart: "2026-01-14T09:00:00.000Z", reason: "Time off" },
+        ],
+      })
+      .mockResolvedValueOnce({ success: false, error: "Nope" });
+    renderSchedule([]);
+    fillForm();
+    fireEvent.click(screen.getByRole("button", { name: "Weekly" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Publish 4 weekly shifts" }),
+    );
+    await waitFor(() =>
+      expect(mocks.toast.warning).toHaveBeenCalledWith(
+        "1 weekly shift published. Skipped Jan 14: Time off.",
+      ),
+    );
+
+    fillForm();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Publish 4 weekly shifts" }),
+    );
+    await waitFor(() => expect(mocks.toast.error).toHaveBeenCalledWith("Nope"));
+  });
+
+  it("repeats a published shift in the weeks after it", async () => {
+    mocks.createWeeklyScheduledShiftsAction.mockResolvedValue({
+      success: true,
+      data: [{}, {}],
+      skipped: [],
+    });
+    const s = shift("scheduled", {
+      user_id: "user_2",
+      note: "Desk",
+      site_id: 7,
+      location: "Warehouse",
+    });
+    renderSchedule([s], true, true, [], sites);
+    const repeat = screen.getByLabelText("Repeat shift weekly");
+    fireEvent.click(repeat);
+    expect(repeat).toHaveAttribute("aria-pressed", "true");
+    const weeks = screen.getByLabelText("Repeat every Monday for the next");
+    expect(weeks).toHaveValue(4);
+    expect(screen.getByText(/through Mon, Feb 2/)).toBeVisible();
+    fireEvent.change(weeks, { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Repeat weekly" }));
+
+    await waitFor(() =>
+      expect(mocks.toast.success).toHaveBeenCalledWith(
+        "2 weekly shifts published",
+      ),
+    );
+    const [memberId, occurrences, note, , location] =
+      mocks.createWeeklyScheduledShiftsAction.mock.calls[0];
+    expect(memberId).toBe("user_2");
+    expect(
+      occurrences.map((w: { shiftStart: string }) => w.shiftStart),
+    ).toEqual(["2026-01-12T09:00:00.000Z", "2026-01-19T09:00:00.000Z"]);
+    expect(note).toBe("Desk");
+    expect(location).toEqual({ siteId: 7 });
+    expect(screen.queryByRole("button", { name: "Repeat weekly" })).toBeNull();
+  });
+
+  it("keeps the repeat form open on errors, and swaps with the edit form", async () => {
+    mocks.createWeeklyScheduledShiftsAction.mockResolvedValue({
+      success: false,
+      error: "Nope",
+    });
+    renderSchedule([shift("scheduled")]);
+    fireEvent.click(screen.getByLabelText("Repeat shift weekly"));
+    fireEvent.click(screen.getByRole("button", { name: "Repeat weekly" }));
+    await waitFor(() => expect(mocks.toast.error).toHaveBeenCalledWith("Nope"));
+    expect(screen.getByRole("button", { name: "Repeat weekly" })).toBeVisible();
+
+    // Editing closes the repeat form, and repeating closes the edit form.
+    fireEvent.click(screen.getByLabelText("Edit shift"));
+    expect(screen.queryByRole("button", { name: "Repeat weekly" })).toBeNull();
+    fireEvent.click(screen.getByLabelText("Repeat shift weekly"));
+    expect(screen.queryByRole("button", { name: "Save shift" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("button", { name: "Repeat weekly" })).toBeNull();
+  });
+
+  it("disables the repeat form while it publishes", async () => {
+    mocks.createWeeklyScheduledShiftsAction.mockReturnValue(
+      new Promise(() => {}),
+    );
+    renderSchedule([shift("scheduled")]);
+    fireEvent.click(screen.getByLabelText("Repeat shift weekly"));
+    fireEvent.click(screen.getByRole("button", { name: "Repeat weekly" }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Repeat weekly" }),
+      ).toBeDisabled(),
+    );
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+  });
+
+  it("only offers to repeat shifts still to come", () => {
+    renderSchedule([shift("no_show")]);
+    expect(screen.queryByLabelText("Repeat shift weekly")).toBeNull();
   });
 });

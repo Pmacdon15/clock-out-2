@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   updateScheduledShiftDal: vi.fn(),
   after: vi.fn((fn: () => unknown) => fn()),
   notifyScheduleChange: vi.fn(),
+  notifyWeeklyShiftsAdded: vi.fn(),
   syncShiftReminderJob: vi.fn(() => Promise.resolve(true)),
   mirrorShiftToGoogleCalendar: vi.fn(() => Promise.resolve()),
 }));
@@ -20,6 +21,7 @@ vi.mock("@/lib/google-calendar", () => ({
 vi.mock("next/server", () => ({ after: mocks.after }));
 vi.mock("@/lib/schedule-notify", () => ({
   notifyScheduleChange: mocks.notifyScheduleChange,
+  notifyWeeklyShiftsAdded: mocks.notifyWeeklyShiftsAdded,
 }));
 
 vi.mock("@/lib/rate-limit", () => ({
@@ -46,6 +48,7 @@ vi.mock("@/lib/dal", () => ({
 
 import {
   createScheduledShiftAction,
+  createWeeklyScheduledShiftsAction,
   deleteScheduledShiftAction,
   updateScheduledShiftAction,
 } from "@/lib/actions";
@@ -222,5 +225,85 @@ describe("Google Calendar mirroring", () => {
       ),
     );
     error.mockRestore();
+  });
+});
+
+describe("createWeeklyScheduledShiftsAction", () => {
+  const week = (day: string) => ({
+    shiftStart: `${day}T09:00:00.000Z`,
+    shiftEnd: `${day}T17:00:00.000Z`,
+    localDays: { start: day, end: day },
+  });
+
+  it("publishes each week, skips the ones that fail and notifies once", async () => {
+    const first = { ...shift, id: 1 };
+    const third = { ...shift, id: 3 };
+    mocks.createScheduledShiftDal
+      .mockResolvedValueOnce(ok(first))
+      .mockResolvedValueOnce(err({ reason: "Time off" }))
+      .mockResolvedValueOnce(ok(third));
+    await expect(
+      createWeeklyScheduledShiftsAction(
+        "user_1",
+        [week("2026-01-05"), week("2026-01-12"), week("2026-01-19")],
+        "Desk",
+        "America/Regina",
+        { siteId: 7 },
+      ),
+    ).resolves.toEqual({
+      success: true,
+      data: [first, third],
+      skipped: [{ shiftStart: "2026-01-12T09:00:00.000Z", reason: "Time off" }],
+    });
+    expect(mocks.createScheduledShiftDal).toHaveBeenNthCalledWith(
+      3,
+      "user_1",
+      new Date("2026-01-19T09:00:00.000Z"),
+      new Date("2026-01-19T17:00:00.000Z"),
+      "Desk",
+      { start: "2026-01-19", end: "2026-01-19" },
+      { siteId: 7 },
+    );
+    expect(mocks.updateTag).toHaveBeenCalledWith("scheduled-shifts-org_1");
+    expect(mocks.notifyWeeklyShiftsAdded).toHaveBeenCalledWith(
+      [first, third],
+      "America/Regina",
+    );
+    expect(mocks.notifyScheduleChange).not.toHaveBeenCalled();
+    expect(mocks.syncShiftReminderJob).toHaveBeenCalledTimes(2);
+    expect(mocks.mirrorShiftToGoogleCalendar).toHaveBeenCalledWith(
+      "added",
+      third,
+    );
+  });
+
+  it("stops at the first week when the admin isn't allowed", async () => {
+    mocks.createScheduledShiftDal.mockResolvedValue(
+      err({ reason: "Unauthorized" }),
+    );
+    await expect(
+      createWeeklyScheduledShiftsAction("user_1", [
+        week("2026-01-05"),
+        week("2026-01-12"),
+      ]),
+    ).resolves.toEqual({ success: false, error: "Unauthorized" });
+    expect(mocks.createScheduledShiftDal).toHaveBeenCalledTimes(1);
+    expect(mocks.updateTag).not.toHaveBeenCalled();
+  });
+
+  it("rejects no weeks or too many", async () => {
+    await expect(
+      createWeeklyScheduledShiftsAction("user_1", []),
+    ).resolves.toMatchObject({ success: false });
+    await expect(
+      createWeeklyScheduledShiftsAction(
+        "user_1",
+        Array.from({ length: 27 }, () => week("2026-01-05")),
+      ),
+    ).resolves.toEqual({
+      success: false,
+      error: "Shifts can repeat for up to 26 weeks",
+    });
+    expect(mocks.createScheduledShiftDal).not.toHaveBeenCalled();
   });
 });
