@@ -142,3 +142,83 @@ export function jobSelectionParam(
   if (selected.length === 0 || selected.length === allJobs.length) return null;
   return selected.join(",");
 }
+
+/** How a job's chart groups its shifts along the x-axis. */
+export type ChartGranularity = "day" | "week" | "month";
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * A sensible grouping for a span of shifts: one bar per day is readable for a
+ * week or a month, but a year of days is hundreds of bars, so longer spans
+ * group by week, then by month.
+ */
+export function autoGranularity(
+  entries: { clockIn: string }[],
+): ChartGranularity {
+  if (entries.length === 0) return "day";
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  for (const e of entries) {
+    const t = new Date(e.clockIn).getTime();
+    if (t < min) min = t;
+    if (t > max) max = t;
+  }
+  const days = (max - min) / DAY_MS;
+  if (days <= 31) return "day";
+  if (days <= 120) return "week";
+  return "month";
+}
+
+/** Start of the local day, Monday-based week or month containing `d`. */
+export function bucketStart(d: Date, granularity: ChartGranularity): Date {
+  const out = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  if (granularity === "week") {
+    const offset = (out.getDay() + 6) % 7; // Monday = 0
+    out.setDate(out.getDate() - offset);
+  } else if (granularity === "month") {
+    out.setDate(1);
+  }
+  return out;
+}
+
+export type JobChartRow = {
+  /** Bucket start, ms since epoch (local time). */
+  start: number;
+  /** Total of all members in this bucket. */
+  total: number;
+  /** Hours per member id. Every member in `memberIds` has a key. */
+  [userId: string]: number;
+};
+
+/**
+ * Groups a job's shifts into chart rows, oldest first, with one column per
+ * member. Uses the runtime's local time zone, so call it in the browser.
+ */
+export function jobChartRows(
+  entries: Pick<JobEntryRow, "userId" | "clockIn" | "hours">[],
+  memberIds: string[],
+  granularity: ChartGranularity,
+): JobChartRow[] {
+  const buckets = new Map<number, JobChartRow>();
+  for (const entry of entries) {
+    const start = bucketStart(new Date(entry.clockIn), granularity).getTime();
+    let row = buckets.get(start);
+    if (!row) {
+      row = { start, total: 0 };
+      for (const id of memberIds) row[id] = 0;
+      buckets.set(start, row);
+    }
+    row[entry.userId] = (row[entry.userId] ?? 0) + entry.hours;
+    row.total += entry.hours;
+  }
+  return [...buckets.values()]
+    .sort((a, b) => a.start - b.start)
+    .map((row) => {
+      const out: JobChartRow = { start: row.start, total: round2(row.total) };
+      for (const [key, value] of Object.entries(row)) {
+        if (key !== "start" && key !== "total") out[key] = round2(value);
+      }
+      return out;
+    });
+}

@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  autoGranularity,
+  bucketStart,
   failedJob,
   type Job,
+  jobChartRows,
   jobSelectionParam,
   MAX_JOB_SELECTION,
   parseJobSelection,
@@ -123,5 +126,71 @@ describe("failedJob", () => {
       entries: [],
       error: "nope",
     });
+  });
+});
+
+describe("autoGranularity", () => {
+  const at = (iso: string) => ({ clockIn: iso });
+  it("uses days for up to a month, weeks for a few months, then months", () => {
+    expect(autoGranularity([])).toBe("day");
+    expect(
+      autoGranularity([at("2026-03-01T09:00:00Z"), at("2026-03-30T09:00:00Z")]),
+    ).toBe("day");
+    expect(
+      autoGranularity([at("2026-01-01T09:00:00Z"), at("2026-03-30T09:00:00Z")]),
+    ).toBe("week");
+    expect(
+      autoGranularity([at("2026-01-01T09:00:00Z"), at("2026-12-30T09:00:00Z")]),
+    ).toBe("month");
+  });
+});
+
+describe("bucketStart", () => {
+  it("snaps to the local day, Monday-based week and month", () => {
+    const d = new Date(2026, 2, 5, 15, 30); // Thu Mar 5 2026
+    expect(bucketStart(d, "day")).toEqual(new Date(2026, 2, 5));
+    expect(bucketStart(d, "week")).toEqual(new Date(2026, 2, 2));
+    expect(bucketStart(new Date(2026, 2, 8), "week")).toEqual(
+      new Date(2026, 2, 2),
+    );
+    expect(bucketStart(d, "month")).toEqual(new Date(2026, 2, 1));
+  });
+});
+
+describe("jobChartRows", () => {
+  const row = (userId: string, local: Date, hours: number) => ({
+    userId,
+    clockIn: local.toISOString(),
+    hours,
+  });
+
+  it("sums each member per bucket, oldest first, with zeros for the rest", () => {
+    const rows = jobChartRows(
+      [
+        row("u2", new Date(2026, 2, 3, 9), 4),
+        row("me", new Date(2026, 2, 2, 9), 8),
+        row("me", new Date(2026, 2, 3, 13), 1.111),
+      ],
+      ["me", "u2"],
+      "day",
+    );
+    expect(rows).toEqual([
+      { start: new Date(2026, 2, 2).getTime(), total: 8, me: 8, u2: 0 },
+      { start: new Date(2026, 2, 3).getTime(), total: 5.11, me: 1.11, u2: 4 },
+    ]);
+  });
+
+  it("folds a whole month into one row", () => {
+    const rows = jobChartRows(
+      [
+        row("me", new Date(2026, 2, 2, 9), 8),
+        row("me", new Date(2026, 2, 28, 9), 2),
+      ],
+      ["me"],
+      "month",
+    );
+    expect(rows).toEqual([
+      { start: new Date(2026, 2, 1).getTime(), total: 10, me: 10 },
+    ]);
   });
 });

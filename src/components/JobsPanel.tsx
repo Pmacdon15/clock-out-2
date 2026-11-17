@@ -4,9 +4,14 @@ import { format } from "date-fns";
 import { Briefcase, ShieldCheck, User } from "lucide-react";
 import type { Route } from "next";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { use } from "react";
-import { type JobsHoursView, jobSelectionParam } from "@/lib/jobs";
+import { use, useState } from "react";
+import {
+  type JobEntryRow,
+  type JobsHoursView,
+  jobSelectionParam,
+} from "@/lib/jobs";
 import type { SerializableResult } from "@/lib/types";
+import JobsChart, { memberColor } from "./JobsChart";
 import LocalTime from "./LocalTime";
 import { Card } from "./ui";
 import {
@@ -22,6 +27,17 @@ export type JobsPanelProps = {
 };
 
 const hoursLabel = (hours: number) => `${hours.toFixed(2)} h`;
+
+/** Shifts listed per job before "Show more". */
+export const ENTRY_PAGE_SIZE = 10;
+
+const ColorDot = ({ color }: { color: string }) => (
+  <span
+    aria-hidden
+    className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+    style={{ backgroundColor: color }}
+  />
+);
 
 /**
  * Hours across several of the signed-in user's jobs (organizations) at once.
@@ -173,55 +189,143 @@ export default function JobsPanel({
                 </span>
               </div>
               {job.isAdmin &&
-                job.members.map((m) => (
+                job.members.map((m, i) => (
                   <div
                     className="flex items-center justify-between px-4 py-2 text-sm"
                     key={m.userId}
                   >
-                    <span>{m.name}</span>
+                    <span className="flex items-center gap-2">
+                      <ColorDot color={memberColor(i)} />
+                      {m.name}
+                    </span>
                     <span>
                       {hoursLabel(m.hours)} · {m.shifts}
                     </span>
                   </div>
                 ))}
+              <JobsChart job={job} />
               {job.entries.length === 0 ? (
                 <p className="p-4 text-sm text-zinc-500">
                   No shifts in this range.
                 </p>
               ) : (
-                <ul className="text-sm">
-                  {job.entries.map((entry) => (
-                    <li
-                      className="flex flex-wrap items-center justify-between gap-2 px-4 py-2"
-                      key={entry.id}
-                    >
-                      <span>
-                        {job.isAdmin && (
-                          <span className="mr-2 font-medium">
-                            {entry.memberName}
-                          </span>
-                        )}
-                        <LocalTime>
-                          {() =>
-                            `${format(new Date(entry.clockIn), "EEE MMM d, h:mm a")} – ${
-                              entry.clockOut
-                                ? format(new Date(entry.clockOut), "h:mm a")
-                                : "now"
-                            }`
-                          }
-                        </LocalTime>
-                      </span>
-                      <span className="tabular-nums">
-                        {hoursLabel(entry.hours)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
+                <JobEntries
+                  colorOf={(userId) =>
+                    memberColor(
+                      Math.max(
+                        0,
+                        job.members.findIndex((m) => m.userId === userId),
+                      ),
+                    )
+                  }
+                  entries={job.entries}
+                  showNames={job.isAdmin}
+                />
               )}
             </Card>
           )}
         </section>
       ))}
+    </div>
+  );
+}
+
+/**
+ * A job's shifts, a page at a time: a month of a busy team is hundreds of
+ * rows, so only the newest few show until asked for more.
+ */
+function JobEntries({
+  entries,
+  showNames,
+  colorOf,
+}: {
+  entries: JobEntryRow[];
+  showNames: boolean;
+  colorOf: (userId: string) => string;
+}) {
+  const [shown, setShown] = useState(ENTRY_PAGE_SIZE);
+  const [open, setOpen] = useState(true);
+  const visible = entries.slice(0, shown);
+  const remaining = entries.length - visible.length;
+
+  return (
+    <div>
+      <button
+        aria-expanded={open}
+        className="flex w-full items-center justify-between px-4 py-2 text-left font-medium text-sm text-zinc-600 hover:bg-zinc-50 dark:text-zinc-400 dark:hover:bg-zinc-900"
+        onClick={() => setOpen((o) => !o)}
+        type="button"
+      >
+        <span>Shifts ({entries.length})</span>
+        <span className="text-xs">{open ? "Hide" : "Show"}</span>
+      </button>
+      {open && (
+        <>
+          <ul className="text-sm">
+            {visible.map((entry) => (
+              <li
+                className="flex flex-wrap items-center justify-between gap-2 px-4 py-2"
+                key={entry.id}
+              >
+                <span className="flex items-center gap-2">
+                  {showNames && (
+                    <>
+                      <ColorDot color={colorOf(entry.userId)} />
+                      <span className="font-medium">{entry.memberName}</span>
+                    </>
+                  )}
+                  <LocalTime>
+                    {() =>
+                      `${format(new Date(entry.clockIn), "EEE MMM d, h:mm a")} – ${
+                        entry.clockOut
+                          ? format(new Date(entry.clockOut), "h:mm a")
+                          : "now"
+                      }`
+                    }
+                  </LocalTime>
+                </span>
+                <span className="tabular-nums">{hoursLabel(entry.hours)}</span>
+              </li>
+            ))}
+          </ul>
+          {(remaining > 0 || shown > ENTRY_PAGE_SIZE) && (
+            <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm">
+              <span className="text-xs text-zinc-500">
+                Showing {visible.length} of {entries.length}
+              </span>
+              <div className="flex gap-3">
+                {remaining > 0 && (
+                  <>
+                    <button
+                      className="font-medium text-blue-600 hover:underline dark:text-blue-400"
+                      onClick={() => setShown((n) => n + ENTRY_PAGE_SIZE)}
+                      type="button"
+                    >
+                      Show {Math.min(ENTRY_PAGE_SIZE, remaining)} more
+                    </button>
+                    <button
+                      className="font-medium text-blue-600 hover:underline dark:text-blue-400"
+                      onClick={() => setShown(entries.length)}
+                      type="button"
+                    >
+                      Show all
+                    </button>
+                  </>
+                )}
+                {shown > ENTRY_PAGE_SIZE && (
+                  <button
+                    className="font-medium text-blue-600 hover:underline dark:text-blue-400"
+                    onClick={() => setShown(ENTRY_PAGE_SIZE)}
+                    type="button"
+                  >
+                    Show less
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
