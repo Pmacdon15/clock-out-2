@@ -211,6 +211,10 @@ export default function NotificationSettings({
     }
     const res = await saveFcmTokenAction(registration, navigator.userAgent);
     if (!res.success) {
+      // Don't leave the browser subscribed when the server didn't keep it:
+      // the page would show push as on while nothing can reach this device.
+      await unregisterFcm(settings.firebase);
+      setSubscription(null);
       toast.error(res.error || "Could not save this device");
       return true;
     }

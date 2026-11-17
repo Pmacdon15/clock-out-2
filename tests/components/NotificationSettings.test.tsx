@@ -353,6 +353,8 @@ describe("NotificationSettings", () => {
         "Invalid device registration",
       ),
     );
+    // A device the server refused is unsubscribed again, not left looking on.
+    expect(mocks.unregisterFcm).toHaveBeenCalled();
 
     mocks.saveFcmTokenAction.mockResolvedValueOnce({ success: false });
     fireEvent.click(turnOn);
