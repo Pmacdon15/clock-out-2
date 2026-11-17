@@ -1197,6 +1197,29 @@ export async function dbCreateScheduledShift(
   return created as unknown as ScheduledShift;
 }
 
+/**
+ * The member's first shift that overlaps [start, end), ignoring `excludeId`
+ * (the shift being moved). Shifts that only touch end-to-start don't count.
+ */
+export async function dbGetOverlappingScheduledShift(
+  orgId: string,
+  userId: string,
+  start: Date,
+  end: Date,
+  excludeId: number | null = null,
+) {
+  await ensureScheduledShiftsTable();
+  const [row] = await sql`
+		SELECT * FROM scheduled_shifts
+		WHERE org_id = ${orgId} AND user_id = ${userId}
+		AND shift_start < ${end} AND shift_end > ${start}
+		AND (${excludeId}::INTEGER IS NULL OR id <> ${excludeId})
+		ORDER BY shift_start ASC, id ASC
+		LIMIT 1
+	`;
+  return row as unknown as ScheduledShift | undefined;
+}
+
 export async function dbGetScheduledShiftById(id: number, orgId: string) {
   await ensureScheduledShiftsTable();
   const [row] = await sql`

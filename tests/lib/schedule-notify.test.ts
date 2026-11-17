@@ -209,15 +209,19 @@ describe("notifyScheduleChange", () => {
     );
   });
 
-  it("skips past shifts, self-scheduled shifts, and leavers", async () => {
+  it("notifies an admin who scheduled themselves", async () => {
+    const self = { ...upcoming, created_by: "u1" };
+    await expect(notifyScheduleChange("added", self, null, now)).resolves.toBe(
+      true,
+    );
+    expect(mocks.deliver).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips past shifts and leavers", async () => {
     const past = shift("2026-10-01T15:00:00Z", "2026-10-01T23:00:00Z");
     await expect(
       notifyScheduleChange("removed", past, null, now),
     ).resolves.toBe(false);
-    const self = { ...upcoming, created_by: "u1" };
-    await expect(notifyScheduleChange("added", self, null, now)).resolves.toBe(
-      false,
-    );
     mocks.loadOrgMembers.mockResolvedValueOnce([]);
     await expect(
       notifyScheduleChange("added", upcoming, null, now),

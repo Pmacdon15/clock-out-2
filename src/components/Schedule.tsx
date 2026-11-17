@@ -25,6 +25,7 @@ import {
 } from "@/lib/calendar-export";
 import {
   countShiftStatuses,
+  findOverlappingShift,
   isFlaggedStatus,
   LATE_GRACE_MINUTES,
   SHIFT_STATUS_LABELS,
@@ -587,10 +588,13 @@ function ShiftForm({
   members,
   sites,
   timeOff,
+  shifts,
 }: {
   members: Member[];
   sites: Site[];
   timeOff: TimeOffRequest[];
+  /** Shifts already published, so the same slot isn't booked twice. */
+  shifts: ScheduledShiftWithStatus[];
 }) {
   const [memberId, setMemberId] = useState("");
   const [date, setDate] = useState("");
@@ -629,7 +633,11 @@ function ShiftForm({
   const conflict = filled
     ? findTimeOffConflict(timeOff, memberId, date, start, end)
     : undefined;
-  const canSubmit = filled && !conflict && !isPending;
+  const times = filled ? buildShiftTimes(date, start, end) : undefined;
+  const overlap = times
+    ? findOverlappingShift(shifts, memberId, times.shiftStart, times.shiftEnd)
+    : undefined;
+  const canSubmit = filled && !conflict && !overlap && !isPending;
 
   return (
     <form
@@ -729,6 +737,18 @@ function ShiftForm({
             {TIME_OFF_TYPE_LABELS[conflict.request_type].slice(1)} on{" "}
             {formatTimeOffDates(conflict)}. Pick another day — they can still
             clock in if they choose to work.
+          </p>
+        )}
+        {!conflict && overlap && (
+          <p
+            className="mb-3 rounded-xl bg-amber-100 p-3 font-medium text-amber-800 text-sm dark:bg-amber-950 dark:text-amber-200"
+            role="alert"
+          >
+            {new Map(members.map((m) => [m.id, m.name])).get(memberId)} is
+            already scheduled{" "}
+            {format(new Date(overlap.shift_start), "EEE, MMM d, h:mm a")} –{" "}
+            {format(new Date(overlap.shift_end), "h:mm a")}. Edit that shift or
+            pick a time that doesn't overlap it.
           </p>
         )}
         <Button
@@ -846,7 +866,12 @@ export default function Schedule({
         )}
 
         {isAdmin && (
-          <ShiftForm members={members} sites={sites} timeOff={timeOff} />
+          <ShiftForm
+            members={members}
+            shifts={result.value}
+            sites={sites}
+            timeOff={timeOff}
+          />
         )}
       </Card>
 

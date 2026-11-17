@@ -116,9 +116,10 @@ export function describeShiftChange(
  * shifts. Runs after the admin's request has been answered (`after()`), so
  * it never slows the schedule down and never throws.
  *
- * Skipped for shifts that already ended (tidying up history), for an admin
- * scheduling themselves, for orgs that switched schedule notices off, and
- * for orgs without the paid `notifications` feature.
+ * Sent even when an admin schedules themselves, so their phone gets the
+ * shift too. Skipped for shifts that already ended (tidying up history), for
+ * orgs that switched schedule notices off, and for orgs without the paid
+ * `notifications` feature.
  */
 export async function notifyScheduleChange(
   change: ScheduleChange,
@@ -128,7 +129,6 @@ export async function notifyScheduleChange(
 ): Promise<boolean> {
   try {
     if (new Date(shift.shift_end).getTime() <= now.getTime()) return false;
-    if (shift.created_by === shift.user_id) return false;
 
     const [settingsRows, prefRows, members] = await Promise.all([
       dbGetAlertSettingsFor([shift.org_id]),

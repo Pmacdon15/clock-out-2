@@ -47,6 +47,7 @@ import {
   dbGetEntryBreaks,
   dbGetLocationSettings,
   dbGetOrgTimeEntries,
+  dbGetOverlappingScheduledShift,
   dbGetOvertimeSettings,
   dbGetPayPeriodSettings,
   dbGetPayRates,
@@ -105,6 +106,7 @@ import { punchReverseGeocode } from "./punch-geocode";
 import {
   evaluateShifts,
   invalidShiftReason,
+  OVERLAPPING_SHIFT_REASON,
   SCHEDULE_FUTURE_DAYS,
   SCHEDULE_PAST_DAYS,
 } from "./schedule-utils";
@@ -1601,6 +1603,24 @@ export async function createScheduledShiftDal(
     } as const);
   }
 
+  // One person can't be in two shifts at once; this also stops the same
+  // shift being published twice.
+  try {
+    if (
+      await dbGetOverlappingScheduledShift(
+        orgId,
+        memberId,
+        shiftStart,
+        shiftEnd,
+      )
+    ) {
+      return errAsync({ reason: OVERLAPPING_SHIFT_REASON } as const);
+    }
+  } catch (e) {
+    console.error("Error checking overlapping shifts: ", e);
+    return errAsync({ reason: "Failed to create shift" } as const);
+  }
+
   return await dbCreateScheduledShift(
     orgId,
     memberId,
@@ -1648,6 +1668,7 @@ export async function updateScheduledShiftDal(
   }
 
   let timeOff: TimeOffRequest[];
+  let overlapping: ScheduledShift | undefined;
   let shiftLocation: ShiftLocation | undefined;
   try {
     const existing = await dbGetScheduledShiftById(id, orgId);
@@ -1668,6 +1689,13 @@ export async function updateScheduledShiftDal(
       days.start,
       days.end,
     );
+    overlapping = await dbGetOverlappingScheduledShift(
+      orgId,
+      existing.user_id,
+      shiftStart,
+      shiftEnd,
+      id,
+    );
   } catch (e) {
     console.error("Error checking shift: ", e);
     return errAsync({ reason: "Failed to update shift" } as const);
@@ -1676,6 +1704,9 @@ export async function updateScheduledShiftDal(
     return errAsync({
       reason: `This member has approved time off on ${formatTimeOffDates(timeOff[0])}`,
     } as const);
+  }
+  if (overlapping) {
+    return errAsync({ reason: OVERLAPPING_SHIFT_REASON } as const);
   }
 
   return await dbUpdateScheduledShift(

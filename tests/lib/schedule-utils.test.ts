@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   countShiftStatuses,
   evaluateShifts,
+  findOverlappingShift,
   invalidShiftReason,
   isFlaggedStatus,
   LATE_GRACE_MINUTES,
@@ -196,5 +197,37 @@ describe("countShiftStatuses", () => {
       not_clocked_in: 0,
       no_show: 1,
     });
+  });
+});
+
+describe("findOverlappingShift", () => {
+  const shifts = [
+    {
+      id: 1,
+      user_id: "u1",
+      shift_start: "2026-01-05T09:00:00Z",
+      shift_end: "2026-01-05T17:00:00Z",
+    },
+  ];
+
+  it("finds the member's shift that overlaps", () => {
+    expect(
+      findOverlappingShift(shifts, "u1", at("12:00"), at("20:00"))?.id,
+    ).toBe(1);
+    expect(
+      findOverlappingShift(shifts, "u1", at("09:00"), at("17:00"))?.id,
+    ).toBe(1);
+  });
+
+  it("ignores other members, back-to-back shifts and the shift being moved", () => {
+    expect(
+      findOverlappingShift(shifts, "u2", at("12:00"), at("20:00")),
+    ).toBeUndefined();
+    expect(
+      findOverlappingShift(shifts, "u1", at("17:00"), at("21:00")),
+    ).toBeUndefined();
+    expect(
+      findOverlappingShift(shifts, "u1", at("12:00"), at("20:00"), 1),
+    ).toBeUndefined();
   });
 });

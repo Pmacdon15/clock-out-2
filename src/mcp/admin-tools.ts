@@ -20,6 +20,7 @@ import {
   dbGetApprovedTimeOffForPeriod,
   dbGetLocationSettings,
   dbGetOrgTimeEntries,
+  dbGetOverlappingScheduledShift,
   dbGetOvertimeSettings,
   dbGetPayPeriodSettings,
   dbGetScheduledShiftById,
@@ -68,6 +69,7 @@ import { notifyScheduleChange } from "@/lib/schedule-notify";
 import {
   evaluateShifts,
   invalidShiftReason,
+  OVERLAPPING_SHIFT_REASON,
   SCHEDULE_FUTURE_DAYS,
   SCHEDULE_PAST_DAYS,
   SHIFT_STATUS_LABELS,
@@ -764,6 +766,19 @@ export async function manageScheduleTool(
         isError: true,
       };
     }
+    const clash = await dbGetOverlappingScheduledShift(
+      org.orgId,
+      member.userId,
+      times.start,
+      times.end,
+    );
+    if (clash) {
+      return {
+        summary: `${member.name} is already scheduled ${describeShift(clash, tz)}, which overlaps that time. ${OVERLAPPING_SHIFT_REASON}.`,
+        data: { status: "overlapping_shift", shift_id: clash.id },
+        isError: true,
+      };
+    }
     const created = await dbCreateScheduledShift(
       org.orgId,
       member.userId,
@@ -905,6 +920,20 @@ export async function manageScheduleTool(
     return {
       summary: `${memberName} has approved time off on ${formatTimeOffDates(conflict)}, so the shift can't move there.`,
       data: { status: "time_off_conflict", time_off_request_id: conflict.id },
+      isError: true,
+    };
+  }
+  const clash = await dbGetOverlappingScheduledShift(
+    org.orgId,
+    existing.user_id,
+    times.start,
+    times.end,
+    existing.id,
+  );
+  if (clash) {
+    return {
+      summary: `${memberName} is already scheduled ${describeShift(clash, tz)}, so the shift can't move there.`,
+      data: { status: "overlapping_shift", shift_id: clash.id },
       isError: true,
     };
   }
