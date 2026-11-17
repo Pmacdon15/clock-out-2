@@ -43,13 +43,18 @@ import {
   TEST_REPORT_LIMIT,
 } from "./rate-limit";
 import { sendWeeklyReports } from "./reports";
-import { notifyScheduleChange } from "./schedule-notify";
+import {
+  notifyScheduleChange,
+  notifyWeeklyShiftsAdded,
+} from "./schedule-notify";
+import { MAX_REPEAT_WEEKS } from "./schedule-utils";
 import type { ShiftLocationInput } from "./shift-location";
 import type {
   BreakCountLimits,
   BreakLimits,
   BreakType,
   PayPeriodSettingsData,
+  ScheduledShift,
   TimeOffType,
 } from "./types";
 
@@ -525,6 +530,82 @@ export async function createScheduledShiftAction(
       return { success: false as const, error: err.reason };
     },
   );
+}
+
+/** One week's copy of a shift being repeated weekly. */
+export type WeeklyShiftOccurrence = {
+  shiftStart: string;
+  shiftEnd: string;
+  /** The shift's days on the admin's calendar, for the time off check. */
+  localDays?: { start: string; end: string } | null;
+};
+
+/**
+ * Publishes the same shift on the same weekday for several weeks (the browser
+ * works out each week's times, so they follow the admin's local clock). Weeks
+ * the member has time off or another shift are skipped and reported back; the
+ * member is told about the rest in one notice.
+ */
+export async function createWeeklyScheduledShiftsAction(
+  memberId: string,
+  occurrences: WeeklyShiftOccurrence[],
+  note?: string | null,
+  timezone?: string | null,
+  location?: ShiftLocationInput | null,
+) {
+  if (!Array.isArray(occurrences) || occurrences.length === 0) {
+    return { success: false as const, error: "Choose how many weeks" };
+  }
+  if (occurrences.length > MAX_REPEAT_WEEKS) {
+    return {
+      success: false as const,
+      error: `Shifts can repeat for up to ${MAX_REPEAT_WEEKS} weeks`,
+    };
+  }
+
+  const created: ScheduledShift[] = [];
+  const skipped: { shiftStart: string; reason: string }[] = [];
+  // One at a time, so each week is checked against the weeks before it.
+  for (const occurrence of occurrences) {
+    const result = await dalCreateScheduledShift(
+      memberId,
+      new Date(occurrence.shiftStart),
+      new Date(occurrence.shiftEnd),
+      note,
+      occurrence.localDays,
+      location,
+    );
+    if (result.isOk()) {
+      created.push(result.value);
+    } else {
+      skipped.push({
+        shiftStart: occurrence.shiftStart,
+        reason: result.error.reason,
+      });
+      // Not allowed at all: every other week would fail the same way.
+      if (
+        result.error.reason === "Unauthorized" ||
+        result.error.reason === "Member not found"
+      ) {
+        break;
+      }
+    }
+  }
+
+  // Every week was skipped (there is at least one): say why the first was.
+  if (created.length === 0) {
+    return { success: false as const, error: skipped[0].reason };
+  }
+
+  updateTag(`scheduled-shifts-${created[0].org_id}`);
+  after(() => notifyWeeklyShiftsAdded(created, timezone));
+  for (const shift of created) {
+    after(() => syncShiftReminderJob("added", shift).catch(logJobError));
+    after(() =>
+      mirrorShiftToGoogleCalendar("added", shift).catch(logCalendarError),
+    );
+  }
+  return { success: true as const, data: created, skipped };
 }
 
 export async function updateScheduledShiftAction(

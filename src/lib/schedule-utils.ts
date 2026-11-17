@@ -49,6 +49,34 @@ export function findOverlappingShift<
 /** Longest shift an admin can publish. */
 export const MAX_SHIFT_HOURS = 24;
 
+/** Most weeks a shift can be repeated for in one go (about six months). */
+export const MAX_REPEAT_WEEKS = 26;
+
+/** How many weeks the repeat options start at. */
+export const DEFAULT_REPEAT_WEEKS = 4;
+
+/**
+ * The same shift on the same weekday for `count` weeks, starting `fromWeek`
+ * weeks after it (0 includes the shift itself). Weeks are added on the local
+ * calendar, so a 9 AM shift stays at 9 AM across a daylight saving change.
+ */
+export function weeklyOccurrences(
+  shiftStart: Date,
+  shiftEnd: Date,
+  count: number,
+  fromWeek = 0,
+): { shiftStart: Date; shiftEnd: Date }[] {
+  const weeks = Math.max(0, Math.min(Math.floor(count), MAX_REPEAT_WEEKS));
+  return Array.from({ length: weeks }, (_, i) => {
+    const days = (fromWeek + i) * 7;
+    const start = new Date(shiftStart);
+    start.setDate(start.getDate() + days);
+    const end = new Date(shiftEnd);
+    end.setDate(end.getDate() + days);
+    return { shiftStart: start, shiftEnd: end };
+  });
+}
+
 /** How far back and ahead of today the schedule view loads. */
 export const SCHEDULE_PAST_DAYS = 14;
 export const SCHEDULE_FUTURE_DAYS = 28;

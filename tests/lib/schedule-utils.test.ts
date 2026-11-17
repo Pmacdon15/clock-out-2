@@ -6,6 +6,8 @@ import {
   invalidShiftReason,
   isFlaggedStatus,
   LATE_GRACE_MINUTES,
+  MAX_REPEAT_WEEKS,
+  weeklyOccurrences,
 } from "@/lib/schedule-utils";
 import type { ScheduledShift } from "@/lib/types";
 import { makeEntry } from "../utils";
@@ -232,5 +234,35 @@ describe("findOverlappingShift", () => {
     expect(
       findOverlappingShift(shifts, "u1", new Date("nope"), at("20:00")),
     ).toBeUndefined();
+  });
+});
+
+describe("weeklyOccurrences", () => {
+  const start = new Date("2026-01-05T22:00:00Z");
+  const end = new Date("2026-01-06T06:00:00Z");
+
+  it("repeats the shift on the same weekday, including it by default", () => {
+    const weeks = weeklyOccurrences(start, end, 3);
+    expect(weeks.map((w) => w.shiftStart.toISOString())).toEqual([
+      "2026-01-05T22:00:00.000Z",
+      "2026-01-12T22:00:00.000Z",
+      "2026-01-19T22:00:00.000Z",
+    ]);
+    // An overnight shift keeps its end on the next morning.
+    expect(weeks[2].shiftEnd.toISOString()).toBe("2026-01-20T06:00:00.000Z");
+  });
+
+  it("can start from the week after the shift", () => {
+    expect(
+      weeklyOccurrences(start, end, 2, 1).map((w) =>
+        w.shiftStart.toISOString(),
+      ),
+    ).toEqual(["2026-01-12T22:00:00.000Z", "2026-01-19T22:00:00.000Z"]);
+  });
+
+  it("caps the number of weeks and ignores nonsense counts", () => {
+    expect(weeklyOccurrences(start, end, 500)).toHaveLength(MAX_REPEAT_WEEKS);
+    expect(weeklyOccurrences(start, end, -2)).toEqual([]);
+    expect(weeklyOccurrences(start, end, 2.7)).toHaveLength(2);
   });
 });
