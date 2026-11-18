@@ -8,6 +8,7 @@ import type {
   NotificationPreferencesData,
   NotificationPreferencesInput,
   PushSubscriptionInput,
+  ScheduledShift,
 } from "./types";
 
 /** Bounds an admin may choose for each alert rule. */
@@ -24,6 +25,8 @@ export const DEFAULT_ALERT_SETTINGS: AlertSettingsInput = {
   forgot_clock_out_hours: 10,
   auto_clock_out_enabled: false,
   auto_clock_out_hours: 16,
+  auto_clock_in_scheduled: false,
+  auto_clock_out_scheduled: false,
   break_reminder_enabled: false,
   break_reminder_minutes: 45,
   notify_admins: true,
@@ -42,6 +45,20 @@ export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferencesInput = {
 
 const HOUR_MS = 3_600_000;
 const MINUTE_MS = 60_000;
+
+/**
+ * A member's open shift counts as their scheduled shift's (and is closed at
+ * its end) when it started no earlier than this before the scheduled start.
+ * Anything older is a forgotten punch from before, which the scheduled end
+ * must not stretch into a huge shift.
+ */
+export const SCHEDULED_EARLY_CLOCK_IN_MS = 2 * HOUR_MS;
+
+/**
+ * How long after a scheduled shift ends it can still be closed automatically
+ * (at its scheduled end), so a late or missed job is caught by the next one.
+ */
+export const SCHEDULED_CLOCK_OUT_WINDOW_MS = 24 * HOUR_MS;
 
 /** A stored row (numeric columns may arrive as strings) or defaults. */
 export function normalizeAlertSettings(
@@ -65,6 +82,8 @@ export function normalizeAlertSettings(
       data?.auto_clock_out_hours,
       d.auto_clock_out_hours,
     ),
+    auto_clock_in_scheduled: Boolean(data?.auto_clock_in_scheduled),
+    auto_clock_out_scheduled: Boolean(data?.auto_clock_out_scheduled),
     break_reminder_enabled: Boolean(data?.break_reminder_enabled),
     break_reminder_minutes: num(
       data?.break_reminder_minutes,
@@ -92,6 +111,8 @@ export function validateAlertSettings(
   const booleans = [
     input.forgot_clock_out_enabled,
     input.auto_clock_out_enabled,
+    input.auto_clock_in_scheduled,
+    input.auto_clock_out_scheduled,
     input.break_reminder_enabled,
     input.notify_admins,
     input.schedule_notifications,
@@ -121,6 +142,21 @@ export function validateAlertSettings(
     return "Auto clock-out must come after the forgot-to-clock-out reminder";
   }
   return null;
+}
+
+/**
+ * Whether saving `next` over `current` switches on a scheduled auto
+ * clock-in/out rule that is off now. Without the Scheduling plan feature that
+ * is refused; a rule saved on earlier can be left as it is.
+ */
+export function turnsOnScheduledRule(
+  current: AlertSettingsInput,
+  next: AlertSettingsInput,
+): boolean {
+  return (
+    (next.auto_clock_in_scheduled && !current.auto_clock_in_scheduled) ||
+    (next.auto_clock_out_scheduled && !current.auto_clock_out_scheduled)
+  );
 }
 
 export function normalizeNotificationPreferences(
@@ -278,6 +314,16 @@ export type PlannedAlert =
       hours: number;
     }
   | {
+      kind: "scheduled_clock_in";
+      key: string;
+      scheduled: ScheduledShift;
+    }
+  | {
+      kind: "scheduled_clock_out";
+      key: string;
+      scheduled: ScheduledShift;
+    }
+  | {
       kind: "forgot_clock_out";
       key: string;
       shift: OpenShift;
@@ -323,23 +369,53 @@ function remindsBeforeLimit(
  * - A break that reaches its type's limit gets one "your break is over"
  *   alert. This needs no alert rule: setting the limit is enough.
  * - Neither is sent for a break whose shift is being closed anyway.
+ * - With the scheduled rules on, a scheduled shift that is under way gets an
+ *   automatic clock-in, and one that has ended (within
+ *   {@link SCHEDULED_CLOCK_OUT_WINDOW_MS}) an automatic clock-out. Whether
+ *   the member is already in or out is checked when it is carried out.
  */
 export function planShiftAlerts({
   settings,
   breakSettings,
   shifts,
   breaks,
+  scheduled = [],
   now,
 }: {
   settings: AlertSettingsInput;
   breakSettings?: BreakSettingsData | null;
   shifts: OpenShift[];
   breaks: OpenShiftBreak[];
+  /** The org's scheduled shifts around now, for the scheduled rules. */
+  scheduled?: ScheduledShift[];
   now: Date;
 }): PlannedAlert[] {
   const planned: PlannedAlert[] = [];
   const closing = new Set<number>();
   const nowMs = now.getTime();
+
+  for (const shift of scheduled) {
+    const start = new Date(shift.shift_start).getTime();
+    const end = new Date(shift.shift_end).getTime();
+    if (settings.auto_clock_in_scheduled && start <= nowMs && nowMs < end) {
+      planned.push({
+        kind: "scheduled_clock_in",
+        key: `sched-in:${shift.id}`,
+        scheduled: shift,
+      });
+    }
+    if (
+      settings.auto_clock_out_scheduled &&
+      end <= nowMs &&
+      nowMs < end + SCHEDULED_CLOCK_OUT_WINDOW_MS
+    ) {
+      planned.push({
+        kind: "scheduled_clock_out",
+        key: `sched-out:${shift.id}`,
+        scheduled: shift,
+      });
+    }
+  }
 
   for (const shift of shifts) {
     const openMs = nowMs - new Date(shift.clock_in).getTime();
@@ -399,26 +475,52 @@ export function planShiftAlerts({
  * moment to wake the alert check. Mirrors {@link planShiftAlerts}: alerts
  * already sent (`claimed`) don't count, a shift's forgot-to-clock-out reminder
  * only counts while it comes before its automatic clock-out, and breaks on a
- * shift that is past its auto clock-out are left to that. Pure.
+ * shift that is past its auto clock-out are left to that. Scheduled shifts
+ * count from their start (clock-in, while the shift is still under way) and
+ * their end (clock-out, while still inside its window). Pure.
  */
 export function nextShiftAlertDueAt({
   settings,
   breakSettings,
   shifts,
   breaks,
+  scheduled = [],
   claimed,
+  now = new Date(),
 }: {
   settings: AlertSettingsInput;
   breakSettings?: BreakSettingsData | null;
   shifts: OpenShift[];
   breaks: OpenShiftBreak[];
+  scheduled?: ScheduledShift[];
   claimed: Set<string>;
+  now?: Date;
 }): Date | null {
   let next = Number.POSITIVE_INFINITY;
   const consider = (ms: number) => {
     if (ms < next) next = ms;
   };
   const autoAt = new Map<number, number>();
+  const nowMs = now.getTime();
+
+  for (const shift of scheduled) {
+    const start = new Date(shift.shift_start).getTime();
+    const end = new Date(shift.shift_end).getTime();
+    if (
+      settings.auto_clock_in_scheduled &&
+      end > nowMs &&
+      !claimed.has(`sched-in:${shift.id}`)
+    ) {
+      consider(start);
+    }
+    if (
+      settings.auto_clock_out_scheduled &&
+      end + SCHEDULED_CLOCK_OUT_WINDOW_MS > nowMs &&
+      !claimed.has(`sched-out:${shift.id}`)
+    ) {
+      consider(end);
+    }
+  }
 
   for (const shift of shifts) {
     const start = new Date(shift.clock_in).getTime();
@@ -466,10 +568,12 @@ export function nextShiftAlertDueAt({
 export function pendingAlertKeys(
   shifts: OpenShift[],
   breaks: OpenShiftBreak[],
+  scheduled: ScheduledShift[] = [],
 ): string[] {
   return [
     ...shifts.map((s) => `forgot:${s.id}`),
     ...breaks.flatMap((b) => [`break:${b.id}`, `break-over:${b.id}`]),
+    ...scheduled.flatMap((s) => [`sched-in:${s.id}`, `sched-out:${s.id}`]),
   ];
 }
 
@@ -505,9 +609,16 @@ const formatHours = (hours: number) =>
 
 /** The user the alert is about. */
 export function alertUserId(alert: PlannedAlert): string {
-  return alert.kind === "break_reminder" || alert.kind === "break_over"
-    ? alert.brk.user_id
-    : alert.shift.user_id;
+  switch (alert.kind) {
+    case "break_reminder":
+    case "break_over":
+      return alert.brk.user_id;
+    case "scheduled_clock_in":
+    case "scheduled_clock_out":
+      return alert.scheduled.user_id;
+    default:
+      return alert.shift.user_id;
+  }
 }
 
 export function alertCategory(alert: PlannedAlert): AlertCategory {
@@ -532,6 +643,34 @@ export function describeAlert(
   const tag = forAdmin ? `${alert.key}:admin` : alert.key;
 
   switch (alert.kind) {
+    case "scheduled_clock_in":
+      return forAdmin
+        ? {
+            title: `${memberName} was clocked in automatically`,
+            body: `${memberName}'s scheduled shift started, so they were clocked in.`,
+            url,
+            tag,
+          }
+        : {
+            title: "You're clocked in",
+            body: "Your scheduled shift has started, so you were clocked in automatically. Tap to open Clock Out.",
+            url,
+            tag,
+          };
+    case "scheduled_clock_out":
+      return forAdmin
+        ? {
+            title: `${memberName} was clocked out automatically`,
+            body: `${memberName}'s scheduled shift ended, so the shift was closed at its scheduled end. Review it in Hours.`,
+            url,
+            tag,
+          }
+        : {
+            title: "You're clocked out",
+            body: "Your scheduled shift has ended, so you were clocked out at its scheduled end. Ask an admin if the time needs correcting.",
+            url,
+            tag,
+          };
     case "forgot_clock_out": {
       const open = formatElapsed(alert.openMs);
       return forAdmin

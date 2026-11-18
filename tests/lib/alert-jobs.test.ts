@@ -17,8 +17,12 @@ const mocks = vi.hoisted(() => ({
   dbGetOpenShiftBreaks: vi.fn(),
   dbGetOpenShifts: vi.fn(),
   dbGetScheduledShiftsBetween: vi.fn(),
+  dbGetOrgScheduledShiftsOverlapping: vi.fn(),
   dbUpsertAlertJob: vi.fn(),
   processOrgAlerts: vi.fn(),
+  withScheduledRulesAllowed: vi.fn(),
+  turnOffScheduledClockRules: vi.fn(),
+  orgHasPlanFeatureStrict: vi.fn(),
   orgHasFeature: vi.fn(),
   dbGetBreakSettings: vi.fn(),
   dbGetScheduledShiftById: vi.fn(),
@@ -52,10 +56,17 @@ vi.mock("@/lib/alerts-db", () => ({
   dbGetOpenShiftBreaks: mocks.dbGetOpenShiftBreaks,
   dbGetOpenShifts: mocks.dbGetOpenShifts,
   dbGetScheduledShiftsBetween: mocks.dbGetScheduledShiftsBetween,
+  dbGetOrgScheduledShiftsOverlapping: mocks.dbGetOrgScheduledShiftsOverlapping,
   dbUpsertAlertJob: mocks.dbUpsertAlertJob,
 }));
 vi.mock("@/lib/alerts-runner", () => ({
   processOrgAlerts: mocks.processOrgAlerts,
+  withScheduledRulesAllowed: mocks.withScheduledRulesAllowed,
+  turnOffScheduledClockRules: mocks.turnOffScheduledClockRules,
+}));
+vi.mock("@/lib/plan-features", () => ({
+  SCHEDULING_FEATURE: "scheduling",
+  orgHasPlanFeatureStrict: mocks.orgHasPlanFeatureStrict,
 }));
 vi.mock("@/lib/billing", () => ({
   NOTIFICATIONS_FEATURE: "notifications",
@@ -90,6 +101,7 @@ import {
   scheduleJob,
   scheduleWeeklyDigestJobs,
   syncOrgShiftAlerts,
+  syncScheduledClockRules,
   syncShiftReminderJob,
   verifyQStashSignature,
 } from "@/lib/alert-jobs";
@@ -142,8 +154,12 @@ beforeEach(() => {
   mocks.dbGetBreakSettings.mockResolvedValue(undefined);
   mocks.dbGetActiveAlertSettings.mockResolvedValue([]);
   mocks.dbGetScheduledShiftsBetween.mockResolvedValue([]);
+  mocks.dbGetOrgScheduledShiftsOverlapping.mockResolvedValue([]);
   mocks.dbGetNotificationPreferencesFor.mockResolvedValue([]);
   mocks.processOrgAlerts.mockResolvedValue({ status: "ok", alerts: 2 });
+  mocks.withScheduledRulesAllowed.mockImplementation(
+    async (_orgId: string, settings: unknown) => settings,
+  );
   mocks.orgHasFeature.mockResolvedValue(true);
   mocks.runWeeklyScheduleDigests.mockResolvedValue({ digests: 3 });
   mocks.sendUpcomingShiftReminders.mockResolvedValue({ reminders: 1 });
@@ -415,6 +431,68 @@ describe("syncOrgShiftAlerts", () => {
         body: { type: "shift-alerts", orgId: "org_1", runAt: due.getTime() },
       }),
     );
+  });
+
+  it("schedules the next scheduled shift's automatic clock-in", async () => {
+    configure();
+    mocks.dbGetAlertSettingsFor.mockResolvedValue([
+      {
+        ...rules,
+        forgot_clock_out_enabled: false,
+        break_reminder_enabled: false,
+        auto_clock_in_scheduled: true,
+        auto_clock_out_scheduled: true,
+      },
+    ]);
+    const start = new Date(now.getTime() + 3 * HOUR);
+    mocks.dbGetOrgScheduledShiftsOverlapping.mockResolvedValue([
+      {
+        id: 8,
+        org_id: "org_1",
+        user_id: "u1",
+        shift_start: start,
+        shift_end: new Date(now.getTime() + 11 * HOUR),
+        note: null,
+        created_by: "admin",
+      },
+    ]);
+    await expect(syncOrgShiftAlerts("org_1", now)).resolves.toEqual(start);
+    expect(mocks.dbGetOrgScheduledShiftsOverlapping).toHaveBeenCalledWith(
+      "org_1",
+      new Date(now.getTime() - 24 * HOUR),
+      new Date(now.getTime() + 6 * 24 * HOUR),
+    );
+    expect(mocks.dbGetClaimedAlertKeys).toHaveBeenCalledWith([
+      "sched-in:8",
+      "sched-out:8",
+    ]);
+    expect(mocks.dbGetOpenShiftBreaks).not.toHaveBeenCalled();
+  });
+
+  it("schedules no clock-in once the plan drops Scheduling", async () => {
+    configure();
+    mocks.dbGetAlertSettingsFor.mockResolvedValue([
+      {
+        ...rules,
+        forgot_clock_out_enabled: false,
+        break_reminder_enabled: false,
+        auto_clock_in_scheduled: true,
+      },
+    ]);
+    mocks.withScheduledRulesAllowed.mockImplementation(
+      async (_orgId: string, settings: object) => ({
+        ...settings,
+        auto_clock_in_scheduled: false,
+        auto_clock_out_scheduled: false,
+      }),
+    );
+    await expect(syncOrgShiftAlerts("org_1", now)).resolves.toBeNull();
+    expect(mocks.withScheduledRulesAllowed).toHaveBeenCalledWith(
+      "org_1",
+      expect.objectContaining({ auto_clock_in_scheduled: true }),
+    );
+    expect(mocks.dbGetOrgScheduledShiftsOverlapping).not.toHaveBeenCalled();
+    expect(mocks.dbDeleteAlertJob).toHaveBeenCalledWith("shift-alerts:org_1");
   });
 
   it("never schedules in the past, nor before the retry floor", async () => {
@@ -792,5 +870,40 @@ describe("scheduleAllAlertJobs", () => {
 
   it("defaults to the current time", async () => {
     await expect(scheduleAllAlertJobs()).resolves.toMatchObject({ orgs: 0 });
+  });
+});
+
+describe("syncScheduledClockRules", () => {
+  it("leaves orgs that still have Scheduling alone", async () => {
+    mocks.orgHasPlanFeatureStrict.mockResolvedValue(true);
+    await expect(syncScheduledClockRules("org_1")).resolves.toBe(false);
+    expect(mocks.orgHasPlanFeatureStrict).toHaveBeenCalledWith(
+      "org_1",
+      "scheduling",
+    );
+    expect(mocks.turnOffScheduledClockRules).not.toHaveBeenCalled();
+  });
+
+  it("does nothing more when no scheduled rule was on", async () => {
+    mocks.orgHasPlanFeatureStrict.mockResolvedValue(false);
+    mocks.turnOffScheduledClockRules.mockResolvedValue(false);
+    await expect(syncScheduledClockRules("org_1")).resolves.toBe(false);
+    expect(mocks.after).not.toHaveBeenCalled();
+  });
+
+  it("turns the rules off and re-times the org's job", async () => {
+    configure();
+    mocks.orgHasPlanFeatureStrict.mockResolvedValue(false);
+    mocks.turnOffScheduledClockRules.mockResolvedValue(true);
+    await expect(syncScheduledClockRules("org_1")).resolves.toBe(true);
+    expect(mocks.turnOffScheduledClockRules).toHaveBeenCalledWith("org_1");
+    expect(mocks.after).toHaveBeenCalled();
+  });
+
+  it("throws when Clerk can't say, so the webhook retries", async () => {
+    mocks.orgHasPlanFeatureStrict.mockRejectedValue(new Error("clerk down"));
+    await expect(syncScheduledClockRules("org_1")).rejects.toThrow(
+      "clerk down",
+    );
   });
 });

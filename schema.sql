@@ -145,6 +145,9 @@ CREATE TABLE IF NOT EXISTS alert_settings (
     forgot_clock_out_hours DOUBLE PRECISION NOT NULL DEFAULT 10,
     auto_clock_out_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     auto_clock_out_hours DOUBLE PRECISION NOT NULL DEFAULT 16,
+    -- Clock members in / out at their scheduled shift's start / end.
+    auto_clock_in_scheduled BOOLEAN NOT NULL DEFAULT FALSE,
+    auto_clock_out_scheduled BOOLEAN NOT NULL DEFAULT FALSE,
     break_reminder_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     break_reminder_minutes INTEGER NOT NULL DEFAULT 45,
     notify_admins BOOLEAN NOT NULL DEFAULT TRUE,

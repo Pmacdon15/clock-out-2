@@ -521,6 +521,8 @@ export async function createScheduledShiftAction(
       updateTag(`scheduled-shifts-${shift.org_id}`);
       after(() => notifyScheduleChange("added", shift, timezone));
       after(() => syncShiftReminderJob("added", shift).catch(logJobError));
+      // The org's scheduled auto clock-in/out follows the schedule.
+      queueShiftAlertSync(shift.org_id);
       after(() =>
         mirrorShiftToGoogleCalendar("added", shift).catch(logCalendarError),
       );
@@ -599,6 +601,7 @@ export async function createWeeklyScheduledShiftsAction(
 
   updateTag(`scheduled-shifts-${created[0].org_id}`);
   after(() => notifyWeeklyShiftsAdded(created, timezone));
+  queueShiftAlertSync(created[0].org_id);
   for (const shift of created) {
     after(() => syncShiftReminderJob("added", shift).catch(logJobError));
     after(() =>
@@ -632,6 +635,8 @@ export async function updateScheduledShiftAction(
       updateTag(`scheduled-shifts-${shift.org_id}`);
       after(() => notifyScheduleChange("changed", shift, timezone));
       after(() => syncShiftReminderJob("changed", shift).catch(logJobError));
+      // The org's scheduled auto clock-in/out follows the schedule.
+      queueShiftAlertSync(shift.org_id);
       after(() =>
         mirrorShiftToGoogleCalendar("changed", shift).catch(logCalendarError),
       );
@@ -654,6 +659,8 @@ export async function deleteScheduledShiftAction(
       updateTag(`scheduled-shifts-${shift.org_id}`);
       after(() => notifyScheduleChange("removed", shift, timezone));
       after(() => syncShiftReminderJob("removed", shift).catch(logJobError));
+      // The org's scheduled auto clock-in/out follows the schedule.
+      queueShiftAlertSync(shift.org_id);
       after(() =>
         mirrorShiftToGoogleCalendar("removed", shift).catch(logCalendarError),
       );

@@ -5,6 +5,7 @@ import {
   nextShiftAlertDueAt,
   normalizeAlertSettings,
   pendingAlertKeys,
+  SCHEDULED_CLOCK_OUT_WINDOW_MS,
 } from "./alerts";
 import {
   dbDeleteAlertJob,
@@ -15,14 +16,20 @@ import {
   dbGetNotificationPreferencesFor,
   dbGetOpenShiftBreaks,
   dbGetOpenShifts,
+  dbGetOrgScheduledShiftsOverlapping,
   dbGetScheduledShiftsBetween,
   dbUpsertAlertJob,
 } from "./alerts-db";
-import { processOrgAlerts } from "./alerts-runner";
+import {
+  processOrgAlerts,
+  turnOffScheduledClockRules,
+  withScheduledRulesAllowed,
+} from "./alerts-runner";
 import { NOTIFICATIONS_FEATURE, orgHasFeature } from "./billing";
 import { getBreakLimits } from "./break-utils";
 import { dbGetBreakSettings, dbGetScheduledShiftById } from "./db";
 import { appUrl } from "./notify";
+import { orgHasPlanFeatureStrict, SCHEDULING_FEATURE } from "./plan-features";
 import {
   DIGEST_HOUR,
   resolveTimezone,
@@ -207,6 +214,19 @@ export const upcomingShiftJobKey = (shiftId: number) => `upcoming:${shiftId}`;
 /* ------------------------------------------------------- shift alerts -- */
 
 /**
+ * After a billing change: when the org's plan no longer includes Scheduling,
+ * switches its scheduled auto clock-in/out rules off and re-times its alert
+ * job. Throws when Clerk can't say, so the webhook can ask Clerk to retry.
+ * Returns whether the rules were turned off.
+ */
+export async function syncScheduledClockRules(orgId: string): Promise<boolean> {
+  if (await orgHasPlanFeatureStrict(orgId, SCHEDULING_FEATURE)) return false;
+  if (!(await turnOffScheduledClockRules(orgId))) return false;
+  queueShiftAlertSync(orgId);
+  return true;
+}
+
+/**
  * (Re)schedules the org's single shift-alert job for when its next alert
  * falls due, or cancels it when nothing is pending. `minRunAt` (ms) keeps a
  * just-dispatched job from re-firing immediately.
@@ -222,34 +242,52 @@ export async function syncOrgShiftAlerts(
     dbGetAlertSettingsFor([orgId]),
     dbGetBreakSettings(orgId).catch(() => undefined),
   ]);
-  const settings = normalizeAlertSettings(row);
+  const settings = await withScheduledRulesAllowed(
+    orgId,
+    normalizeAlertSettings(row),
+  );
   // A break time limit sends "your break is over" even with every rule off.
   const anyBreakLimit = Object.values(getBreakLimits(breakSettings)).some(
     (limit) => limit !== null,
   );
+  const scheduledRules =
+    settings.auto_clock_in_scheduled || settings.auto_clock_out_scheduled;
   const anyRule =
     settings.forgot_clock_out_enabled ||
     settings.auto_clock_out_enabled ||
     settings.break_reminder_enabled ||
+    scheduledRules ||
     anyBreakLimit;
   if (!anyRule) {
     await cancelJob(key);
     return null;
   }
 
-  const [shifts, breaks] = await Promise.all([
+  const [shifts, breaks, scheduled] = await Promise.all([
     dbGetOpenShifts(orgId),
     settings.break_reminder_enabled || anyBreakLimit
       ? dbGetOpenShiftBreaks(orgId)
       : Promise.resolve([]),
+    // Shifts further out than the horizon are picked up by the daily sweep.
+    scheduledRules
+      ? dbGetOrgScheduledShiftsOverlapping(
+          orgId,
+          new Date(now.getTime() - SCHEDULED_CLOCK_OUT_WINDOW_MS),
+          new Date(now.getTime() + SCHEDULE_HORIZON_MS),
+        )
+      : Promise.resolve([]),
   ]);
-  const claimed = await dbGetClaimedAlertKeys(pendingAlertKeys(shifts, breaks));
+  const claimed = await dbGetClaimedAlertKeys(
+    pendingAlertKeys(shifts, breaks, scheduled),
+  );
   const due = nextShiftAlertDueAt({
     settings,
     breakSettings,
     shifts,
     breaks,
+    scheduled,
     claimed,
+    now,
   });
   if (!due) {
     await cancelJob(key);

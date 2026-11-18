@@ -1,6 +1,7 @@
 import type { WebhookEvent } from "@clerk/nextjs/server";
 import { verifyWebhook } from "@clerk/nextjs/webhooks";
 import type { NextRequest } from "next/server";
+import { syncScheduledClockRules } from "@/lib/alert-jobs";
 import { syncMembershipLimit } from "@/lib/webhooks/clerk";
 
 /** The organization a billing event is for, or null for a user's own billing. */
@@ -38,11 +39,13 @@ export async function POST(req: NextRequest) {
     }
     try {
       await syncMembershipLimit(orgId);
+      // Losing Scheduling turns off auto clock-in/out at scheduled shifts.
+      await syncScheduledClockRules(orgId);
     } catch (error) {
       console.error("Error handling webhook event:", error);
       // A non-2xx response makes Clerk retry, so a transient billing API
       // error can't leave the org on a cap it no longer pays for.
-      return new Response("Couldn't sync the membership limit", {
+      return new Response("Couldn't sync the org's plan", {
         status: 500,
       });
     }

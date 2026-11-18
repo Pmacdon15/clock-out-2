@@ -144,6 +144,48 @@ describe("updateAlertSettingsDal", () => {
     expect(mocks.dbUpdateAlertSettings).toHaveBeenCalledWith("org_1", valid);
   });
 
+  it("needs Scheduling to turn on a scheduled auto clock rule", async () => {
+    const noScheduling = {
+      ...admin,
+      has: vi.fn(
+        ({ feature }: { feature: string }) => feature !== "scheduling",
+      ),
+    };
+    mocks.protect.mockResolvedValue(noScheduling);
+    mocks.dbGetAlertSettings.mockResolvedValue(undefined);
+    const result = await updateAlertSettingsDal({
+      ...valid,
+      auto_clock_out_scheduled: true,
+    });
+    expect(result._unsafeUnwrapErr().reason).toContain(
+      "Scheduling is only available on paid plans",
+    );
+    expect(mocks.dbUpdateAlertSettings).not.toHaveBeenCalled();
+  });
+
+  it("keeps a scheduled rule saved on before the plan changed", async () => {
+    mocks.protect.mockResolvedValue({ ...admin, has: vi.fn(() => false) });
+    mocks.dbGetAlertSettings.mockResolvedValue({
+      org_id: "org_1",
+      auto_clock_in_scheduled: true,
+    });
+    mocks.dbUpdateAlertSettings.mockResolvedValue({ org_id: "org_1" });
+    const input = { ...valid, auto_clock_in_scheduled: true };
+    expect((await updateAlertSettingsDal(input)).isOk()).toBe(true);
+    expect(mocks.dbUpdateAlertSettings).toHaveBeenCalledWith("org_1", input);
+  });
+
+  it("turns scheduled rules on with Scheduling, without a lookup", async () => {
+    mocks.dbUpdateAlertSettings.mockResolvedValue({ org_id: "org_1" });
+    const input = {
+      ...valid,
+      auto_clock_in_scheduled: true,
+      auto_clock_out_scheduled: true,
+    };
+    expect((await updateAlertSettingsDal(input)).isOk()).toBe(true);
+    expect(mocks.dbGetAlertSettings).not.toHaveBeenCalled();
+  });
+
   it("reports write failures", async () => {
     mocks.dbUpdateAlertSettings.mockRejectedValue(new Error("db"));
     expect((await updateAlertSettingsDal(valid))._unsafeUnwrapErr()).toEqual({

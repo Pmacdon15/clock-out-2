@@ -681,7 +681,7 @@ export function registerClockOutTools(server: McpServer) {
     {
       title: "View or update shift alert rules",
       description:
-        "Views or updates the organization's alert rules: forgot-to-clock-out reminders, automatic clock-out, still-on-break reminders, whether admins are copied, and schedule notices to members. Only the fields passed change. Anyone can view; updating is admin-only ('org:admin').",
+        "Views or updates the organization's alert rules: forgot-to-clock-out reminders, automatic clock-out after a time limit, automatic clock-in at each member's scheduled shift start (auto_clock_in_scheduled) and clock-out at its scheduled end (auto_clock_out_scheduled), still-on-break reminders, whether admins are copied, and schedule notices to members. Only the fields passed change. Anyone can view; updating is admin-only ('org:admin').",
       inputSchema: portable(manageAlertSettingsInputSchema),
       annotations: {
         readOnlyHint: false,

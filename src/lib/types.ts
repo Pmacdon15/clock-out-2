@@ -218,6 +218,10 @@ export type AlertSettingsData = {
   /** Close shifts automatically at clock-in + `auto_clock_out_hours`. */
   auto_clock_out_enabled: boolean;
   auto_clock_out_hours: number;
+  /** Clock members in automatically when a scheduled shift of theirs starts. */
+  auto_clock_in_scheduled: boolean;
+  /** Clock members out automatically when a scheduled shift of theirs ends. */
+  auto_clock_out_scheduled: boolean;
   /** Remind members still on a break after `break_reminder_minutes`. */
   break_reminder_enabled: boolean;
   break_reminder_minutes: number;

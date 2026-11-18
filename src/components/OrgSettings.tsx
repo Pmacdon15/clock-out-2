@@ -66,12 +66,15 @@ interface OrgSettingsProps {
   hasGeofencing?: boolean;
   /** False when the org's plan does not include the `notifications` feature. */
   hasNotifications?: boolean;
+  /** False when the org's plan does not include the `scheduling` feature. */
+  hasScheduling?: boolean;
 }
 
 export default function OrgSettings({
   hasReporting,
   hasGeofencing = false,
   hasNotifications = false,
+  hasScheduling = false,
   orgSettingsPromise,
   breakSettingsPromise,
   locationSettingsPromise,
@@ -168,6 +171,7 @@ export default function OrgSettings({
       {alertSettingsResult && (
         <AlertSettings
           hasNotifications={hasNotifications}
+          hasScheduling={hasScheduling}
           initialData={
             alertSettingsResult.ok ? alertSettingsResult.value : null
           }
