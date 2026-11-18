@@ -35,6 +35,8 @@ const m = vi.hoisted(() => ({
   dbGetAlertSettings: vi.fn(),
   dbUpdateAlertSettings: vi.fn(),
   searchAddress: vi.fn(async () => [] as unknown[]),
+  queueShiftAlertSync: vi.fn(),
+  syncShiftReminderJob: vi.fn(async () => false),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({
@@ -58,6 +60,10 @@ vi.mock("@/lib/schedule-notify", () => ({
 vi.mock("@/lib/geoapify", () => ({
   reverseGeocode: vi.fn(async () => null),
   searchAddress: m.searchAddress,
+}));
+vi.mock("@/lib/alert-jobs", () => ({
+  queueShiftAlertSync: m.queueShiftAlertSync,
+  syncShiftReminderJob: m.syncShiftReminderJob,
 }));
 vi.mock("@/lib/alerts-db", () => ({
   dbGetAlertSettings: m.dbGetAlertSettings,
@@ -229,6 +235,9 @@ describe("manage_schedule", () => {
       expire: 0,
     });
     expect(m.notifyScheduleChange).toHaveBeenCalledWith("added", shift, TZ);
+    // The reminder and the org's scheduled auto clock-in/out follow it.
+    expect(m.syncShiftReminderJob).toHaveBeenCalledWith("added", shift);
+    expect(m.queueShiftAlertSync).toHaveBeenCalledWith("org_1");
   });
 
   it("refuses a shift on the member's approved time off", async () => {
@@ -1031,6 +1040,42 @@ describe("manage_alert_settings", () => {
         schedule_notifications: true,
       }),
     );
+  });
+
+  it("turns on automatic clock-in/out at scheduled shifts", async () => {
+    m.dbGetAlertSettings.mockResolvedValue(undefined);
+    m.dbUpdateAlertSettings.mockImplementation(async (_org, input) => input);
+    const res = await manageAlertSettingsTool(admin, {
+      action: "update",
+      auto_clock_in_scheduled: true,
+      auto_clock_out_scheduled: true,
+    });
+    expect(res.data.status).toBe("updated");
+    expect(m.queueShiftAlertSync).toHaveBeenCalledWith("org_1");
+    expect(res.summary).toContain("clock-in at scheduled shift start");
+    expect(res.summary).toContain("clock-out at scheduled shift end");
+    expect(m.dbUpdateAlertSettings).toHaveBeenCalledWith(
+      "org_1",
+      expect.objectContaining({
+        auto_clock_in_scheduled: true,
+        auto_clock_out_scheduled: true,
+        auto_clock_out_enabled: false,
+      }),
+    );
+  });
+
+  it("shows the scheduled rules when viewing", async () => {
+    m.dbGetAlertSettings.mockResolvedValue({
+      org_id: "org_1",
+      auto_clock_out_scheduled: true,
+    });
+    const res = await manageAlertSettingsTool(admin, { action: "get" });
+    expect(res.data.settings).toMatchObject({
+      auto_clock_in_scheduled: false,
+      auto_clock_out_scheduled: true,
+    });
+    expect(res.summary).toContain("clock-out at scheduled shift end");
+    expect(res.summary).not.toContain("clock-in at scheduled shift start");
   });
 
   it("forbids members from changing it", async () => {

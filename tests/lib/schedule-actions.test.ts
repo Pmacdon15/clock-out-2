@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   notifyScheduleChange: vi.fn(),
   notifyWeeklyShiftsAdded: vi.fn(),
   syncShiftReminderJob: vi.fn(() => Promise.resolve(true)),
+  queueShiftAlertSync: vi.fn(),
   mirrorShiftToGoogleCalendar: vi.fn(() => Promise.resolve()),
 }));
 
@@ -32,7 +33,7 @@ vi.mock("@/lib/rate-limit", () => ({
   TEST_REPORT_LIMIT: { name: "test-report" },
 }));
 vi.mock("@/lib/alert-jobs", () => ({
-  queueShiftAlertSync: vi.fn(),
+  queueShiftAlertSync: mocks.queueShiftAlertSync,
   syncShiftReminderJob: mocks.syncShiftReminderJob,
 }));
 
@@ -79,6 +80,7 @@ describe("createScheduledShiftAction", () => {
       "America/Regina",
     );
     expect(mocks.syncShiftReminderJob).toHaveBeenCalledWith("added", shift);
+    expect(mocks.queueShiftAlertSync).toHaveBeenCalledWith(shift.org_id);
     expect(mocks.createScheduledShiftDal).toHaveBeenCalledWith(
       "user_1",
       new Date("2026-01-05T09:00:00.000Z"),
@@ -113,6 +115,7 @@ describe("deleteScheduledShiftAction", () => {
       "UTC",
     );
     expect(mocks.syncShiftReminderJob).toHaveBeenCalledWith("removed", shift);
+    expect(mocks.queueShiftAlertSync).toHaveBeenCalledWith(shift.org_id);
   });
 
   it("returns the error", async () => {
@@ -153,6 +156,7 @@ describe("updateScheduledShiftAction", () => {
       "UTC",
     );
     expect(mocks.syncShiftReminderJob).toHaveBeenCalledWith("changed", shift);
+    expect(mocks.queueShiftAlertSync).toHaveBeenCalledWith(shift.org_id);
   });
 
   it("returns the error", async () => {
@@ -271,6 +275,7 @@ describe("createWeeklyScheduledShiftsAction", () => {
     );
     expect(mocks.notifyScheduleChange).not.toHaveBeenCalled();
     expect(mocks.syncShiftReminderJob).toHaveBeenCalledTimes(2);
+    expect(mocks.queueShiftAlertSync).toHaveBeenCalledTimes(1);
     expect(mocks.mirrorShiftToGoogleCalendar).toHaveBeenCalledWith(
       "added",
       third,
