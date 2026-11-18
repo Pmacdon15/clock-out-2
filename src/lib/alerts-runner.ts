@@ -13,6 +13,7 @@ import {
 import {
   dbAutoClockOut,
   dbClaimAlert,
+  dbDisableScheduledClockRules,
   dbGetActiveAlertSettings,
   dbGetOpenShiftBreaks,
   dbGetOpenShifts,
@@ -25,7 +26,7 @@ import { getBreakLimits } from "./break-utils";
 import { fetchAllPages } from "./clerk-pagination";
 import { dbGetBreakSettings } from "./db";
 import { type Delivery, deliver } from "./notify";
-import { orgHasPlanFeature, SCHEDULING_FEATURE } from "./plan-features";
+import { orgHasPlanFeatureStrict, SCHEDULING_FEATURE } from "./plan-features";
 import type { AlertSettingsData, AlertSettingsInput } from "./types";
 
 export type OrgMember = {
@@ -136,10 +137,29 @@ export function alertNotifiesAdmins(
 }
 
 /**
+ * Switches the org's scheduled auto clock-in/out rules off for good (they're
+ * saved off, so the Settings page shows them off too). Returns whether one
+ * was on.
+ */
+export async function turnOffScheduledClockRules(
+  orgId: string,
+): Promise<boolean> {
+  const row = await dbDisableScheduledClockRules(orgId);
+  if (!row) return false;
+  console.log(
+    `[Alerts] Scheduling is off for ${orgId}: turned off auto clock-in/out`,
+  );
+  revalidateTag(`alert-settings-${orgId}`, { expire: 0 });
+  return true;
+}
+
+/**
  * The rules as they apply to this org: the scheduled auto clock-in/out rules
  * act on the schedule, so they're off while the org's plan doesn't include
- * Scheduling (its schedule is hidden then, and its reminders stop). Only asks
- * Clerk when one of them is on.
+ * Scheduling (its schedule is hidden then, and its reminders stop), and are
+ * then switched off for good. Only asks Clerk when one of them is on. When
+ * Clerk can't be reached they're skipped this time but left saved on, so a
+ * billing outage never turns them off.
  */
 export async function withScheduledRulesAllowed(
   orgId: string,
@@ -148,12 +168,26 @@ export async function withScheduledRulesAllowed(
   if (!settings.auto_clock_in_scheduled && !settings.auto_clock_out_scheduled) {
     return settings;
   }
-  if (await orgHasPlanFeature(orgId, SCHEDULING_FEATURE)) return settings;
-  return {
+  const off = {
     ...settings,
     auto_clock_in_scheduled: false,
     auto_clock_out_scheduled: false,
   };
+  let hasScheduling: boolean;
+  try {
+    hasScheduling = await orgHasPlanFeatureStrict(orgId, SCHEDULING_FEATURE);
+  } catch (error) {
+    console.error(`[Alerts] Plan unavailable for ${orgId}:`, error);
+    return off;
+  }
+  if (hasScheduling) return settings;
+  await turnOffScheduledClockRules(orgId).catch((error) => {
+    console.error(
+      `[Alerts] Couldn't turn off auto clocking for ${orgId}:`,
+      error,
+    );
+  });
+  return off;
 }
 
 /** Alerts that change someone's clock, which run on every plan. */

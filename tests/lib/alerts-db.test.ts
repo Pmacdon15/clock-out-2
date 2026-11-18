@@ -132,6 +132,23 @@ describe("alert settings", () => {
     ]);
   });
 
+  it("switches off only scheduled rules that were on", async () => {
+    await primeTables();
+    sql.mockResolvedValueOnce([{ org_id: "o1" }]);
+    await expect(adb.dbDisableScheduledClockRules("o1")).resolves.toEqual({
+      org_id: "o1",
+    });
+    expect(textOf(0)).toContain("SET auto_clock_in_scheduled = FALSE");
+    expect(textOf(0)).toContain(
+      "AND (auto_clock_in_scheduled OR auto_clock_out_scheduled)",
+    );
+    expect(valuesOf(0)).toEqual(["o1"]);
+    sql.mockResolvedValueOnce([]);
+    await expect(
+      adb.dbDisableScheduledClockRules("o1"),
+    ).resolves.toBeUndefined();
+  });
+
   it("lists orgs with any rule switched on", async () => {
     await primeTables();
     sql.mockResolvedValueOnce([{ org_id: "o1" }]);

@@ -21,6 +21,8 @@ const mocks = vi.hoisted(() => ({
   dbUpsertAlertJob: vi.fn(),
   processOrgAlerts: vi.fn(),
   withScheduledRulesAllowed: vi.fn(),
+  turnOffScheduledClockRules: vi.fn(),
+  orgHasPlanFeatureStrict: vi.fn(),
   orgHasFeature: vi.fn(),
   dbGetBreakSettings: vi.fn(),
   dbGetScheduledShiftById: vi.fn(),
@@ -60,6 +62,11 @@ vi.mock("@/lib/alerts-db", () => ({
 vi.mock("@/lib/alerts-runner", () => ({
   processOrgAlerts: mocks.processOrgAlerts,
   withScheduledRulesAllowed: mocks.withScheduledRulesAllowed,
+  turnOffScheduledClockRules: mocks.turnOffScheduledClockRules,
+}));
+vi.mock("@/lib/plan-features", () => ({
+  SCHEDULING_FEATURE: "scheduling",
+  orgHasPlanFeatureStrict: mocks.orgHasPlanFeatureStrict,
 }));
 vi.mock("@/lib/billing", () => ({
   NOTIFICATIONS_FEATURE: "notifications",
@@ -94,6 +101,7 @@ import {
   scheduleJob,
   scheduleWeeklyDigestJobs,
   syncOrgShiftAlerts,
+  syncScheduledClockRules,
   syncShiftReminderJob,
   verifyQStashSignature,
 } from "@/lib/alert-jobs";
@@ -862,5 +870,40 @@ describe("scheduleAllAlertJobs", () => {
 
   it("defaults to the current time", async () => {
     await expect(scheduleAllAlertJobs()).resolves.toMatchObject({ orgs: 0 });
+  });
+});
+
+describe("syncScheduledClockRules", () => {
+  it("leaves orgs that still have Scheduling alone", async () => {
+    mocks.orgHasPlanFeatureStrict.mockResolvedValue(true);
+    await expect(syncScheduledClockRules("org_1")).resolves.toBe(false);
+    expect(mocks.orgHasPlanFeatureStrict).toHaveBeenCalledWith(
+      "org_1",
+      "scheduling",
+    );
+    expect(mocks.turnOffScheduledClockRules).not.toHaveBeenCalled();
+  });
+
+  it("does nothing more when no scheduled rule was on", async () => {
+    mocks.orgHasPlanFeatureStrict.mockResolvedValue(false);
+    mocks.turnOffScheduledClockRules.mockResolvedValue(false);
+    await expect(syncScheduledClockRules("org_1")).resolves.toBe(false);
+    expect(mocks.after).not.toHaveBeenCalled();
+  });
+
+  it("turns the rules off and re-times the org's job", async () => {
+    configure();
+    mocks.orgHasPlanFeatureStrict.mockResolvedValue(false);
+    mocks.turnOffScheduledClockRules.mockResolvedValue(true);
+    await expect(syncScheduledClockRules("org_1")).resolves.toBe(true);
+    expect(mocks.turnOffScheduledClockRules).toHaveBeenCalledWith("org_1");
+    expect(mocks.after).toHaveBeenCalled();
+  });
+
+  it("throws when Clerk can't say, so the webhook retries", async () => {
+    mocks.orgHasPlanFeatureStrict.mockRejectedValue(new Error("clerk down"));
+    await expect(syncScheduledClockRules("org_1")).rejects.toThrow(
+      "clerk down",
+    );
   });
 });

@@ -57,6 +57,26 @@ describe("AlertSettings", () => {
     expect(screen.getByLabelText(/Forgot to clock out/)).toBeEnabled();
   });
 
+  it("shows saved-on scheduled rules as off without Scheduling", () => {
+    render(
+      <AlertSettings
+        hasNotifications
+        initialData={{
+          org_id: "org_1",
+          ...DEFAULT_ALERT_SETTINGS,
+          auto_clock_in_scheduled: true,
+          auto_clock_out_scheduled: true,
+        }}
+      />,
+    );
+    expect(
+      screen.getByLabelText(/Auto clock-in at scheduled start/),
+    ).not.toBeChecked();
+    expect(
+      screen.getByLabelText(/Auto clock-out at scheduled end/),
+    ).not.toBeChecked();
+  });
+
   it("saves every rule the admin turns on", async () => {
     mocks.updateAlertSettingsAction.mockResolvedValue({
       success: true,

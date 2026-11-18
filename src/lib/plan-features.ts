@@ -22,6 +22,24 @@ export const TIME_OFF_UPGRADE_REASON =
   "Time off is only available on paid plans. Upgrade your organization to unlock it.";
 
 /**
+ * Whether an org's plan includes a feature, throwing when Clerk can't say.
+ * For decisions that are written down (turning a setting off for good), where
+ * a billing outage must not count as a downgrade.
+ */
+export async function orgHasPlanFeatureStrict(
+  orgId: string,
+  slug: string,
+): Promise<boolean> {
+  const client = await clerkClient();
+  const subscription =
+    await client.billing.getOrganizationBillingSubscription(orgId);
+  return subscription.subscriptionItems.some(
+    (item: { plan?: { features?: { slug: string }[] } | null }) =>
+      item.plan?.features?.some((f) => f.slug === slug),
+  );
+}
+
+/**
  * Whether an org's plan includes a feature, for code with no signed-in
  * session to ask (cron jobs, MCP). Any billing error counts as "no", the same
  * way a session without the feature does.
@@ -31,13 +49,7 @@ export async function orgHasPlanFeature(
   slug: string,
 ): Promise<boolean> {
   try {
-    const client = await clerkClient();
-    const subscription =
-      await client.billing.getOrganizationBillingSubscription(orgId);
-    return subscription.subscriptionItems.some(
-      (item: { plan?: { features?: { slug: string }[] } | null }) =>
-        item.plan?.features?.some((f) => f.slug === slug),
-    );
+    return await orgHasPlanFeatureStrict(orgId, slug);
   } catch {
     return false;
   }

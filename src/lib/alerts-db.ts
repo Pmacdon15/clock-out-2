@@ -189,6 +189,25 @@ export async function dbUpdateAlertSettings(
 }
 
 /**
+ * Switches off an org's scheduled auto clock-in/out rules (its plan no longer
+ * has Scheduling). Returns the row only when one of them was on, so callers
+ * know whether anything changed.
+ */
+export async function dbDisableScheduledClockRules(orgId: string) {
+  await ensureAlertTables();
+  const [updated] = await sql`
+		UPDATE alert_settings
+		SET auto_clock_in_scheduled = FALSE,
+			auto_clock_out_scheduled = FALSE,
+			updated_at = NOW()
+		WHERE org_id = ${orgId}
+		AND (auto_clock_in_scheduled OR auto_clock_out_scheduled)
+		RETURNING *
+	`;
+  return updated as AlertSettingsData | undefined;
+}
+
+/**
  * Every org with at least one alert rule switched on. Uncached: the cron must
  * see a rule the moment an admin saves it.
  */

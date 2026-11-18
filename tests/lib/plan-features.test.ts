@@ -15,6 +15,7 @@ vi.mock("@clerk/nextjs/server", () => ({
 
 import {
   orgHasPlanFeature,
+  orgHasPlanFeatureStrict,
   SCHEDULING_FEATURE,
   TIME_OFF_FEATURE,
 } from "@/lib/plan-features";
@@ -43,6 +44,15 @@ describe("orgHasPlanFeature", () => {
     await expect(orgHasPlanFeature("org_1", TIME_OFF_FEATURE)).resolves.toBe(
       false,
     );
+  });
+
+  it("throws a billing error from the strict check", async () => {
+    mocks.getOrganizationBillingSubscription.mockRejectedValue(
+      new Error("clerk down"),
+    );
+    await expect(
+      orgHasPlanFeatureStrict("org_1", SCHEDULING_FEATURE),
+    ).rejects.toThrow("clerk down");
   });
 
   it("treats a billing error as not having the feature", async () => {

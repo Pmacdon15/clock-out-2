@@ -103,9 +103,18 @@ export default function AlertSettings({
   hasNotifications = false,
   hasScheduling = false,
 }: AlertSettingsProps) {
-  const [saved, setSaved] = useState<AlertSettingsInput>(() =>
-    normalizeAlertSettings(initialData),
-  );
+  const [saved, setSaved] = useState<AlertSettingsInput>(() => {
+    const settings = normalizeAlertSettings(initialData);
+    // Without Scheduling the scheduled rules don't run (and are switched off
+    // on the server), so show them off.
+    return hasScheduling
+      ? settings
+      : {
+          ...settings,
+          auto_clock_in_scheduled: false,
+          auto_clock_out_scheduled: false,
+        };
+  });
   const [form, setForm] = useState<AlertSettingsInput>(saved);
   const [isPending, startTransition] = useTransition();
 

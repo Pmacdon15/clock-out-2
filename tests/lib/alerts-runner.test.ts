@@ -14,7 +14,8 @@ const mocks = vi.hoisted(() => ({
   dbScheduledClockIn: vi.fn(),
   dbScheduledClockOut: vi.fn(),
   deliver: vi.fn(),
-  orgHasPlanFeature: vi.fn(),
+  orgHasPlanFeatureStrict: vi.fn(),
+  dbDisableScheduledClockRules: vi.fn(),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({
@@ -28,6 +29,7 @@ vi.mock("next/cache", () => ({ revalidateTag: mocks.revalidateTag }));
 vi.mock("@/lib/alerts-db", () => ({
   dbAutoClockOut: mocks.dbAutoClockOut,
   dbClaimAlert: mocks.dbClaimAlert,
+  dbDisableScheduledClockRules: mocks.dbDisableScheduledClockRules,
   dbGetActiveAlertSettings: mocks.dbGetActiveAlertSettings,
   dbGetOpenShiftBreaks: mocks.dbGetOpenShiftBreaks,
   dbGetOpenShifts: mocks.dbGetOpenShifts,
@@ -39,7 +41,7 @@ vi.mock("@/lib/db", () => ({ dbGetBreakSettings: mocks.dbGetBreakSettings }));
 vi.mock("@/lib/notify", () => ({ deliver: mocks.deliver }));
 vi.mock("@/lib/plan-features", () => ({
   SCHEDULING_FEATURE: "scheduling",
-  orgHasPlanFeature: mocks.orgHasPlanFeature,
+  orgHasPlanFeatureStrict: mocks.orgHasPlanFeatureStrict,
 }));
 
 import { normalizeAlertSettings, type PlannedAlert } from "@/lib/alerts";
@@ -49,6 +51,7 @@ import {
   loadOrgMembers,
   processOrgAlerts,
   runShiftAlerts,
+  turnOffScheduledClockRules,
   withScheduledRulesAllowed,
 } from "@/lib/alerts-runner";
 import type { AlertSettingsData } from "@/lib/types";
@@ -88,6 +91,7 @@ const members = [
 
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
+  vi.spyOn(console, "log").mockImplementation(() => {});
   mocks.getOrganizationMembershipList.mockResolvedValue({
     data: [
       membership("u1", "org:member", {
@@ -104,7 +108,8 @@ beforeEach(() => {
   mocks.dbGetOpenShiftBreaks.mockResolvedValue([]);
   mocks.dbClaimAlert.mockResolvedValue(true);
   mocks.dbGetOrgScheduledShiftsOverlapping.mockResolvedValue([]);
-  mocks.orgHasPlanFeature.mockResolvedValue(true);
+  mocks.orgHasPlanFeatureStrict.mockResolvedValue(true);
+  mocks.dbDisableScheduledClockRules.mockResolvedValue(undefined);
   mocks.deliver.mockResolvedValue({ email: 1, push: 2 });
 });
 
@@ -261,14 +266,17 @@ describe("processOrgAlerts: scheduled shifts", () => {
     await processOrgAlerts(settings, now);
     expect(mocks.dbGetOrgScheduledShiftsOverlapping).not.toHaveBeenCalled();
     // Nothing to check the plan for, either.
-    expect(mocks.orgHasPlanFeature).not.toHaveBeenCalled();
+    expect(mocks.orgHasPlanFeatureStrict).not.toHaveBeenCalled();
   });
 
   it("does nothing once the plan drops Scheduling", async () => {
-    mocks.orgHasPlanFeature.mockResolvedValue(false);
+    mocks.orgHasPlanFeatureStrict.mockResolvedValue(false);
     mocks.dbGetOrgScheduledShiftsOverlapping.mockResolvedValue([running]);
     const result = await processOrgAlerts(scheduledRow, now);
-    expect(mocks.orgHasPlanFeature).toHaveBeenCalledWith("org_1", "scheduling");
+    expect(mocks.orgHasPlanFeatureStrict).toHaveBeenCalledWith(
+      "org_1",
+      "scheduling",
+    );
     expect(result).toMatchObject({ autoClockIns: 0, autoClockOuts: 0 });
     expect(mocks.dbGetOrgScheduledShiftsOverlapping).not.toHaveBeenCalled();
     expect(mocks.dbScheduledClockIn).not.toHaveBeenCalled();
@@ -491,22 +499,53 @@ describe("withScheduledRulesAllowed", () => {
 
   it("leaves rules alone, without asking Clerk, when neither is on", async () => {
     await expect(withScheduledRulesAllowed("org_1", base)).resolves.toBe(base);
-    expect(mocks.orgHasPlanFeature).not.toHaveBeenCalled();
+    expect(mocks.orgHasPlanFeatureStrict).not.toHaveBeenCalled();
   });
 
-  it("keeps them with Scheduling and turns them off without", async () => {
+  const off = {
+    ...base,
+    auto_clock_in_scheduled: false,
+    auto_clock_out_scheduled: false,
+  };
+  const outOn = { ...base, auto_clock_out_scheduled: true };
+
+  it("keeps them with Scheduling", async () => {
     const on = { ...base, auto_clock_in_scheduled: true };
     await expect(withScheduledRulesAllowed("org_1", on)).resolves.toBe(on);
-    mocks.orgHasPlanFeature.mockResolvedValue(false);
-    await expect(
-      withScheduledRulesAllowed("org_1", {
-        ...base,
-        auto_clock_out_scheduled: true,
-      }),
-    ).resolves.toEqual({
-      ...base,
-      auto_clock_in_scheduled: false,
-      auto_clock_out_scheduled: false,
+    expect(mocks.dbDisableScheduledClockRules).not.toHaveBeenCalled();
+  });
+
+  it("switches them off for good once Scheduling is gone", async () => {
+    mocks.orgHasPlanFeatureStrict.mockResolvedValue(false);
+    mocks.dbDisableScheduledClockRules.mockResolvedValue({ org_id: "org_1" });
+    await expect(withScheduledRulesAllowed("org_1", outOn)).resolves.toEqual(
+      off,
+    );
+    expect(mocks.dbDisableScheduledClockRules).toHaveBeenCalledWith("org_1");
+    expect(mocks.revalidateTag).toHaveBeenCalledWith("alert-settings-org_1", {
+      expire: 0,
     });
+  });
+
+  it("still skips them when saving them off fails", async () => {
+    mocks.orgHasPlanFeatureStrict.mockResolvedValue(false);
+    mocks.dbDisableScheduledClockRules.mockRejectedValue(new Error("db"));
+    await expect(withScheduledRulesAllowed("org_1", outOn)).resolves.toEqual(
+      off,
+    );
+    expect(console.error).toHaveBeenCalled();
+  });
+
+  it("skips them this time, but leaves them saved, when Clerk is down", async () => {
+    mocks.orgHasPlanFeatureStrict.mockRejectedValue(new Error("clerk down"));
+    await expect(withScheduledRulesAllowed("org_1", outOn)).resolves.toEqual(
+      off,
+    );
+    expect(mocks.dbDisableScheduledClockRules).not.toHaveBeenCalled();
+  });
+
+  it("reports whether turning them off changed anything", async () => {
+    await expect(turnOffScheduledClockRules("org_1")).resolves.toBe(false);
+    expect(mocks.revalidateTag).not.toHaveBeenCalled();
   });
 });

@@ -20,11 +20,16 @@ import {
   dbGetScheduledShiftsBetween,
   dbUpsertAlertJob,
 } from "./alerts-db";
-import { processOrgAlerts, withScheduledRulesAllowed } from "./alerts-runner";
+import {
+  processOrgAlerts,
+  turnOffScheduledClockRules,
+  withScheduledRulesAllowed,
+} from "./alerts-runner";
 import { NOTIFICATIONS_FEATURE, orgHasFeature } from "./billing";
 import { getBreakLimits } from "./break-utils";
 import { dbGetBreakSettings, dbGetScheduledShiftById } from "./db";
 import { appUrl } from "./notify";
+import { orgHasPlanFeatureStrict, SCHEDULING_FEATURE } from "./plan-features";
 import {
   DIGEST_HOUR,
   resolveTimezone,
@@ -207,6 +212,19 @@ export const shiftAlertsJobKey = (orgId: string) => `shift-alerts:${orgId}`;
 export const upcomingShiftJobKey = (shiftId: number) => `upcoming:${shiftId}`;
 
 /* ------------------------------------------------------- shift alerts -- */
+
+/**
+ * After a billing change: when the org's plan no longer includes Scheduling,
+ * switches its scheduled auto clock-in/out rules off and re-times its alert
+ * job. Throws when Clerk can't say, so the webhook can ask Clerk to retry.
+ * Returns whether the rules were turned off.
+ */
+export async function syncScheduledClockRules(orgId: string): Promise<boolean> {
+  if (await orgHasPlanFeatureStrict(orgId, SCHEDULING_FEATURE)) return false;
+  if (!(await turnOffScheduledClockRules(orgId))) return false;
+  queueShiftAlertSync(orgId);
+  return true;
+}
 
 /**
  * (Re)schedules the org's single shift-alert job for when its next alert

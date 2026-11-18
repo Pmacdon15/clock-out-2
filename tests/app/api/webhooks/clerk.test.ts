@@ -2,13 +2,16 @@
 import type { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { verifyWebhook, syncMembershipLimit } = vi.hoisted(() => ({
-  verifyWebhook: vi.fn(),
-  syncMembershipLimit: vi.fn(),
-}));
+const { verifyWebhook, syncMembershipLimit, syncScheduledClockRules } =
+  vi.hoisted(() => ({
+    verifyWebhook: vi.fn(),
+    syncMembershipLimit: vi.fn(),
+    syncScheduledClockRules: vi.fn(),
+  }));
 
 vi.mock("@clerk/nextjs/webhooks", () => ({ verifyWebhook }));
 vi.mock("@/lib/webhooks/clerk", () => ({ syncMembershipLimit }));
+vi.mock("@/lib/alert-jobs", () => ({ syncScheduledClockRules }));
 
 import { POST } from "@/app/api/webhooks/clerk/route";
 
@@ -64,6 +67,8 @@ describe("POST /api/webhooks/clerk", () => {
     expect(res.status).toBe(200);
     await expect(res.text()).resolves.toBe("Webhook received");
     expect(syncMembershipLimit).toHaveBeenCalledWith("org_1");
+    // A downgrade off Scheduling also turns off scheduled auto clocking.
+    expect(syncScheduledClockRules).toHaveBeenCalledWith("org_1");
   });
 
   it.each([
@@ -74,6 +79,7 @@ describe("POST /api/webhooks/clerk", () => {
     const res = await POST(request);
     expect(res.status).toBe(200);
     expect(syncMembershipLimit).not.toHaveBeenCalled();
+    expect(syncScheduledClockRules).not.toHaveBeenCalled();
   });
 
   it("answers 500 so Clerk retries when the sync fails", async () => {
@@ -88,6 +94,17 @@ describe("POST /api/webhooks/clerk", () => {
       "Error handling webhook event:",
       expect.any(Error),
     );
+  });
+
+  it("answers 500 so Clerk retries when the plan can't be read", async () => {
+    verifyWebhook.mockResolvedValue({
+      type: "subscriptionItem.ended",
+      data: { payer: { organization_id: "org_1" } },
+    });
+    syncScheduledClockRules.mockRejectedValueOnce(new Error("clerk down"));
+    const res = await POST(request);
+    expect(res.status).toBe(500);
+    await expect(res.text()).resolves.toBe("Couldn't sync the org's plan");
   });
 
   it("never logs the event payload", async () => {
