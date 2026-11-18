@@ -22,10 +22,14 @@ const setNumber = (label: RegExp, value: string) =>
 
 describe("AlertSettings", () => {
   it("points orgs without the notifications feature to the plans page", () => {
-    const { rerender } = render(<AlertSettings initialData={null} />);
+    const { rerender } = render(
+      <AlertSettings hasScheduling initialData={null} />,
+    );
     expect(screen.getByTestId("notifications-upgrade")).toBeInTheDocument();
     expect(screen.getByRole("link")).toHaveAttribute("href", "/plans");
-    rerender(<AlertSettings hasNotifications initialData={null} />);
+    rerender(
+      <AlertSettings hasNotifications hasScheduling initialData={null} />,
+    );
     expect(
       screen.queryByTestId("notifications-upgrade"),
     ).not.toBeInTheDocument();
@@ -40,12 +44,25 @@ describe("AlertSettings", () => {
     expect(save()).toBeDisabled();
   });
 
+  it("locks the scheduled rules on plans without Scheduling", () => {
+    render(<AlertSettings hasNotifications initialData={null} />);
+    expect(screen.getByTestId("scheduling-upgrade")).toBeInTheDocument();
+    expect(screen.getByRole("link")).toHaveAttribute("href", "/plans");
+    expect(
+      screen.getByLabelText(/Auto clock-in at scheduled start/),
+    ).toBeDisabled();
+    expect(
+      screen.getByLabelText(/Auto clock-out at scheduled end/),
+    ).toBeDisabled();
+    expect(screen.getByLabelText(/Forgot to clock out/)).toBeEnabled();
+  });
+
   it("saves every rule the admin turns on", async () => {
     mocks.updateAlertSettingsAction.mockResolvedValue({
       success: true,
       data: {},
     });
-    render(<AlertSettings initialData={null} />);
+    render(<AlertSettings hasScheduling initialData={null} />);
 
     toggle(/Forgot to clock out/);
     setNumber(/Remind after \(hours\)/, "9");

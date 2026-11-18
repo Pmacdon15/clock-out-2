@@ -29,6 +29,12 @@ interface AlertSettingsProps {
    * automatic clock-out still works, but no reminders are sent.
    */
   hasNotifications?: boolean;
+  /**
+   * False when the plan does not include the `scheduling` feature: the
+   * scheduled auto clock-in/out rules have no schedule to follow, so they
+   * can't be turned on (and don't run if they were saved on).
+   */
+  hasScheduling?: boolean;
 }
 
 const inputClass =
@@ -40,6 +46,8 @@ type RuleProps = {
   title: string;
   description: string;
   checked: boolean;
+  /** Shown but can't be changed (a plan feature is missing). */
+  disabled?: boolean;
   onToggle: (checked: boolean) => void;
   children?: React.ReactNode;
 };
@@ -50,14 +58,21 @@ function Rule({
   title,
   description,
   checked,
+  disabled = false,
   onToggle,
   children,
 }: RuleProps) {
   return (
-    <div className="space-y-3 rounded-2xl border-2 border-zinc-200 p-5 dark:border-zinc-800">
-      <label className="flex cursor-pointer items-start gap-3" htmlFor={id}>
+    <div
+      className={`space-y-3 rounded-2xl border-2 border-zinc-200 p-5 dark:border-zinc-800${disabled ? " opacity-60" : ""}`}
+    >
+      <label
+        className={`flex items-start gap-3 ${disabled ? "cursor-not-allowed" : "cursor-pointer"}`}
+        htmlFor={id}
+      >
         <input
           checked={checked}
+          disabled={disabled}
           className="mt-1 h-4 w-4 accent-zinc-900 dark:accent-zinc-100"
           id={id}
           onChange={(e) => onToggle(e.target.checked)}
@@ -86,6 +101,7 @@ function Rule({
 export default function AlertSettings({
   initialData,
   hasNotifications = false,
+  hasScheduling = false,
 }: AlertSettingsProps) {
   const [saved, setSaved] = useState<AlertSettingsInput>(() =>
     normalizeAlertSettings(initialData),
@@ -194,8 +210,24 @@ export default function AlertSettings({
           />
         </Rule>
 
+        {!hasScheduling && (
+          <div
+            className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border-2 border-amber-300 bg-amber-50 p-4 text-amber-900 text-sm dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+            data-testid="scheduling-upgrade"
+          >
+            <p>
+              Automatic clock-in and clock-out at scheduled shifts follow the
+              schedule, which is only available on plans with Scheduling.
+            </p>
+            <Link href="/plans">
+              <Button variant="outline">View Plans</Button>
+            </Link>
+          </div>
+        )}
+
         <Rule
           checked={form.auto_clock_in_scheduled}
+          disabled={!hasScheduling}
           description="When a member's scheduled shift starts and they haven't clocked in, clock them in at the scheduled start. If they clock out early, they aren't clocked back in."
           icon={CalendarClock}
           id="alert-auto-clock-in-scheduled"
@@ -205,6 +237,7 @@ export default function AlertSettings({
 
         <Rule
           checked={form.auto_clock_out_scheduled}
+          disabled={!hasScheduling}
           description="When a member's scheduled shift ends and they're still clocked in, clock them out at the scheduled end. Members who stay later can clock in again."
           icon={CalendarCheck}
           id="alert-auto-clock-out-scheduled"

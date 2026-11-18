@@ -332,7 +332,7 @@ describe("TimeOffPage", () => {
 
 describe("SettingsPage", () => {
   it("gives admins every org setting and their plan's features", async () => {
-    mocks.features = new Set(["geofencing", "reporting"]);
+    mocks.features = new Set(["geofencing", "reporting", "scheduling"]);
     await renderOnce(SettingsPage);
     expect(await screen.findByTestId("org-settings")).toBeVisible();
     expect(latest("org-settings")).toEqual({
@@ -341,6 +341,7 @@ describe("SettingsPage", () => {
       hasGeofencing: true,
       hasNotifications: false,
       hasReporting: true,
+      hasScheduling: true,
       locationSettingsPromise: "location_settings",
       membersPromise: "members",
       orgSettingsPromise: "reporting_settings",

@@ -16,7 +16,11 @@ import {
   getOrgSites,
 } from "@/lib/dal";
 import { getOrgPayroll } from "@/lib/payroll-dal";
-import { GEOFENCING_FEATURE, REPORTING_FEATURE } from "@/lib/plan-features";
+import {
+  GEOFENCING_FEATURE,
+  REPORTING_FEATURE,
+  SCHEDULING_FEATURE,
+} from "@/lib/plan-features";
 import { hasFeature, isAdmin } from "@/lib/session";
 
 export const metadata: Metadata = { title: "Settings | Clock Out" };
@@ -40,14 +44,21 @@ async function settingsPanel() {
     );
   }
 
-  const [hasGeofencing, hasNotifications, hasReporting, payRates, payroll] =
-    await Promise.all([
-      hasFeature(GEOFENCING_FEATURE),
-      hasFeature(NOTIFICATIONS_FEATURE),
-      hasFeature(REPORTING_FEATURE),
-      getOrgPayRates(),
-      getOrgPayroll(),
-    ]);
+  const [
+    hasGeofencing,
+    hasNotifications,
+    hasReporting,
+    hasScheduling,
+    payRates,
+    payroll,
+  ] = await Promise.all([
+    hasFeature(GEOFENCING_FEATURE),
+    hasFeature(NOTIFICATIONS_FEATURE),
+    hasFeature(REPORTING_FEATURE),
+    hasFeature(SCHEDULING_FEATURE),
+    getOrgPayRates(),
+    getOrgPayroll(),
+  ]);
 
   return (
     <OrgSettings
@@ -56,6 +67,7 @@ async function settingsPanel() {
       hasGeofencing={hasGeofencing}
       hasNotifications={hasNotifications}
       hasReporting={hasReporting}
+      hasScheduling={hasScheduling}
       locationSettingsPromise={getOrgLocationSettings()}
       membersPromise={getOrgMembers()}
       orgSettingsPromise={getOrgReportingSettings()}

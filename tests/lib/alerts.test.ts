@@ -17,6 +17,7 @@ import {
   pendingAlertKeys,
   planShiftAlerts,
   sanitizeFcmToken,
+  turnsOnScheduledRule,
   validateAlertSettings,
 } from "@/lib/alerts";
 import type { OpenShift, OpenShiftBreak } from "@/lib/alerts-db";
@@ -854,5 +855,18 @@ describe("scheduled auto clock-in/out", () => {
         auto_clock_in_scheduled: "yes" as unknown as boolean,
       }),
     ).toBe("Invalid alert settings");
+  });
+});
+
+describe("turnsOnScheduledRule", () => {
+  const off = DEFAULT_ALERT_SETTINGS;
+  it("is true only when a scheduled rule goes from off to on", () => {
+    const inOn = { ...off, auto_clock_in_scheduled: true };
+    const outOn = { ...off, auto_clock_out_scheduled: true };
+    expect(turnsOnScheduledRule(off, inOn)).toBe(true);
+    expect(turnsOnScheduledRule(off, outOn)).toBe(true);
+    expect(turnsOnScheduledRule(inOn, inOn)).toBe(false);
+    expect(turnsOnScheduledRule(inOn, off)).toBe(false);
+    expect(turnsOnScheduledRule(off, off)).toBe(false);
   });
 });

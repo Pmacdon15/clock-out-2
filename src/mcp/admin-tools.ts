@@ -7,6 +7,7 @@ import { queueShiftAlertSync, syncShiftReminderJob } from "@/lib/alert-jobs";
 import {
   ALERT_BOUNDS,
   normalizeAlertSettings,
+  turnsOnScheduledRule,
   validateAlertSettings,
 } from "@/lib/alerts";
 import { dbGetAlertSettings, dbUpdateAlertSettings } from "@/lib/alerts-db";
@@ -1641,6 +1642,16 @@ export async function manageAlertSettingsTool(
   }
   const reason = validateAlertSettings(next);
   if (reason) return invalid(reason);
+  if (
+    turnsOnScheduledRule(current, next) &&
+    !(await orgHasPlanFeature(org.orgId, SCHEDULING_FEATURE))
+  ) {
+    return {
+      summary: `Automatic clock-in/out at scheduled shifts follows the schedule. ${SCHEDULING_UPGRADE_REASON}`,
+      data: { status: "scheduling_not_enabled" },
+      isError: true,
+    };
+  }
   const updated = normalizeAlertSettings(
     await dbUpdateAlertSettings(org.orgId, next),
   );

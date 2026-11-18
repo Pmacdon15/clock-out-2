@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   dbGetOrgScheduledShiftsOverlapping: vi.fn(),
   dbUpsertAlertJob: vi.fn(),
   processOrgAlerts: vi.fn(),
+  withScheduledRulesAllowed: vi.fn(),
   orgHasFeature: vi.fn(),
   dbGetBreakSettings: vi.fn(),
   dbGetScheduledShiftById: vi.fn(),
@@ -58,6 +59,7 @@ vi.mock("@/lib/alerts-db", () => ({
 }));
 vi.mock("@/lib/alerts-runner", () => ({
   processOrgAlerts: mocks.processOrgAlerts,
+  withScheduledRulesAllowed: mocks.withScheduledRulesAllowed,
 }));
 vi.mock("@/lib/billing", () => ({
   NOTIFICATIONS_FEATURE: "notifications",
@@ -147,6 +149,9 @@ beforeEach(() => {
   mocks.dbGetOrgScheduledShiftsOverlapping.mockResolvedValue([]);
   mocks.dbGetNotificationPreferencesFor.mockResolvedValue([]);
   mocks.processOrgAlerts.mockResolvedValue({ status: "ok", alerts: 2 });
+  mocks.withScheduledRulesAllowed.mockImplementation(
+    async (_orgId: string, settings: unknown) => settings,
+  );
   mocks.orgHasFeature.mockResolvedValue(true);
   mocks.runWeeklyScheduleDigests.mockResolvedValue({ digests: 3 });
   mocks.sendUpcomingShiftReminders.mockResolvedValue({ reminders: 1 });
@@ -454,6 +459,32 @@ describe("syncOrgShiftAlerts", () => {
       "sched-out:8",
     ]);
     expect(mocks.dbGetOpenShiftBreaks).not.toHaveBeenCalled();
+  });
+
+  it("schedules no clock-in once the plan drops Scheduling", async () => {
+    configure();
+    mocks.dbGetAlertSettingsFor.mockResolvedValue([
+      {
+        ...rules,
+        forgot_clock_out_enabled: false,
+        break_reminder_enabled: false,
+        auto_clock_in_scheduled: true,
+      },
+    ]);
+    mocks.withScheduledRulesAllowed.mockImplementation(
+      async (_orgId: string, settings: object) => ({
+        ...settings,
+        auto_clock_in_scheduled: false,
+        auto_clock_out_scheduled: false,
+      }),
+    );
+    await expect(syncOrgShiftAlerts("org_1", now)).resolves.toBeNull();
+    expect(mocks.withScheduledRulesAllowed).toHaveBeenCalledWith(
+      "org_1",
+      expect.objectContaining({ auto_clock_in_scheduled: true }),
+    );
+    expect(mocks.dbGetOrgScheduledShiftsOverlapping).not.toHaveBeenCalled();
+    expect(mocks.dbDeleteAlertJob).toHaveBeenCalledWith("shift-alerts:org_1");
   });
 
   it("never schedules in the past, nor before the retry floor", async () => {

@@ -144,6 +144,21 @@ export function validateAlertSettings(
   return null;
 }
 
+/**
+ * Whether saving `next` over `current` switches on a scheduled auto
+ * clock-in/out rule that is off now. Without the Scheduling plan feature that
+ * is refused; a rule saved on earlier can be left as it is.
+ */
+export function turnsOnScheduledRule(
+  current: AlertSettingsInput,
+  next: AlertSettingsInput,
+): boolean {
+  return (
+    (next.auto_clock_in_scheduled && !current.auto_clock_in_scheduled) ||
+    (next.auto_clock_out_scheduled && !current.auto_clock_out_scheduled)
+  );
+}
+
 export function normalizeNotificationPreferences(
   data?: Partial<NotificationPreferencesData> | null,
 ): NotificationPreferencesInput {

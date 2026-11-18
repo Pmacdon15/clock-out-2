@@ -25,7 +25,8 @@ import { getBreakLimits } from "./break-utils";
 import { fetchAllPages } from "./clerk-pagination";
 import { dbGetBreakSettings } from "./db";
 import { type Delivery, deliver } from "./notify";
-import type { AlertSettingsData } from "./types";
+import { orgHasPlanFeature, SCHEDULING_FEATURE } from "./plan-features";
+import type { AlertSettingsData, AlertSettingsInput } from "./types";
 
 export type OrgMember = {
   userId: string;
@@ -134,6 +135,27 @@ export function alertNotifiesAdmins(
   return alert.kind !== "break_over" || settings.break_reminder_enabled;
 }
 
+/**
+ * The rules as they apply to this org: the scheduled auto clock-in/out rules
+ * act on the schedule, so they're off while the org's plan doesn't include
+ * Scheduling (its schedule is hidden then, and its reminders stop). Only asks
+ * Clerk when one of them is on.
+ */
+export async function withScheduledRulesAllowed(
+  orgId: string,
+  settings: AlertSettingsInput,
+): Promise<AlertSettingsInput> {
+  if (!settings.auto_clock_in_scheduled && !settings.auto_clock_out_scheduled) {
+    return settings;
+  }
+  if (await orgHasPlanFeature(orgId, SCHEDULING_FEATURE)) return settings;
+  return {
+    ...settings,
+    auto_clock_in_scheduled: false,
+    auto_clock_out_scheduled: false,
+  };
+}
+
 /** Alerts that change someone's clock, which run on every plan. */
 function isClockAction(alert: PlannedAlert): boolean {
   return (
@@ -156,7 +178,10 @@ export async function processOrgAlerts(
   notify = true,
 ): Promise<OrgAlertResult> {
   const orgId = row.org_id;
-  const settings = normalizeAlertSettings(row);
+  const settings = await withScheduledRulesAllowed(
+    orgId,
+    normalizeAlertSettings(row),
+  );
   const scheduledRules =
     settings.auto_clock_in_scheduled || settings.auto_clock_out_scheduled;
   const [shifts, breaks, breakSettings, scheduled] = await Promise.all([

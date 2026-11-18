@@ -1042,7 +1042,38 @@ describe("manage_alert_settings", () => {
     );
   });
 
+  it("needs Scheduling to turn on automatic clock-in/out at shifts", async () => {
+    m.getBillingSubscription.mockResolvedValue({ subscriptionItems: [] });
+    m.dbGetAlertSettings.mockResolvedValue(undefined);
+    const res = await manageAlertSettingsTool(admin, {
+      action: "update",
+      auto_clock_in_scheduled: true,
+    });
+    expect(res.isError).toBe(true);
+    expect(res.data.status).toBe("scheduling_not_enabled");
+    expect(m.dbUpdateAlertSettings).not.toHaveBeenCalled();
+  });
+
+  it("lets other rules change without Scheduling", async () => {
+    m.getBillingSubscription.mockResolvedValue({ subscriptionItems: [] });
+    // Saved on while the org still had Scheduling.
+    m.dbGetAlertSettings.mockResolvedValue({
+      org_id: "org_1",
+      auto_clock_out_scheduled: true,
+    });
+    m.dbUpdateAlertSettings.mockImplementation(async (_org, input) => input);
+    const res = await manageAlertSettingsTool(admin, {
+      action: "update",
+      notify_admins: false,
+    });
+    expect(res.data.status).toBe("updated");
+    expect(m.getBillingSubscription).not.toHaveBeenCalled();
+  });
+
   it("turns on automatic clock-in/out at scheduled shifts", async () => {
+    m.getBillingSubscription.mockResolvedValue({
+      subscriptionItems: [{ plan: { features: [{ slug: "scheduling" }] } }],
+    });
     m.dbGetAlertSettings.mockResolvedValue(undefined);
     m.dbUpdateAlertSettings.mockImplementation(async (_org, input) => input);
     const res = await manageAlertSettingsTool(admin, {

@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   dbScheduledClockIn: vi.fn(),
   dbScheduledClockOut: vi.fn(),
   deliver: vi.fn(),
+  orgHasPlanFeature: vi.fn(),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({
@@ -36,6 +37,10 @@ vi.mock("@/lib/alerts-db", () => ({
 }));
 vi.mock("@/lib/db", () => ({ dbGetBreakSettings: mocks.dbGetBreakSettings }));
 vi.mock("@/lib/notify", () => ({ deliver: mocks.deliver }));
+vi.mock("@/lib/plan-features", () => ({
+  SCHEDULING_FEATURE: "scheduling",
+  orgHasPlanFeature: mocks.orgHasPlanFeature,
+}));
 
 import { normalizeAlertSettings, type PlannedAlert } from "@/lib/alerts";
 import {
@@ -44,6 +49,7 @@ import {
   loadOrgMembers,
   processOrgAlerts,
   runShiftAlerts,
+  withScheduledRulesAllowed,
 } from "@/lib/alerts-runner";
 import type { AlertSettingsData } from "@/lib/types";
 
@@ -98,6 +104,7 @@ beforeEach(() => {
   mocks.dbGetOpenShiftBreaks.mockResolvedValue([]);
   mocks.dbClaimAlert.mockResolvedValue(true);
   mocks.dbGetOrgScheduledShiftsOverlapping.mockResolvedValue([]);
+  mocks.orgHasPlanFeature.mockResolvedValue(true);
   mocks.deliver.mockResolvedValue({ email: 1, push: 2 });
 });
 
@@ -253,6 +260,18 @@ describe("processOrgAlerts: scheduled shifts", () => {
   it("reads no schedule when the scheduled rules are off", async () => {
     await processOrgAlerts(settings, now);
     expect(mocks.dbGetOrgScheduledShiftsOverlapping).not.toHaveBeenCalled();
+    // Nothing to check the plan for, either.
+    expect(mocks.orgHasPlanFeature).not.toHaveBeenCalled();
+  });
+
+  it("does nothing once the plan drops Scheduling", async () => {
+    mocks.orgHasPlanFeature.mockResolvedValue(false);
+    mocks.dbGetOrgScheduledShiftsOverlapping.mockResolvedValue([running]);
+    const result = await processOrgAlerts(scheduledRow, now);
+    expect(mocks.orgHasPlanFeature).toHaveBeenCalledWith("org_1", "scheduling");
+    expect(result).toMatchObject({ autoClockIns: 0, autoClockOuts: 0 });
+    expect(mocks.dbGetOrgScheduledShiftsOverlapping).not.toHaveBeenCalled();
+    expect(mocks.dbScheduledClockIn).not.toHaveBeenCalled();
   });
 });
 
@@ -464,5 +483,30 @@ describe("runShiftAlerts", () => {
   it("defaults to the current time", async () => {
     mocks.dbGetActiveAlertSettings.mockResolvedValue([]);
     await expect(runShiftAlerts()).resolves.toEqual([]);
+  });
+});
+
+describe("withScheduledRulesAllowed", () => {
+  const base = normalizeAlertSettings(null);
+
+  it("leaves rules alone, without asking Clerk, when neither is on", async () => {
+    await expect(withScheduledRulesAllowed("org_1", base)).resolves.toBe(base);
+    expect(mocks.orgHasPlanFeature).not.toHaveBeenCalled();
+  });
+
+  it("keeps them with Scheduling and turns them off without", async () => {
+    const on = { ...base, auto_clock_in_scheduled: true };
+    await expect(withScheduledRulesAllowed("org_1", on)).resolves.toBe(on);
+    mocks.orgHasPlanFeature.mockResolvedValue(false);
+    await expect(
+      withScheduledRulesAllowed("org_1", {
+        ...base,
+        auto_clock_out_scheduled: true,
+      }),
+    ).resolves.toEqual({
+      ...base,
+      auto_clock_in_scheduled: false,
+      auto_clock_out_scheduled: false,
+    });
   });
 });

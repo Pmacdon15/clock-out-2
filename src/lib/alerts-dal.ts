@@ -7,6 +7,7 @@ import {
   normalizeAlertSettings,
   normalizeNotificationPreferences,
   sanitizeFcmToken,
+  turnsOnScheduledRule,
   validateAlertSettings,
 } from "./alerts";
 import {
@@ -28,6 +29,7 @@ import {
   isPushConfigured,
   isWebPushConfigured,
 } from "./notify";
+import { SCHEDULING_FEATURE, SCHEDULING_UPGRADE_REASON } from "./plan-features";
 import {
   checkRateLimit,
   rateLimitedMessage,
@@ -76,7 +78,7 @@ export async function getOrgAlertSettings(): Promise<
 export async function updateAlertSettingsDal(
   input: AlertSettingsInput,
 ): Promise<Result<AlertSettingsData, Failure>> {
-  const { userId, orgId, orgRole } = await auth.protect();
+  const { userId, orgId, orgRole, has } = await auth.protect();
   if (!userId || !orgId || orgRole !== "org:admin") {
     return err({ reason: "Unauthorized" });
   }
@@ -85,6 +87,16 @@ export async function updateAlertSettingsDal(
       ? validateAlertSettings(input)
       : "Invalid alert settings";
   if (invalid) return err({ reason: invalid });
+  if (
+    (input.auto_clock_in_scheduled || input.auto_clock_out_scheduled) &&
+    !has({ feature: SCHEDULING_FEATURE }) &&
+    turnsOnScheduledRule(
+      normalizeAlertSettings(await dbGetAlertSettings(orgId)),
+      input,
+    )
+  ) {
+    return err({ reason: SCHEDULING_UPGRADE_REASON });
+  }
 
   return await dbUpdateAlertSettings(orgId, {
     forgot_clock_out_enabled: input.forgot_clock_out_enabled,

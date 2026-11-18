@@ -20,7 +20,7 @@ import {
   dbGetScheduledShiftsBetween,
   dbUpsertAlertJob,
 } from "./alerts-db";
-import { processOrgAlerts } from "./alerts-runner";
+import { processOrgAlerts, withScheduledRulesAllowed } from "./alerts-runner";
 import { NOTIFICATIONS_FEATURE, orgHasFeature } from "./billing";
 import { getBreakLimits } from "./break-utils";
 import { dbGetBreakSettings, dbGetScheduledShiftById } from "./db";
@@ -224,7 +224,10 @@ export async function syncOrgShiftAlerts(
     dbGetAlertSettingsFor([orgId]),
     dbGetBreakSettings(orgId).catch(() => undefined),
   ]);
-  const settings = normalizeAlertSettings(row);
+  const settings = await withScheduledRulesAllowed(
+    orgId,
+    normalizeAlertSettings(row),
+  );
   // A break time limit sends "your break is over" even with every rule off.
   const anyBreakLimit = Object.values(getBreakLimits(breakSettings)).some(
     (limit) => limit !== null,
