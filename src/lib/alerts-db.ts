@@ -108,6 +108,11 @@ export async function ensureAlertTables(): Promise<void> {
 		CREATE INDEX IF NOT EXISTS idx_fcm_tokens_endpoint ON fcm_tokens (endpoint)
 	`;
     await sql`
+		ALTER TABLE alert_settings
+			ADD COLUMN IF NOT EXISTS auto_clock_in_scheduled BOOLEAN NOT NULL DEFAULT FALSE,
+			ADD COLUMN IF NOT EXISTS auto_clock_out_scheduled BOOLEAN NOT NULL DEFAULT FALSE
+	`;
+    await sql`
 		CREATE TABLE IF NOT EXISTS alert_jobs (
 			job_key TEXT PRIMARY KEY,
 			org_id TEXT NOT NULL,
@@ -153,6 +158,7 @@ export async function dbUpdateAlertSettings(
 			org_id,
 			forgot_clock_out_enabled, forgot_clock_out_hours,
 			auto_clock_out_enabled, auto_clock_out_hours,
+			auto_clock_in_scheduled, auto_clock_out_scheduled,
 			break_reminder_enabled, break_reminder_minutes,
 			notify_admins, schedule_notifications, updated_at
 		)
@@ -160,6 +166,7 @@ export async function dbUpdateAlertSettings(
 			${orgId},
 			${input.forgot_clock_out_enabled}, ${input.forgot_clock_out_hours},
 			${input.auto_clock_out_enabled}, ${input.auto_clock_out_hours},
+			${input.auto_clock_in_scheduled}, ${input.auto_clock_out_scheduled},
 			${input.break_reminder_enabled}, ${input.break_reminder_minutes},
 			${input.notify_admins}, ${input.schedule_notifications}, NOW()
 		)
@@ -169,6 +176,8 @@ export async function dbUpdateAlertSettings(
 			forgot_clock_out_hours = ${input.forgot_clock_out_hours},
 			auto_clock_out_enabled = ${input.auto_clock_out_enabled},
 			auto_clock_out_hours = ${input.auto_clock_out_hours},
+			auto_clock_in_scheduled = ${input.auto_clock_in_scheduled},
+			auto_clock_out_scheduled = ${input.auto_clock_out_scheduled},
 			break_reminder_enabled = ${input.break_reminder_enabled},
 			break_reminder_minutes = ${input.break_reminder_minutes},
 			notify_admins = ${input.notify_admins},
@@ -189,6 +198,8 @@ export async function dbGetActiveAlertSettings() {
 		SELECT * FROM alert_settings
 		WHERE forgot_clock_out_enabled
 		OR auto_clock_out_enabled
+		OR auto_clock_in_scheduled
+		OR auto_clock_out_scheduled
 		OR break_reminder_enabled
 	`;
   return rows as unknown as AlertSettingsData[];
@@ -608,6 +619,101 @@ export async function dbAutoClockOut(
   return closed as unknown as OpenShift | undefined;
 }
 
+/**
+ * Clocks a member in for a scheduled shift that is under way, at exactly its
+ * scheduled start. Re-read from the database, so a shift moved, reassigned or
+ * removed since it was planned uses its current times (or does nothing).
+ * Does nothing when the member is already clocked in, or has a shift that
+ * ended after the scheduled start (they already worked it). The advisory
+ * lock is the one manual clock-ins take, so the two can't both insert.
+ */
+export async function dbScheduledClockIn(shift: ScheduledShift) {
+  await ensureScheduledShiftsTable();
+  const [, inserted] = await sql.transaction([
+    sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${shift.user_id}:${shift.org_id}`}::text, 0))`,
+    sql`
+		INSERT INTO time_entries (user_id, org_id, clock_in)
+		SELECT s.user_id, s.org_id, s.shift_start
+		FROM scheduled_shifts s
+		WHERE s.id = ${shift.id} AND s.org_id = ${shift.org_id}
+		AND s.user_id = ${shift.user_id}
+		AND s.shift_start <= NOW() AND s.shift_end > NOW()
+		AND NOT EXISTS (
+			SELECT 1 FROM time_entries e
+			WHERE e.user_id = s.user_id AND e.org_id = s.org_id
+			AND (e.clock_out IS NULL OR e.clock_out > s.shift_start)
+		)
+		RETURNING id, user_id, org_id, clock_in
+	`,
+  ]);
+  return inserted[0] as unknown as OpenShift | undefined;
+}
+
+/**
+ * Closes a member's open shift at exactly its scheduled shift's end, once
+ * that has passed. Only a shift opened between
+ * `earlyMs` before the scheduled start and the scheduled end counts as this
+ * one's, so an older forgotten punch isn't stretched to it. Breaks are
+ * trimmed and capped the same way {@link dbAutoClockOut} does. Returns
+ * undefined when there was nothing to close.
+ */
+export async function dbScheduledClockOut(
+  shift: ScheduledShift,
+  earlyMs: number,
+  limits?: BreakLimits | null,
+) {
+  await ensureScheduledShiftsTable();
+  await ensureTimeEntryBreaksTable();
+  const meal = limits?.unpaid_meal ?? null;
+  const paidMeal = limits?.paid_meal ?? null;
+  const unpaidRest = limits?.unpaid_rest ?? null;
+  const paidRest = limits?.paid_rest ?? null;
+  const [closed] = await sql`
+		WITH closed AS (
+			UPDATE time_entries e
+			SET clock_out = s.shift_end,
+				updated_at = NOW()
+			FROM scheduled_shifts s
+			WHERE s.id = ${shift.id} AND s.org_id = ${shift.org_id}
+			AND e.user_id = s.user_id AND e.org_id = s.org_id
+			AND e.clock_out IS NULL
+			AND s.shift_end <= NOW()
+			AND e.clock_in < s.shift_end
+			AND e.clock_in >= s.shift_start - make_interval(secs => ${earlyMs / 1000}::DOUBLE PRECISION)
+			RETURNING e.*
+		),
+		dropped AS (
+			DELETE FROM time_entry_breaks b
+			USING closed c
+			WHERE b.time_entry_id = c.id AND b.break_start >= c.clock_out
+			RETURNING b.id
+		),
+		capped AS (
+			UPDATE time_entry_breaks b
+			SET break_end = LEAST(
+					COALESCE(b.break_end, NOW()),
+					c.clock_out,
+					CASE WHEN b.break_end IS NULL THEN
+						b.break_start + make_interval(mins => (CASE b.break_type
+							WHEN 'unpaid_meal' THEN ${meal}::INTEGER
+							WHEN 'paid_meal' THEN ${paidMeal}::INTEGER
+							WHEN 'unpaid_rest' THEN ${unpaidRest}::INTEGER
+							WHEN 'paid_rest' THEN ${paidRest}::INTEGER
+						END))
+					END
+				),
+				updated_at = NOW()
+			FROM closed c
+			WHERE b.time_entry_id = c.id
+			AND b.break_start < c.clock_out
+			AND (b.break_end IS NULL OR b.break_end > c.clock_out)
+			RETURNING b.id
+		)
+		SELECT * FROM closed
+	`;
+  return closed as unknown as OpenShift | undefined;
+}
+
 /* --------------------------------------------------- schedule digests -- */
 
 /** Uncached settings for many orgs at once (missing orgs have no row). */
@@ -626,6 +732,25 @@ export async function dbGetScheduledShiftsBetween(start: Date, end: Date) {
   const rows = await sql`
 		SELECT * FROM scheduled_shifts
 		WHERE shift_start >= ${start} AND shift_start < ${end}
+		ORDER BY shift_start ASC, id ASC
+	`;
+  return rows as unknown as ScheduledShift[];
+}
+
+/**
+ * One org's scheduled shifts that overlap [start, end): still running after
+ * `start` and starting before `end`. Uncached, for the scheduled clock rules.
+ */
+export async function dbGetOrgScheduledShiftsOverlapping(
+  orgId: string,
+  start: Date,
+  end: Date,
+) {
+  await ensureScheduledShiftsTable();
+  const rows = await sql`
+		SELECT * FROM scheduled_shifts
+		WHERE org_id = ${orgId}
+		AND shift_end > ${start} AND shift_start < ${end}
 		ORDER BY shift_start ASC, id ASC
 	`;
   return rows as unknown as ScheduledShift[];

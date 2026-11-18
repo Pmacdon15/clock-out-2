@@ -7,6 +7,8 @@ import {
   normalizeAlertSettings,
   type PlannedAlert,
   planShiftAlerts,
+  SCHEDULED_CLOCK_OUT_WINDOW_MS,
+  SCHEDULED_EARLY_CLOCK_IN_MS,
 } from "./alerts";
 import {
   dbAutoClockOut,
@@ -14,6 +16,9 @@ import {
   dbGetActiveAlertSettings,
   dbGetOpenShiftBreaks,
   dbGetOpenShifts,
+  dbGetOrgScheduledShiftsOverlapping,
+  dbScheduledClockIn,
+  dbScheduledClockOut,
 } from "./alerts-db";
 import { createFeatureCheck, NOTIFICATIONS_FEATURE } from "./billing";
 import { getBreakLimits } from "./break-utils";
@@ -34,6 +39,7 @@ export type OrgAlertResult =
       orgId: string;
       status: "ok";
       alerts: number;
+      autoClockIns: number;
       autoClockOuts: number;
       emails: number;
       pushes: number;
@@ -117,7 +123,24 @@ export function alertNotifiesAdmins(
   settings: ReturnType<typeof normalizeAlertSettings>,
 ): boolean {
   if (!settings.notify_admins) return false;
+  // Every scheduled shift starts and ends: copying admins on each would be
+  // noise. They see it on the schedule and in Hours.
+  if (
+    alert.kind === "scheduled_clock_in" ||
+    alert.kind === "scheduled_clock_out"
+  ) {
+    return false;
+  }
   return alert.kind !== "break_over" || settings.break_reminder_enabled;
+}
+
+/** Alerts that change someone's clock, which run on every plan. */
+function isClockAction(alert: PlannedAlert): boolean {
+  return (
+    alert.kind === "auto_clock_out" ||
+    alert.kind === "scheduled_clock_in" ||
+    alert.kind === "scheduled_clock_out"
+  );
 }
 
 /**
@@ -134,7 +157,9 @@ export async function processOrgAlerts(
 ): Promise<OrgAlertResult> {
   const orgId = row.org_id;
   const settings = normalizeAlertSettings(row);
-  const [shifts, breaks, breakSettings] = await Promise.all([
+  const scheduledRules =
+    settings.auto_clock_in_scheduled || settings.auto_clock_out_scheduled;
+  const [shifts, breaks, breakSettings, scheduled] = await Promise.all([
     dbGetOpenShifts(orgId),
     // Fetched whatever the rules: a break's time limit alone sends "your
     // break is over".
@@ -143,6 +168,13 @@ export async function processOrgAlerts(
       console.error(`[Alerts] Break settings unavailable for ${orgId}:`, e);
       return undefined;
     }),
+    scheduledRules
+      ? dbGetOrgScheduledShiftsOverlapping(
+          orgId,
+          new Date(now.getTime() - SCHEDULED_CLOCK_OUT_WINDOW_MS),
+          new Date(now.getTime() + 1),
+        )
+      : Promise.resolve([]),
   ]);
 
   const planned = planShiftAlerts({
@@ -150,12 +182,14 @@ export async function processOrgAlerts(
     breakSettings,
     shifts,
     breaks,
+    scheduled,
     now,
-  }).filter((alert) => notify || alert.kind === "auto_clock_out");
+  }).filter((alert) => notify || isClockAction(alert));
   const result = {
     orgId,
     status: "ok" as const,
     alerts: 0,
+    autoClockIns: 0,
     autoClockOuts: 0,
     emails: 0,
     pushes: 0,
@@ -166,6 +200,43 @@ export async function processOrgAlerts(
   const limits = getBreakLimits(breakSettings);
 
   for (const alert of planned) {
+    if (
+      alert.kind === "scheduled_clock_in" ||
+      alert.kind === "scheduled_clock_out"
+    ) {
+      // Claimed before acting, not after: each scheduled start and end is
+      // acted on once, so a member who clocks out early isn't clocked back
+      // in by the next check, nor clocked out twice.
+      if (!(await dbClaimAlert(alert.key, orgId))) continue;
+      const entry =
+        alert.kind === "scheduled_clock_in"
+          ? await dbScheduledClockIn(alert.scheduled)
+          : await dbScheduledClockOut(
+              alert.scheduled,
+              SCHEDULED_EARLY_CLOCK_IN_MS,
+              limits,
+            );
+      // Already in (or out), or the shift moved: nothing to tell.
+      if (!entry) continue;
+      if (alert.kind === "scheduled_clock_in") result.autoClockIns += 1;
+      else result.autoClockOuts += 1;
+      revalidateTag(`time-entries-${entry.user_id}-${orgId}`, { expire: 0 });
+      revalidateTag(`org-time-entries-${orgId}`, { expire: 0 });
+      if (!notify) continue;
+      const counts = await deliver(
+        buildDeliveries(
+          alert,
+          members,
+          orgId,
+          alertNotifiesAdmins(alert, settings),
+        ),
+      );
+      result.alerts += 1;
+      result.emails += counts.email;
+      result.pushes += counts.push;
+      continue;
+    }
+
     if (alert.kind === "auto_clock_out") {
       const closed = await dbAutoClockOut(alert.shift.id, alert.hours, limits);
       // Already clocked out (or edited) since we looked: nothing to tell.

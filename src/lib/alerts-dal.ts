@@ -91,6 +91,8 @@ export async function updateAlertSettingsDal(
     forgot_clock_out_hours: input.forgot_clock_out_hours,
     auto_clock_out_enabled: input.auto_clock_out_enabled,
     auto_clock_out_hours: input.auto_clock_out_hours,
+    auto_clock_in_scheduled: input.auto_clock_in_scheduled,
+    auto_clock_out_scheduled: input.auto_clock_out_scheduled,
     break_reminder_enabled: input.break_reminder_enabled,
     break_reminder_minutes: input.break_reminder_minutes,
     notify_admins: input.notify_admins,

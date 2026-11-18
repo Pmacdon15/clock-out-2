@@ -55,6 +55,8 @@ describe("AlertSettings", () => {
     setNumber(/Remind after \(minutes\)/, "40");
     toggle(/Notify admins too/);
     toggle(/Schedule notifications/);
+    toggle(/Auto clock-in at scheduled start/);
+    toggle(/Auto clock-out at scheduled end/);
 
     expect(save()).toBeEnabled();
     fireEvent.click(save());
@@ -69,6 +71,8 @@ describe("AlertSettings", () => {
       forgot_clock_out_hours: 9,
       auto_clock_out_enabled: true,
       auto_clock_out_hours: 14,
+      auto_clock_in_scheduled: true,
+      auto_clock_out_scheduled: true,
       break_reminder_enabled: true,
       break_reminder_minutes: 40,
       notify_admins: false,

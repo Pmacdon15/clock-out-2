@@ -5,6 +5,7 @@ import {
   nextShiftAlertDueAt,
   normalizeAlertSettings,
   pendingAlertKeys,
+  SCHEDULED_CLOCK_OUT_WINDOW_MS,
 } from "./alerts";
 import {
   dbDeleteAlertJob,
@@ -15,6 +16,7 @@ import {
   dbGetNotificationPreferencesFor,
   dbGetOpenShiftBreaks,
   dbGetOpenShifts,
+  dbGetOrgScheduledShiftsOverlapping,
   dbGetScheduledShiftsBetween,
   dbUpsertAlertJob,
 } from "./alerts-db";
@@ -227,29 +229,44 @@ export async function syncOrgShiftAlerts(
   const anyBreakLimit = Object.values(getBreakLimits(breakSettings)).some(
     (limit) => limit !== null,
   );
+  const scheduledRules =
+    settings.auto_clock_in_scheduled || settings.auto_clock_out_scheduled;
   const anyRule =
     settings.forgot_clock_out_enabled ||
     settings.auto_clock_out_enabled ||
     settings.break_reminder_enabled ||
+    scheduledRules ||
     anyBreakLimit;
   if (!anyRule) {
     await cancelJob(key);
     return null;
   }
 
-  const [shifts, breaks] = await Promise.all([
+  const [shifts, breaks, scheduled] = await Promise.all([
     dbGetOpenShifts(orgId),
     settings.break_reminder_enabled || anyBreakLimit
       ? dbGetOpenShiftBreaks(orgId)
       : Promise.resolve([]),
+    // Shifts further out than the horizon are picked up by the daily sweep.
+    scheduledRules
+      ? dbGetOrgScheduledShiftsOverlapping(
+          orgId,
+          new Date(now.getTime() - SCHEDULED_CLOCK_OUT_WINDOW_MS),
+          new Date(now.getTime() + SCHEDULE_HORIZON_MS),
+        )
+      : Promise.resolve([]),
   ]);
-  const claimed = await dbGetClaimedAlertKeys(pendingAlertKeys(shifts, breaks));
+  const claimed = await dbGetClaimedAlertKeys(
+    pendingAlertKeys(shifts, breaks, scheduled),
+  );
   const due = nextShiftAlertDueAt({
     settings,
     breakSettings,
     shifts,
     breaks,
+    scheduled,
     claimed,
+    now,
   });
   if (!due) {
     await cancelJob(key);

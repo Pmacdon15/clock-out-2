@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   dbGetOpenShiftBreaks: vi.fn(),
   dbGetOpenShifts: vi.fn(),
   dbGetScheduledShiftsBetween: vi.fn(),
+  dbGetOrgScheduledShiftsOverlapping: vi.fn(),
   dbUpsertAlertJob: vi.fn(),
   processOrgAlerts: vi.fn(),
   orgHasFeature: vi.fn(),
@@ -52,6 +53,7 @@ vi.mock("@/lib/alerts-db", () => ({
   dbGetOpenShiftBreaks: mocks.dbGetOpenShiftBreaks,
   dbGetOpenShifts: mocks.dbGetOpenShifts,
   dbGetScheduledShiftsBetween: mocks.dbGetScheduledShiftsBetween,
+  dbGetOrgScheduledShiftsOverlapping: mocks.dbGetOrgScheduledShiftsOverlapping,
   dbUpsertAlertJob: mocks.dbUpsertAlertJob,
 }));
 vi.mock("@/lib/alerts-runner", () => ({
@@ -142,6 +144,7 @@ beforeEach(() => {
   mocks.dbGetBreakSettings.mockResolvedValue(undefined);
   mocks.dbGetActiveAlertSettings.mockResolvedValue([]);
   mocks.dbGetScheduledShiftsBetween.mockResolvedValue([]);
+  mocks.dbGetOrgScheduledShiftsOverlapping.mockResolvedValue([]);
   mocks.dbGetNotificationPreferencesFor.mockResolvedValue([]);
   mocks.processOrgAlerts.mockResolvedValue({ status: "ok", alerts: 2 });
   mocks.orgHasFeature.mockResolvedValue(true);
@@ -415,6 +418,42 @@ describe("syncOrgShiftAlerts", () => {
         body: { type: "shift-alerts", orgId: "org_1", runAt: due.getTime() },
       }),
     );
+  });
+
+  it("schedules the next scheduled shift's automatic clock-in", async () => {
+    configure();
+    mocks.dbGetAlertSettingsFor.mockResolvedValue([
+      {
+        ...rules,
+        forgot_clock_out_enabled: false,
+        break_reminder_enabled: false,
+        auto_clock_in_scheduled: true,
+        auto_clock_out_scheduled: true,
+      },
+    ]);
+    const start = new Date(now.getTime() + 3 * HOUR);
+    mocks.dbGetOrgScheduledShiftsOverlapping.mockResolvedValue([
+      {
+        id: 8,
+        org_id: "org_1",
+        user_id: "u1",
+        shift_start: start,
+        shift_end: new Date(now.getTime() + 11 * HOUR),
+        note: null,
+        created_by: "admin",
+      },
+    ]);
+    await expect(syncOrgShiftAlerts("org_1", now)).resolves.toEqual(start);
+    expect(mocks.dbGetOrgScheduledShiftsOverlapping).toHaveBeenCalledWith(
+      "org_1",
+      new Date(now.getTime() - 24 * HOUR),
+      new Date(now.getTime() + 6 * 24 * HOUR),
+    );
+    expect(mocks.dbGetClaimedAlertKeys).toHaveBeenCalledWith([
+      "sched-in:8",
+      "sched-out:8",
+    ]);
+    expect(mocks.dbGetOpenShiftBreaks).not.toHaveBeenCalled();
   });
 
   it("never schedules in the past, nor before the retry floor", async () => {

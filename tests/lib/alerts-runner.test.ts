@@ -10,6 +10,9 @@ const mocks = vi.hoisted(() => ({
   dbGetOpenShiftBreaks: vi.fn(),
   dbGetOpenShifts: vi.fn(),
   dbGetBreakSettings: vi.fn(),
+  dbGetOrgScheduledShiftsOverlapping: vi.fn(),
+  dbScheduledClockIn: vi.fn(),
+  dbScheduledClockOut: vi.fn(),
   deliver: vi.fn(),
 }));
 
@@ -27,6 +30,9 @@ vi.mock("@/lib/alerts-db", () => ({
   dbGetActiveAlertSettings: mocks.dbGetActiveAlertSettings,
   dbGetOpenShiftBreaks: mocks.dbGetOpenShiftBreaks,
   dbGetOpenShifts: mocks.dbGetOpenShifts,
+  dbGetOrgScheduledShiftsOverlapping: mocks.dbGetOrgScheduledShiftsOverlapping,
+  dbScheduledClockIn: mocks.dbScheduledClockIn,
+  dbScheduledClockOut: mocks.dbScheduledClockOut,
 }));
 vi.mock("@/lib/db", () => ({ dbGetBreakSettings: mocks.dbGetBreakSettings }));
 vi.mock("@/lib/notify", () => ({ deliver: mocks.deliver }));
@@ -91,6 +97,7 @@ beforeEach(() => {
   mocks.dbGetOpenShifts.mockResolvedValue([]);
   mocks.dbGetOpenShiftBreaks.mockResolvedValue([]);
   mocks.dbClaimAlert.mockResolvedValue(true);
+  mocks.dbGetOrgScheduledShiftsOverlapping.mockResolvedValue([]);
   mocks.deliver.mockResolvedValue({ email: 1, push: 2 });
 });
 
@@ -163,6 +170,92 @@ describe("buildDeliveries", () => {
   });
 });
 
+describe("processOrgAlerts: scheduled shifts", () => {
+  const scheduledRow: AlertSettingsData = {
+    org_id: "org_1",
+    ...normalizeAlertSettings(null),
+    auto_clock_in_scheduled: true,
+    auto_clock_out_scheduled: true,
+  };
+  const scheduledShift = (id: number, start: Date, end: Date) => ({
+    id,
+    org_id: "org_1",
+    user_id: "u1",
+    shift_start: start,
+    shift_end: end,
+    note: null,
+    created_by: "admin",
+  });
+  const running = scheduledShift(1, ago(HOUR), new Date(now.getTime() + HOUR));
+  const ended = scheduledShift(2, ago(9 * HOUR), ago(HOUR));
+  const ended2 = scheduledShift(3, ago(10 * HOUR), ago(2 * HOUR));
+
+  it("clocks members in and out once, telling only the member", async () => {
+    mocks.dbGetOrgScheduledShiftsOverlapping.mockResolvedValue([
+      running,
+      ended,
+      ended2,
+    ]);
+    mocks.dbScheduledClockIn.mockResolvedValue({ id: 10, user_id: "u1" });
+    // Shift 3 has nothing open any more.
+    mocks.dbScheduledClockOut
+      .mockResolvedValueOnce({ id: 11, user_id: "u1" })
+      .mockResolvedValueOnce(undefined);
+    await expect(processOrgAlerts(scheduledRow, now)).resolves.toMatchObject({
+      alerts: 2,
+      autoClockIns: 1,
+      autoClockOuts: 1,
+    });
+    expect(mocks.dbGetOrgScheduledShiftsOverlapping).toHaveBeenCalledWith(
+      "org_1",
+      ago(24 * HOUR),
+      new Date(now.getTime() + 1),
+    );
+    expect(mocks.dbClaimAlert.mock.calls.map((c) => c[0])).toEqual([
+      "sched-in:1",
+      "sched-out:2",
+      "sched-out:3",
+    ]);
+    expect(mocks.dbScheduledClockOut).toHaveBeenCalledWith(
+      ended,
+      2 * HOUR,
+      expect.objectContaining({ unpaid_meal: null }),
+    );
+    expect(mocks.revalidateTag).toHaveBeenCalledWith("time-entries-u1-org_1", {
+      expire: 0,
+    });
+    // notify_admins is on, but admins aren't copied on scheduled punches.
+    for (const [deliveries] of mocks.deliver.mock.calls) {
+      expect(
+        deliveries.map(
+          (d: { recipient: { userId: string } }) => d.recipient.userId,
+        ),
+      ).toEqual(["u1"]);
+    }
+  });
+
+  it("acts on each start or end only once", async () => {
+    mocks.dbGetOrgScheduledShiftsOverlapping.mockResolvedValue([running]);
+    mocks.dbClaimAlert.mockResolvedValue(false);
+    const result = await processOrgAlerts(scheduledRow, now);
+    expect(result.autoClockIns).toBe(0);
+    expect(mocks.dbScheduledClockIn).not.toHaveBeenCalled();
+  });
+
+  it("still clocks in without the notifications feature, silently", async () => {
+    mocks.dbGetOrgScheduledShiftsOverlapping.mockResolvedValue([running]);
+    mocks.dbScheduledClockIn.mockResolvedValue({ id: 10, user_id: "u1" });
+    const result = await processOrgAlerts(scheduledRow, now, false);
+    expect(result).toMatchObject({ alerts: 0, autoClockIns: 1 });
+    expect(mocks.deliver).not.toHaveBeenCalled();
+  });
+
+  it("reads no schedule when the scheduled rules are off", async () => {
+    await processOrgAlerts(settings, now);
+    expect(mocks.dbGetOrgScheduledShiftsOverlapping).not.toHaveBeenCalled();
+  });
+});
+
 describe("processOrgAlerts", () => {
   it("does no Clerk lookups when nothing is due", async () => {
     mocks.dbGetOpenShifts.mockResolvedValue([
@@ -172,6 +265,7 @@ describe("processOrgAlerts", () => {
       orgId: "org_1",
       status: "ok",
       alerts: 0,
+      autoClockIns: 0,
       autoClockOuts: 0,
       emails: 0,
       pushes: 0,
@@ -215,6 +309,7 @@ describe("processOrgAlerts", () => {
       orgId: "org_1",
       status: "ok",
       alerts: 2,
+      autoClockIns: 0,
       autoClockOuts: 1,
       emails: 2,
       pushes: 4,
@@ -251,6 +346,7 @@ describe("processOrgAlerts", () => {
       orgId: "org_1",
       status: "ok",
       alerts: 0,
+      autoClockIns: 0,
       autoClockOuts: 1,
       emails: 0,
       pushes: 0,

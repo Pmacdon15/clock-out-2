@@ -389,6 +389,18 @@ export const manageAlertSettingsInputSchema = z.object({
     .max(ALERT_BOUNDS.maxHours)
     .optional()
     .describe("Hours on the clock before the automatic clock-out."),
+  auto_clock_in_scheduled: z
+    .boolean()
+    .optional()
+    .describe(
+      "Clock members in automatically, at the scheduled start, when a scheduled shift of theirs starts and they aren't clocked in.",
+    ),
+  auto_clock_out_scheduled: z
+    .boolean()
+    .optional()
+    .describe(
+      "Clock members out automatically, at the scheduled end, when a scheduled shift of theirs ends and they're still clocked in.",
+    ),
   break_reminder_enabled: z
     .boolean()
     .optional()
@@ -498,7 +510,10 @@ function invalid(summary: string, data: Record<string, unknown> = {}) {
   } satisfies ToolResult;
 }
 
-/** Keeps the shift's "starts in an hour" reminder job in step; never throws. */
+/**
+ * Keeps the shift's "starts in an hour" reminder job, and the org's scheduled
+ * auto clock-in/out, in step; never throws.
+ */
 async function scheduleReminder(
   change: "added" | "changed" | "removed",
   shift: Parameters<typeof syncShiftReminderJob>[1],
@@ -506,6 +521,8 @@ async function scheduleReminder(
   await syncShiftReminderJob(change, shift).catch((error) => {
     console.error("[Jobs] Failed to schedule shift reminder:", error);
   });
+  // The org's scheduled auto clock-in/out follows the schedule.
+  queueShiftAlertSync(shift.org_id);
 }
 
 function revalidate(...tags: string[]) {
@@ -1572,6 +1589,8 @@ function describeAlerts(s: AlertSettingsInput) {
     s.auto_clock_out_enabled
       ? `automatic clock-out after ${s.auto_clock_out_hours}h`
       : null,
+    s.auto_clock_in_scheduled ? "clock-in at scheduled shift start" : null,
+    s.auto_clock_out_scheduled ? "clock-out at scheduled shift end" : null,
     s.break_reminder_enabled
       ? `break reminder after ${s.break_reminder_minutes} min`
       : null,
@@ -1584,6 +1603,8 @@ const ALERT_FIELDS = [
   "forgot_clock_out_hours",
   "auto_clock_out_enabled",
   "auto_clock_out_hours",
+  "auto_clock_in_scheduled",
+  "auto_clock_out_scheduled",
   "break_reminder_enabled",
   "break_reminder_minutes",
   "notify_admins",

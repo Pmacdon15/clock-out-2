@@ -20,7 +20,7 @@ import {
   validateAlertSettings,
 } from "@/lib/alerts";
 import type { OpenShift, OpenShiftBreak } from "@/lib/alerts-db";
-import type { AlertSettingsInput } from "@/lib/types";
+import type { AlertSettingsInput, ScheduledShift } from "@/lib/types";
 
 const HOUR = 3_600_000;
 const MIN = 60_000;
@@ -68,6 +68,8 @@ describe("normalizeAlertSettings", () => {
         forgot_clock_out_hours: "8.5" as unknown as number,
         auto_clock_out_enabled: true,
         auto_clock_out_hours: 12,
+        auto_clock_in_scheduled: true,
+        auto_clock_out_scheduled: true,
         break_reminder_enabled: true,
         break_reminder_minutes: "30" as unknown as number,
         notify_admins: false,
@@ -78,6 +80,8 @@ describe("normalizeAlertSettings", () => {
       forgot_clock_out_hours: 8.5,
       auto_clock_out_enabled: true,
       auto_clock_out_hours: 12,
+      auto_clock_in_scheduled: true,
+      auto_clock_out_scheduled: true,
       break_reminder_enabled: true,
       break_reminder_minutes: 30,
       notify_admins: false,
@@ -708,5 +712,147 @@ describe("sanitizeFcmToken", () => {
     expect(sanitizeFcmToken("token")).toBeNull();
     expect(sanitizeFcmToken({ token: 5 })).toBeNull();
     expect(sanitizeFcmToken({ token: "bad token here!!" })).toBeNull();
+  });
+});
+
+describe("scheduled auto clock-in/out", () => {
+  const scheduled = (
+    id: number,
+    startOffsetMs: number,
+    endOffsetMs: number,
+  ): ScheduledShift => ({
+    id,
+    org_id: "org_1",
+    user_id: "u2",
+    shift_start: new Date(now.getTime() + startOffsetMs),
+    shift_end: new Date(now.getTime() + endOffsetMs),
+    note: null,
+    created_by: "admin",
+  });
+  const both: AlertSettingsInput = {
+    ...DEFAULT_ALERT_SETTINGS,
+    auto_clock_in_scheduled: true,
+    auto_clock_out_scheduled: true,
+  };
+  const running = scheduled(1, -HOUR, 7 * HOUR);
+  const ended = scheduled(2, -9 * HOUR, -HOUR);
+  const longAgo = scheduled(3, -40 * HOUR, -32 * HOUR);
+  const upcoming = scheduled(4, 2 * HOUR, 10 * HOUR);
+  const plan = (settings: AlertSettingsInput) =>
+    planShiftAlerts({
+      settings,
+      shifts: [],
+      breaks: [],
+      scheduled: [running, ended, longAgo, upcoming],
+      now,
+    }).map((a) => a.key);
+
+  it("clocks in shifts under way and out shifts that just ended", () => {
+    expect(plan(both)).toEqual(["sched-in:1", "sched-out:2"]);
+    expect(plan({ ...both, auto_clock_out_scheduled: false })).toEqual([
+      "sched-in:1",
+    ]);
+    expect(plan({ ...both, auto_clock_in_scheduled: false })).toEqual([
+      "sched-out:2",
+    ]);
+    expect(plan(DEFAULT_ALERT_SETTINGS)).toEqual([]);
+    // No scheduled shifts passed: nothing planned for them.
+    expect(
+      planShiftAlerts({ settings: both, shifts: [], breaks: [], now }),
+    ).toEqual([]);
+  });
+
+  it("is due at the next start or end not yet acted on", () => {
+    const due = (
+      settings: AlertSettingsInput,
+      list: ScheduledShift[],
+      claimed: string[] = [],
+    ) =>
+      nextShiftAlertDueAt({
+        settings,
+        shifts: [],
+        breaks: [],
+        scheduled: list,
+        claimed: new Set(claimed),
+        now,
+      });
+    // Running and unclaimed: due right away (its start has passed).
+    expect(due(both, [running, upcoming])).toEqual(running.shift_start);
+    // Once clocked in, its end comes after the upcoming shift's start.
+    expect(due(both, [running, upcoming], ["sched-in:1"])).toEqual(
+      upcoming.shift_start,
+    );
+    expect(
+      due({ ...both, auto_clock_in_scheduled: false }, [running, upcoming]),
+    ).toEqual(running.shift_end);
+    // An ended shift is still due a clock-out inside its window, never a
+    // clock-in; one past its window is due nothing.
+    expect(due(both, [ended])).toEqual(ended.shift_end);
+    expect(due(both, [ended], ["sched-out:2"])).toBeNull();
+    expect(due(both, [longAgo])).toBeNull();
+    expect(due(DEFAULT_ALERT_SETTINGS, [running])).toBeNull();
+    // `now` defaults to the current time.
+    expect(
+      nextShiftAlertDueAt({
+        settings: both,
+        shifts: [],
+        breaks: [],
+        claimed: new Set(),
+      }),
+    ).toBeNull();
+  });
+
+  it("lists their keys among the pending ones", () => {
+    expect(pendingAlertKeys([], [], [running])).toEqual([
+      "sched-in:1",
+      "sched-out:1",
+    ]);
+  });
+
+  it("words the notices for members and admins", () => {
+    const clockIn: PlannedAlert = {
+      kind: "scheduled_clock_in",
+      key: "sched-in:1",
+      scheduled: running,
+    };
+    const clockOut: PlannedAlert = {
+      kind: "scheduled_clock_out",
+      key: "sched-out:2",
+      scheduled: ended,
+    };
+    const audience = { memberName: "Ada", orgId: "org_1" };
+    expect(alertUserId(clockIn)).toBe("u2");
+    expect(alertUserId(clockOut)).toBe("u2");
+    expect(alertCategory(clockIn)).toBe("shift_alerts");
+    expect(describeAlert(clockIn, { ...audience, forAdmin: false })).toEqual({
+      title: "You're clocked in",
+      body: expect.stringContaining("scheduled shift has started"),
+      url: "/?orgId=org_1",
+      tag: "sched-in:1",
+    });
+    expect(describeAlert(clockIn, { ...audience, forAdmin: true }).title).toBe(
+      "Ada was clocked in automatically",
+    );
+    expect(
+      describeAlert(clockOut, { ...audience, forAdmin: false }),
+    ).toMatchObject({
+      title: "You're clocked out",
+      body: expect.stringContaining("scheduled end"),
+    });
+    expect(describeAlert(clockOut, { ...audience, forAdmin: true })).toEqual({
+      title: "Ada was clocked out automatically",
+      body: expect.stringContaining("scheduled shift ended"),
+      url: "/hours?orgId=org_1&userId=u2",
+      tag: "sched-out:2:admin",
+    });
+  });
+
+  it("refuses a non-boolean scheduled rule", () => {
+    expect(
+      validateAlertSettings({
+        ...both,
+        auto_clock_in_scheduled: "yes" as unknown as boolean,
+      }),
+    ).toBe("Invalid alert settings");
   });
 });

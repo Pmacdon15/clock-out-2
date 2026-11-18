@@ -24,13 +24,15 @@ const valuesOf = (call: number) => sql.mock.calls[call].slice(1);
 const allText = () => sql.mock.calls.map((_c, i) => textOf(i)).join("\n");
 
 /** Number of statements `ensureAlertTables` runs the first time. */
-const ENSURE_STATEMENTS = 12;
+const ENSURE_STATEMENTS = 13;
 
 const input = {
   forgot_clock_out_enabled: true,
   forgot_clock_out_hours: 10,
   auto_clock_out_enabled: true,
   auto_clock_out_hours: 16,
+  auto_clock_in_scheduled: true,
+  auto_clock_out_scheduled: false,
   break_reminder_enabled: false,
   break_reminder_minutes: 45,
   notify_admins: true,
@@ -115,12 +117,14 @@ describe("alert settings", () => {
     expect(textOf(0)).toContain("INSERT INTO settings");
     expect(textOf(1)).toContain("INSERT INTO alert_settings");
     expect(textOf(1)).toContain("ON CONFLICT (org_id)");
-    expect(valuesOf(1).slice(0, 9)).toEqual([
+    expect(valuesOf(1).slice(0, 11)).toEqual([
       "o1",
       true,
       10,
       true,
       16,
+      true,
+      false,
       false,
       45,
       true,
@@ -324,6 +328,85 @@ describe("schedule notification queries", () => {
     expect(textOf(0)).toContain("FROM scheduled_shifts");
     expect(valuesOf(0)).toEqual([start, end]);
     expect(cacheTag).not.toHaveBeenCalled();
+  });
+});
+
+describe("scheduled auto clock-in/out", () => {
+  const shift = {
+    id: 5,
+    org_id: "o1",
+    user_id: "u1",
+    shift_start: new Date("2026-11-02T16:00:00Z"),
+    shift_end: new Date("2026-11-03T00:00:00Z"),
+    note: null,
+    created_by: "admin",
+  };
+
+  async function primeScheduled() {
+    await primeTables();
+    db.resetScheduledShiftsTableCheck();
+    await db.ensureScheduledShiftsTable();
+    sql.mockClear();
+  }
+
+  it("lists one org's shifts overlapping a window", async () => {
+    await primeScheduled();
+    sql.mockResolvedValueOnce([{ id: 5 }]);
+    const start = new Date("2026-11-01T00:00:00Z");
+    const end = new Date("2026-11-08T00:00:00Z");
+    await expect(
+      adb.dbGetOrgScheduledShiftsOverlapping("o1", start, end),
+    ).resolves.toEqual([{ id: 5 }]);
+    expect(textOf(0)).toContain("shift_end > ? AND shift_start < ?");
+    expect(valuesOf(0)).toEqual(["o1", start, end]);
+  });
+
+  it("clocks in at the scheduled start under the clock-in lock", async () => {
+    await primeScheduled();
+    sql.transaction.mockResolvedValueOnce([[], [{ id: 9, user_id: "u1" }]]);
+    await expect(adb.dbScheduledClockIn(shift)).resolves.toEqual({
+      id: 9,
+      user_id: "u1",
+    });
+    expect(textOf(0)).toContain("pg_advisory_xact_lock");
+    expect(valuesOf(0)).toEqual(["u1:o1"]);
+    expect(textOf(1)).toContain("SELECT s.user_id, s.org_id, s.shift_start");
+    expect(textOf(1)).toContain(
+      "e.clock_out IS NULL OR e.clock_out > s.shift_start",
+    );
+    expect(valuesOf(1)).toEqual([5, "o1", "u1"]);
+  });
+
+  it("does nothing when the member is already in", async () => {
+    await primeScheduled();
+    sql.transaction.mockResolvedValueOnce([[], []]);
+    await expect(adb.dbScheduledClockIn(shift)).resolves.toBeUndefined();
+  });
+
+  it("clocks out at the scheduled end, trimming breaks", async () => {
+    await primeScheduled();
+    sql.mockResolvedValueOnce([{ id: 9, user_id: "u1" }]);
+    await expect(
+      adb.dbScheduledClockOut(shift, 7_200_000, {
+        unpaid_meal: 30,
+        paid_meal: null,
+        unpaid_rest: 10,
+        paid_rest: 15,
+      }),
+    ).resolves.toEqual({ id: 9, user_id: "u1" });
+    const text = textOf(0);
+    expect(text).toContain("SET clock_out = s.shift_end");
+    expect(text).toContain("e.clock_in < s.shift_end");
+    expect(text).toContain("DELETE FROM time_entry_breaks");
+    expect(valuesOf(0)).toEqual([5, "o1", 7200, 30, null, 10, 15]);
+  });
+
+  it("returns undefined when nothing was open, without limits", async () => {
+    await primeScheduled();
+    await expect(
+      adb.dbScheduledClockOut(shift, 7_200_000),
+    ).resolves.toBeUndefined();
+    expect(valuesOf(0)).toEqual([5, "o1", 7200, null, null, null, null]);
   });
 });
 

@@ -2,6 +2,8 @@
 
 import {
   BellRing,
+  CalendarCheck,
+  CalendarClock,
   CalendarDays,
   Coffee,
   Loader2,
@@ -130,7 +132,7 @@ export default function AlertSettings({
         >
           <p>
             Reminders and schedule notices are only sent on paid plans.
-            Automatic clock-out still works on every plan.
+            Automatic clock-in and clock-out still work on every plan.
           </p>
           <Link href="/plans">
             <Button variant="outline">View Plans</Button>
@@ -191,6 +193,24 @@ export default function AlertSettings({
             value={form.auto_clock_out_hours}
           />
         </Rule>
+
+        <Rule
+          checked={form.auto_clock_in_scheduled}
+          description="When a member's scheduled shift starts and they haven't clocked in, clock them in at the scheduled start. If they clock out early, they aren't clocked back in."
+          icon={CalendarClock}
+          id="alert-auto-clock-in-scheduled"
+          onToggle={(v) => set("auto_clock_in_scheduled", v)}
+          title="Auto clock-in at scheduled start"
+        />
+
+        <Rule
+          checked={form.auto_clock_out_scheduled}
+          description="When a member's scheduled shift ends and they're still clocked in, clock them out at the scheduled end. Members who stay later can clock in again."
+          icon={CalendarCheck}
+          id="alert-auto-clock-out-scheduled"
+          onToggle={(v) => set("auto_clock_out_scheduled", v)}
+          title="Auto clock-out at scheduled end"
+        />
 
         <Rule
           checked={form.break_reminder_enabled}
