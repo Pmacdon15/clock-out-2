@@ -139,7 +139,9 @@ export async function sendWeeklyReports(
       })
       .map((m) => m.publicUserData?.identifier as string);
 
-    console.log(`[Reports] Found ${adminEmails.length} admin email recipients.`);
+    console.log(
+      `[Reports] Found ${adminEmails.length} admin email recipients.`,
+    );
 
     if (adminEmails.length === 0) {
       console.log(
