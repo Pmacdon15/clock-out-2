@@ -139,7 +139,7 @@ export async function sendWeeklyReports(
       })
       .map((m) => m.publicUserData?.identifier as string);
 
-    console.log(`[Reports] Admin emails found:`, adminEmails);
+    console.log(`[Reports] Found ${adminEmails.length} admin email recipients.`);
 
     if (adminEmails.length === 0) {
       console.log(
@@ -355,7 +355,7 @@ export async function sendWeeklyReports(
 
       if (entries.length > 0 || timeOffLines.length > 0) {
         console.log(
-          `[Reports] Sending email for ${userName} to admins: ${adminEmails.join(", ")}`,
+          `[Reports] Sending weekly report to ${adminEmails.length} admins.`,
         );
         try {
           const emailHtml = await render(
