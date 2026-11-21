@@ -21,6 +21,8 @@ import {
   reviewTimeOffRequestDal as dalReviewTimeOffRequest,
   setTimeOffAllowanceDal as dalSetTimeOffAllowance,
   startBreak as dalStartBreak,
+  startShiftSeriesDal as dalStartShiftSeries,
+  stopShiftSeriesDal as dalStopShiftSeries,
   updateBreakDal as dalUpdateBreak,
   updateScheduledShiftDal as dalUpdateScheduledShift,
   updateSiteDal as dalUpdateSite,
@@ -49,6 +51,7 @@ import {
 } from "./schedule-notify";
 import { MAX_REPEAT_WEEKS } from "./schedule-utils";
 import type { ShiftLocationInput } from "./shift-location";
+import { fillShiftSeries, syncNewSeriesShifts } from "./shift-series-runner";
 import type {
   BreakCountLimits,
   BreakLimits,
@@ -609,6 +612,109 @@ export async function createWeeklyScheduledShiftsAction(
     );
   }
   return { success: true as const, data: created, skipped };
+}
+
+/** What publishing a repeating shift reports back to the form. */
+export type RepeatingShiftResult =
+  | {
+      success: true;
+      /** Every week made now, the first shift included when it is new. */
+      data: ScheduledShift[];
+      skipped: { shiftStart: string; reason: string }[];
+    }
+  | { success: false; error: string };
+
+/**
+ * Makes a published shift repeat every week until stopped, and makes the
+ * coming weeks now (the daily job keeps adding weeks after that).
+ */
+async function startRepeating(
+  shiftId: number,
+  /** The first shift, when it was published just now. */
+  newShift: ScheduledShift | null,
+  timezone: string | null | undefined,
+): Promise<RepeatingShiftResult> {
+  const started = await dalStartShiftSeries(shiftId, timezone);
+  if (started.isErr()) {
+    return { success: false, error: started.error.reason };
+  }
+  const { shift, series } = started.value;
+  const fill = await fillShiftSeries(series);
+  const created = newShift ? [newShift, ...fill.created] : fill.created;
+
+  updateTag(`scheduled-shifts-${shift.org_id}`);
+  queueShiftAlertSync(shift.org_id);
+  if (created.length > 0) {
+    after(() => notifyWeeklyShiftsAdded(created, timezone));
+    after(() => syncNewSeriesShifts(created));
+  }
+  return { success: true, data: created, skipped: fill.skipped };
+}
+
+/** Publishes a shift that repeats every week until an admin stops it. */
+export async function createRepeatingShiftAction(
+  memberId: string,
+  shiftStart: string,
+  shiftEnd: string,
+  note?: string | null,
+  timezone?: string | null,
+  localDays?: { start: string; end: string } | null,
+  location?: ShiftLocationInput | null,
+): Promise<RepeatingShiftResult> {
+  const first = await dalCreateScheduledShift(
+    memberId,
+    new Date(shiftStart),
+    new Date(shiftEnd),
+    note,
+    localDays,
+    location,
+  );
+  if (first.isErr()) {
+    return { success: false, error: first.error.reason };
+  }
+  const result = await startRepeating(first.value.id, first.value, timezone);
+  if (!result.success) {
+    // The first shift is published either way; say so with the reason.
+    updateTag(`scheduled-shifts-${first.value.org_id}`);
+    after(() => notifyScheduleChange("added", first.value, timezone));
+    after(() => syncNewSeriesShifts([first.value]));
+    queueShiftAlertSync(first.value.org_id);
+    return {
+      success: false,
+      error: `Shift published, but it couldn't be set to repeat: ${result.error}`,
+    };
+  }
+  return result;
+}
+
+/** Makes an already published shift repeat every week until stopped. */
+export async function repeatShiftWeeklyAction(
+  shiftId: number,
+  timezone?: string | null,
+): Promise<RepeatingShiftResult> {
+  return startRepeating(shiftId, null, timezone);
+}
+
+/**
+ * Stops a shift repeating. That shift and the weeks before it stay; the
+ * weeks already made after it are removed.
+ */
+export async function stopRepeatingShiftAction(shiftId: number) {
+  const result = await dalStopShiftSeries(shiftId);
+  return result.match(
+    ({ shift, removed }) => {
+      updateTag(`scheduled-shifts-${shift.org_id}`);
+      queueShiftAlertSync(shift.org_id);
+      for (const gone of removed) {
+        after(() => syncShiftReminderJob("removed", gone).catch(logJobError));
+        after(() =>
+          mirrorShiftToGoogleCalendar("removed", gone).catch(logCalendarError),
+        );
+      }
+      return { success: true as const, removed: removed.length };
+    },
+    (err) => ({ success: false as const, error: err.reason }),
+  );
 }
 
 export async function updateScheduledShiftAction(

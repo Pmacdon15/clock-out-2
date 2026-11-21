@@ -28,6 +28,10 @@ const mocks = vi.hoisted(() => ({
   queueShiftAlertSync: vi.fn(),
 }));
 
+vi.mock("@/lib/shift-series-runner", () => ({
+  fillShiftSeries: vi.fn(),
+  syncNewSeriesShifts: vi.fn(),
+}));
 vi.mock("@clerk/nextjs/server", () => ({ auth: { protect: mocks.protect } }));
 vi.mock("next/cache", () => ({ updateTag: mocks.updateTag }));
 vi.mock("next/server", () => ({ after: vi.fn() }));

@@ -13,6 +13,7 @@ import type {
   PayRateData,
   ReportingSettingsData,
   ScheduledShift,
+  ShiftSeries,
   SiteData,
   TimeEntry,
   TimeEntryBreak,
@@ -1142,7 +1143,8 @@ export async function ensureScheduledShiftsTable(): Promise<void> {
 		ALTER TABLE scheduled_shifts
 			ADD COLUMN IF NOT EXISTS site_id INTEGER,
 			ADD COLUMN IF NOT EXISTS location TEXT,
-			ADD COLUMN IF NOT EXISTS location_address TEXT
+			ADD COLUMN IF NOT EXISTS location_address TEXT,
+			ADD COLUMN IF NOT EXISTS series_id INTEGER
 	`;
   })();
   scheduledShiftsTableReady = true;
@@ -1185,13 +1187,16 @@ export async function dbCreateScheduledShift(
   note: string | null,
   createdBy: string,
   location: ShiftLocation = NO_SHIFT_LOCATION,
+  /** The repeating shift this week's shift was made from, if any. */
+  seriesId: number | null = null,
 ) {
   await ensureScheduledShiftsTable();
   const [created] = await sql`
 		INSERT INTO scheduled_shifts (org_id, user_id, shift_start, shift_end, note, created_by,
-			site_id, location, location_address)
+			site_id, location, location_address, series_id)
 		VALUES (${orgId}, ${userId}, ${shiftStart}, ${shiftEnd}, ${note}, ${createdBy},
-			${location.site_id}, ${location.location}, ${location.location_address})
+			${location.site_id}, ${location.location}, ${location.location_address},
+			${seriesId})
 		RETURNING *
 	`;
   return created as unknown as ScheduledShift;
@@ -1265,6 +1270,138 @@ export async function dbDeleteScheduledShift(id: number, orgId: string) {
 		RETURNING *
 	`;
   return deleted as unknown as ScheduledShift | undefined;
+}
+
+/* ------------------------------------------------- repeating shifts -- */
+
+let shiftSeriesTableReady = false;
+
+/**
+ * A shift that repeats every week with no end date. The rule keeps its first
+ * shift's times and the zone they were set in, so later weeks keep the same
+ * local start and end across daylight saving changes. `next_index` is the
+ * week the daily job makes next (week 0 is the first shift); weeks it has
+ * passed are never made again, so a removed or skipped week stays removed.
+ */
+export async function ensureShiftSeriesTable(): Promise<void> {
+  if (shiftSeriesTableReady) return;
+  await ensureScheduledShiftsTable();
+  await sql`
+		CREATE TABLE IF NOT EXISTS shift_series (
+			id SERIAL PRIMARY KEY,
+			org_id TEXT NOT NULL,
+			user_id TEXT NOT NULL,
+			first_start TIMESTAMP WITH TIME ZONE NOT NULL,
+			first_end TIMESTAMP WITH TIME ZONE NOT NULL,
+			timezone TEXT NOT NULL,
+			note TEXT,
+			site_id INTEGER,
+			location TEXT,
+			location_address TEXT,
+			next_index INTEGER NOT NULL DEFAULT 1,
+			created_by TEXT NOT NULL,
+			ended_at TIMESTAMP WITH TIME ZONE,
+			CHECK (first_end > first_start),
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+		)
+	`;
+  await sql`
+		CREATE INDEX IF NOT EXISTS idx_shift_series_active
+			ON shift_series (org_id) WHERE ended_at IS NULL
+	`;
+  shiftSeriesTableReady = true;
+}
+
+/** Test-only: forget that the table check ran. */
+export function resetShiftSeriesTableCheck() {
+  shiftSeriesTableReady = false;
+}
+
+/** Saves a repeating shift whose first week is `firstShift`, and links it. */
+export async function dbCreateShiftSeries(
+  firstShift: ScheduledShift,
+  timezone: string,
+  createdBy: string,
+) {
+  await ensureShiftSeriesTable();
+  const [created] = await sql`
+		INSERT INTO shift_series (org_id, user_id, first_start, first_end, timezone,
+			note, site_id, location, location_address, created_by)
+		VALUES (${firstShift.org_id}, ${firstShift.user_id}, ${firstShift.shift_start},
+			${firstShift.shift_end}, ${timezone}, ${firstShift.note},
+			${firstShift.site_id ?? null}, ${firstShift.location ?? null},
+			${firstShift.location_address ?? null}, ${createdBy})
+		RETURNING *
+	`;
+  const series = created as unknown as ShiftSeries;
+  await sql`
+		UPDATE scheduled_shifts SET series_id = ${series.id}, updated_at = NOW()
+		WHERE id = ${firstShift.id} AND org_id = ${firstShift.org_id}
+	`;
+  return series;
+}
+
+export async function dbGetShiftSeriesById(id: number, orgId: string) {
+  await ensureShiftSeriesTable();
+  const [row] = await sql`
+		SELECT * FROM shift_series WHERE id = ${id} AND org_id = ${orgId}
+	`;
+  return row as unknown as ShiftSeries | undefined;
+}
+
+/** Every repeating shift that hasn't been stopped, across all orgs. */
+export async function dbGetActiveShiftSeries() {
+  await ensureShiftSeriesTable();
+  const rows = await sql`
+		SELECT * FROM shift_series WHERE ended_at IS NULL ORDER BY org_id, id
+	`;
+  return rows as unknown as ShiftSeries[];
+}
+
+/**
+ * Moves a repeating shift's next week from `from` to `to`, only if no other
+ * run got there first. Returns whether this caller now owns those weeks, so
+ * two overlapping runs never make the same week twice.
+ */
+export async function dbClaimShiftSeriesWeeks(
+  id: number,
+  from: number,
+  to: number,
+) {
+  await ensureShiftSeriesTable();
+  const rows = await sql`
+		UPDATE shift_series SET next_index = ${to}, updated_at = NOW()
+		WHERE id = ${id} AND next_index = ${from} AND ended_at IS NULL
+		RETURNING id
+	`;
+  return rows.length > 0;
+}
+
+/** Stops a repeating shift: the daily job makes no more weeks of it. */
+export async function dbEndShiftSeries(id: number, orgId: string) {
+  await ensureShiftSeriesTable();
+  const [row] = await sql`
+		UPDATE shift_series SET ended_at = NOW(), updated_at = NOW()
+		WHERE id = ${id} AND org_id = ${orgId} AND ended_at IS NULL
+		RETURNING *
+	`;
+  return row as unknown as ShiftSeries | undefined;
+}
+
+/** Removes a repeating shift's weeks that start after `after`. */
+export async function dbDeleteShiftSeriesShiftsAfter(
+  seriesId: number,
+  orgId: string,
+  after: Date,
+) {
+  await ensureScheduledShiftsTable();
+  const rows = await sql`
+		DELETE FROM scheduled_shifts
+		WHERE series_id = ${seriesId} AND org_id = ${orgId} AND shift_start > ${after}
+		RETURNING *
+	`;
+  return rows as unknown as ScheduledShift[];
 }
 
 /* ------------------------------------------------------------ time off -- */

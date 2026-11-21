@@ -31,14 +31,17 @@ import {
   dbClockIn,
   dbClockOut,
   dbCreateScheduledShift,
+  dbCreateShiftSeries,
   dbCreateSite,
   dbCreateTimeOffRequest,
   dbDeleteBreak,
   dbDeletePayRate,
   dbDeleteScheduledShift,
+  dbDeleteShiftSeriesShiftsAfter,
   dbDeleteSite,
   dbDeleteTimeEntry,
   dbEndOpenBreak,
+  dbEndShiftSeries,
   dbGetActiveEntry,
   dbGetApprovedTimeOffForPeriod,
   dbGetBreakSettings,
@@ -55,6 +58,7 @@ import {
   dbGetReportingSettings,
   dbGetScheduledShiftById,
   dbGetScheduledShifts,
+  dbGetShiftSeriesById,
   dbGetSites,
   dbGetSitesForEnforcement,
   dbGetTimeEntries,
@@ -1750,6 +1754,80 @@ export async function deleteScheduledShiftDal(id: number) {
       console.error("Error deleting shift: ", e);
       return errAsync({ reason: "Failed to delete shift" } as const);
     });
+}
+
+/**
+ * Makes a published shift repeat every week until stopped. The daily job
+ * makes the coming weeks from it; the caller makes the first ones right away.
+ */
+export async function startShiftSeriesDal(
+  shiftId: number,
+  timezone: string | null | undefined,
+) {
+  const { userId, orgId, orgRole, has } = await auth.protect();
+  if (!userId || !orgId || orgRole !== "org:admin") {
+    return errAsync({ reason: "Unauthorized" } as const);
+  }
+  if (!has({ feature: SCHEDULING_FEATURE })) {
+    return errAsync({ reason: SCHEDULING_UPGRADE_REASON } as const);
+  }
+  if (!isValidTimeZone(timezone)) {
+    return errAsync({ reason: "Couldn't tell your time zone" } as const);
+  }
+
+  try {
+    const shift = await dbGetScheduledShiftById(shiftId, orgId);
+    if (!shift) {
+      return errAsync({ reason: "Shift not found" } as const);
+    }
+    if (shift.series_id != null) {
+      const existing = await dbGetShiftSeriesById(shift.series_id, orgId);
+      if (existing && existing.ended_at === null) {
+        return errAsync({
+          reason: "This shift already repeats weekly",
+        } as const);
+      }
+    }
+    const series = await dbCreateShiftSeries(shift, timezone, userId);
+    return okAsync({ shift, series });
+  } catch (e) {
+    console.error("Error starting a repeating shift: ", e);
+    return errAsync({ reason: "Failed to repeat shift" } as const);
+  }
+}
+
+/**
+ * Stops a shift repeating: no more weeks are made, and the weeks already made
+ * after `shiftId` are removed (that shift and the ones before it stay).
+ */
+export async function stopShiftSeriesDal(shiftId: number) {
+  const { userId, orgId, orgRole, has } = await auth.protect();
+  if (!userId || !orgId || orgRole !== "org:admin") {
+    return errAsync({ reason: "Unauthorized" } as const);
+  }
+  if (!has({ feature: SCHEDULING_FEATURE })) {
+    return errAsync({ reason: SCHEDULING_UPGRADE_REASON } as const);
+  }
+
+  try {
+    const shift = await dbGetScheduledShiftById(shiftId, orgId);
+    if (!shift) {
+      return errAsync({ reason: "Shift not found" } as const);
+    }
+    if (shift.series_id == null) {
+      return errAsync({ reason: "This shift doesn't repeat" } as const);
+    }
+    await dbEndShiftSeries(shift.series_id, orgId);
+    const removed = await dbDeleteShiftSeriesShiftsAfter(
+      shift.series_id,
+      orgId,
+      new Date(shift.shift_start),
+    );
+    return okAsync({ shift, removed });
+  } catch (e) {
+    console.error("Error stopping a repeating shift: ", e);
+    return errAsync({ reason: "Failed to stop repeating" } as const);
+  }
 }
 
 /* ------------------------------------------------------------ time off -- */

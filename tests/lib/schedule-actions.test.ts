@@ -15,6 +15,10 @@ const mocks = vi.hoisted(() => ({
   mirrorShiftToGoogleCalendar: vi.fn(() => Promise.resolve()),
 }));
 
+vi.mock("@/lib/shift-series-runner", () => ({
+  fillShiftSeries: vi.fn(),
+  syncNewSeriesShifts: vi.fn(),
+}));
 vi.mock("@/lib/google-calendar", () => ({
   mirrorShiftToGoogleCalendar: mocks.mirrorShiftToGoogleCalendar,
 }));

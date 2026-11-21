@@ -7,6 +7,7 @@ import {
   runUpcomingShiftReminders,
   runWeeklyScheduleDigests,
 } from "@/lib/schedule-notify";
+import { runShiftSeries } from "@/lib/shift-series-runner";
 
 /** FCM expires tokens unused for 270 days; drop ours a little earlier. */
 const STALE_FCM_TOKEN_DAYS = 240;
@@ -17,8 +18,10 @@ const STALE_FCM_TOKEN_DAYS = 240;
  * start and schedule changes and delivered by QStash to /api/alerts/dispatch;
  * this catches up on anything that slipped through (a failed publish, QStash
  * not configured yet), schedules reminders for shifts that have come within
- * six days, and forgets stale FCM tokens. Safe to call as often as you like:
- * each alert is sent once.
+ * six days, and forgets stale FCM tokens. It first tops up repeating shifts
+ * with their coming weeks, so the digests and reminders below include them.
+ * Safe to call as often as you like: each alert is sent once and each week of
+ * a repeating shift is made once.
  */
 async function handle(request: Request) {
   if (!isAuthorizedCronRequest(request)) {
@@ -26,6 +29,7 @@ async function handle(request: Request) {
   }
 
   const now = new Date();
+  const [series] = await Promise.allSettled([runShiftSeries(now)]);
   // Independent jobs: one failing never stops the others.
   const [alerts, digests, reminders, jobs, pruned] = await Promise.allSettled([
     runShiftAlerts(now),
@@ -35,6 +39,7 @@ async function handle(request: Request) {
     dbPruneStaleFcmTokens(STALE_FCM_TOKEN_DAYS),
   ]);
   const labelled = [
+    ["Repeating shifts", series],
     ["Shift alerts", alerts],
     ["Weekly schedules", digests],
     ["Shift reminders", reminders],
@@ -53,6 +58,7 @@ async function handle(request: Request) {
     {
       success: !failed,
       date: now.toISOString(),
+      repeatingShifts: value(series),
       orgs: value(alerts),
       schedules: value(digests),
       reminders: value(reminders),
