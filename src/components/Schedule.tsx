@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation } from "@tanstack/react-query";
-import { format } from "date-fns";
+import { addWeeks, format } from "date-fns";
 import {
   CalendarClock,
   Loader2,
@@ -184,10 +184,10 @@ function toastRepeatingResult(
   res: Extract<RepeatingShiftResult, { success: true }>,
 ) {
   const last = res.data.at(-1);
-  const through = last
-    ? ` Scheduled through ${format(new Date(last.shift_start), "MMM d")};`
-    : "";
-  const message = `Repeats every ${weekday}.${through} new weeks are added automatically.`;
+  const more = last
+    ? ` Scheduled through ${format(new Date(last.shift_start), "MMM d")}; new weeks are added automatically.`
+    : " New weeks are added automatically.";
+  const message = `Repeats every ${weekday}.${more}`;
   if (res.skipped.length === 0) {
     toast.success(message);
     return;
@@ -505,7 +505,8 @@ function RepeatShiftForm({
   const start = new Date(shift.shift_start);
   const end = new Date(shift.shift_end);
   const weekday = format(start, "EEEE");
-  const last = weeklyOccurrences(start, end, weeks, 1).at(-1);
+  // The last copy, `weeks` weeks on (local calendar, like the copies).
+  const lastStart = addWeeks(start, weeks);
 
   const { mutate, isPending } = useMutation({
     mutationFn: async () => {
@@ -614,9 +615,7 @@ function RepeatShiftForm({
         Same time and location
         {mode === "ongoing"
           ? ". New weeks are added automatically, about five weeks ahead."
-          : last
-            ? `, through ${format(last.shiftStart, "EEE, MMM d")}.`
-            : "."}{" "}
+          : `, through ${format(lastStart, "EEE, MMM d")}.`}{" "}
         Weeks with time off or another shift are skipped.
       </p>
     </form>
@@ -831,9 +830,9 @@ function ShiftForm({
       },
       onSuccess: (res) => {
         if (res.success) {
-          const first = res.data[0];
+          // The first shift is always in a successful result.
           toastRepeatingResult(
-            first ? format(new Date(first.shift_start), "EEEE") : "week",
+            format(new Date(res.data[0].shift_start), "EEEE"),
             res,
           );
           setDate("");

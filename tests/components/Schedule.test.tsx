@@ -895,6 +895,43 @@ describe("Schedule weekly shifts", () => {
     await waitFor(() => expect(mocks.toast.error).toHaveBeenCalledWith("Nope"));
   });
 
+  it("warns about skipped weeks and errors for a set number of weeks", async () => {
+    mocks.createWeeklyScheduledShiftsAction
+      .mockResolvedValueOnce({
+        success: true,
+        data: [{}],
+        skipped: [
+          { shiftStart: "2026-01-14T09:00:00.000Z", reason: "Time off" },
+        ],
+      })
+      .mockResolvedValueOnce({ success: false, error: "Nope" });
+    renderSchedule([]);
+    fillForm();
+    fireEvent.click(screen.getByRole("button", { name: "Weekly" }));
+    fireEvent.click(screen.getByLabelText("For the next"));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Publish 4 weekly shifts" }),
+    );
+    await waitFor(() =>
+      expect(mocks.toast.warning).toHaveBeenCalledWith(
+        "1 weekly shift published. Skipped Jan 14: Time off.",
+      ),
+    );
+
+    fillForm();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Publish 4 weekly shifts" }),
+    );
+    await waitFor(() => expect(mocks.toast.error).toHaveBeenCalledWith("Nope"));
+
+    // Back to repeating until stopped.
+    fireEvent.click(screen.getByLabelText("Every Wednesday, until I stop it"));
+    expect(screen.getByLabelText("Number of weeks")).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Publish repeating shift" }),
+    ).toBeVisible();
+  });
+
   it("makes a published shift repeat until stopped", async () => {
     mocks.repeatShiftWeeklyAction.mockResolvedValue({
       success: true,
@@ -987,6 +1024,76 @@ describe("Schedule weekly shifts", () => {
     expect(
       screen.queryByRole("button", { name: "Stop repeating after this shift" }),
     ).toBeNull();
+  });
+
+  it("words a repeat that made no new weeks yet, and a single extra week", async () => {
+    mocks.repeatShiftWeeklyAction.mockResolvedValue({
+      success: true,
+      data: [],
+      skipped: [],
+    });
+    renderSchedule([shift("scheduled")]);
+    fireEvent.click(repeatButton());
+    fireEvent.click(screen.getByLabelText("For the next"));
+    fireEvent.change(screen.getByLabelText("Number of weeks"), {
+      target: { value: "1" },
+    });
+    expect(screen.getByText("weeks (1 more shift)")).toBeVisible();
+    fireEvent.click(screen.getByLabelText("Every Monday, until I stop it"));
+    fireEvent.click(screen.getByRole("button", { name: "Repeat weekly" }));
+    await waitFor(() =>
+      expect(mocks.toast.success).toHaveBeenCalledWith(
+        "Repeats every Monday. New weeks are added automatically.",
+      ),
+    );
+  });
+
+  it("keeps the repeat form open when a set number of weeks fails", async () => {
+    mocks.createWeeklyScheduledShiftsAction.mockResolvedValue({
+      success: false,
+      error: "Nope",
+    });
+    renderSchedule([shift("scheduled")]);
+    fireEvent.click(repeatButton());
+    fireEvent.click(screen.getByLabelText("For the next"));
+    fireEvent.click(screen.getByRole("button", { name: "Repeat weekly" }));
+    await waitFor(() => expect(mocks.toast.error).toHaveBeenCalledWith("Nope"));
+    expect(mocks.toast.success).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Repeat weekly" })).toBeVisible();
+  });
+
+  it("words stopping with one or no later weeks, and shows progress", async () => {
+    mocks.stopRepeatingShiftAction
+      .mockResolvedValueOnce({ success: true, removed: 1 })
+      .mockResolvedValueOnce({ success: true, removed: 0 })
+      .mockReturnValueOnce(new Promise(() => {}));
+    renderSchedule([shift("scheduled", { series_id: 4 })]);
+    const open = () =>
+      fireEvent.click(screen.getByRole("button", { name: "Repeating…" }));
+    const stop = () =>
+      fireEvent.click(
+        screen.getByRole("button", { name: "Stop repeating after this shift" }),
+      );
+    open();
+    stop();
+    await waitFor(() =>
+      expect(mocks.toast.success).toHaveBeenCalledWith(
+        "Stopped repeating. Removed 1 later shift.",
+      ),
+    );
+    open();
+    stop();
+    await waitFor(() =>
+      expect(mocks.toast.success).toHaveBeenCalledWith("Stopped repeating"),
+    );
+    open();
+    stop();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Stop repeating after this shift" }),
+      ).toBeDisabled(),
+    );
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
   });
 
   it("keeps the repeat form open on errors, and swaps with the edit form", async () => {

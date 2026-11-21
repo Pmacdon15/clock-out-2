@@ -280,6 +280,14 @@ describe("runShiftSeries", () => {
     expect(mocks.dbEndShiftSeries).toHaveBeenCalledWith(5, "org_1");
   });
 
+  it("doesn't count a series another run already stopped", async () => {
+    mocks.dbGetActiveShiftSeries.mockResolvedValue([
+      { ...series, user_id: "gone" },
+    ]);
+    mocks.dbEndShiftSeries.mockResolvedValue(undefined);
+    await expect(runShiftSeries(now)).resolves.toMatchObject({ ended: 0 });
+  });
+
   it("leaves orgs without Scheduling alone", async () => {
     mocks.dbGetActiveShiftSeries.mockResolvedValue([series]);
     mocks.orgHasPlanFeature.mockResolvedValue(false);
