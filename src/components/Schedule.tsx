@@ -8,7 +8,9 @@ import {
   MapPin,
   Pencil,
   Repeat,
+  Search,
   Trash2,
+  X,
 } from "lucide-react";
 import { use, useState } from "react";
 import { toast } from "sonner";
@@ -23,13 +25,18 @@ import {
   updateScheduledShiftAction,
 } from "@/lib/actions";
 import {
+  activeFilterCount,
   countShiftStatuses,
   DEFAULT_REPEAT_WEEKS,
+  EMPTY_SHIFT_FILTERS,
+  filterShifts,
   findOverlappingShift,
-  isFlaggedStatus,
   LATE_GRACE_MINUTES,
   MAX_REPEAT_WEEKS,
   SHIFT_STATUS_LABELS,
+  type ShiftFilters,
+  TIME_OF_DAY_LABELS,
+  type TimeOfDay,
   weeklyOccurrences,
 } from "@/lib/schedule-utils";
 import {
@@ -1081,6 +1088,174 @@ function ShiftForm({
   );
 }
 
+const WEEKDAYS = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+];
+
+/**
+ * Admin filter bar for a busy schedule: search by name, note or location, and
+ * narrow by member, day, weekday, time of day or status.
+ */
+function ShiftFilterBar({
+  filters,
+  onChange,
+  members,
+  shown,
+  total,
+}: {
+  filters: ShiftFilters;
+  onChange: (filters: ShiftFilters) => void;
+  members: Member[];
+  shown: number;
+  total: number;
+}) {
+  const set = <K extends keyof ShiftFilters>(key: K, value: ShiftFilters[K]) =>
+    onChange({ ...filters, [key]: value });
+  const active = activeFilterCount(filters);
+  const labelClass = "block font-medium text-xs";
+  const selectClass = `${inputClass} h-10`;
+
+  return (
+    <search
+      aria-label="Filter shifts"
+      className="space-y-3 rounded-2xl border-2 border-zinc-100 p-4 dark:border-zinc-800"
+    >
+      <div className="relative">
+        <Search
+          aria-hidden="true"
+          className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+        />
+        <input
+          aria-label="Search shifts"
+          className={`${inputClass} pl-9`}
+          onChange={(e) => set("query", e.target.value)}
+          placeholder="Search by name, note or location"
+          type="search"
+          value={filters.query}
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+        <div className="space-y-1">
+          <span aria-hidden="true" className={labelClass}>
+            Member
+          </span>
+          <select
+            className={selectClass}
+            aria-label="Filter by member"
+            id="filterMember"
+            onChange={(e) => set("memberId", e.target.value)}
+            value={filters.memberId}
+          >
+            <option value="">Everyone</option>
+            {members.map((member) => (
+              <option key={member.id} value={member.id}>
+                {member.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="space-y-1">
+          <span aria-hidden="true" className={labelClass}>
+            Day
+          </span>
+          <input
+            className={selectClass}
+            aria-label="Filter by day"
+            id="filterDate"
+            onChange={(e) => set("date", e.target.value)}
+            type="date"
+            value={filters.date}
+          />
+        </div>
+        <div className="space-y-1">
+          <span aria-hidden="true" className={labelClass}>
+            Weekday
+          </span>
+          <select
+            className={selectClass}
+            aria-label="Filter by weekday"
+            id="filterWeekday"
+            onChange={(e) => set("weekday", e.target.value)}
+            value={filters.weekday}
+          >
+            <option value="">Any weekday</option>
+            {WEEKDAYS.map((name, day) => (
+              <option key={name} value={String(day)}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="space-y-1">
+          <span aria-hidden="true" className={labelClass}>
+            Time of day
+          </span>
+          <select
+            className={selectClass}
+            aria-label="Filter by time of day"
+            id="filterTime"
+            onChange={(e) => set("timeOfDay", e.target.value as TimeOfDay | "")}
+            value={filters.timeOfDay}
+          >
+            <option value="">Any time</option>
+            {(Object.keys(TIME_OF_DAY_LABELS) as TimeOfDay[]).map((key) => (
+              <option key={key} value={key}>
+                {TIME_OF_DAY_LABELS[key]}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="col-span-2 space-y-1 lg:col-span-1">
+          <span aria-hidden="true" className={labelClass}>
+            Status
+          </span>
+          <select
+            className={selectClass}
+            aria-label="Filter by status"
+            id="filterStatus"
+            onChange={(e) =>
+              set("status", e.target.value as ShiftFilters["status"])
+            }
+            value={filters.status}
+          >
+            <option value="">Any status</option>
+            <option value="flagged">Flagged only</option>
+            {(Object.keys(SHIFT_STATUS_LABELS) as ShiftStatus[]).map((key) => (
+              <option key={key} value={key}>
+                {SHIFT_STATUS_LABELS[key]}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+        <p aria-live="polite" className="text-muted-foreground">
+          {active > 0
+            ? `Showing ${shown} of ${total} shift${total === 1 ? "" : "s"}`
+            : `${total} shift${total === 1 ? "" : "s"}`}
+        </p>
+        {active > 0 && (
+          <Button
+            onClick={() => onChange(EMPTY_SHIFT_FILTERS)}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            <X className="mr-1 h-4 w-4" />
+            Clear filters ({active})
+          </Button>
+        )}
+      </div>
+    </search>
+  );
+}
+
 export default function Schedule({
   schedulePromise,
   membersPromise,
@@ -1096,7 +1271,7 @@ export default function Schedule({
   const members = membersPromise ? use(membersPromise) : [];
   const timeOffResult = timeOffPromise ? use(timeOffPromise) : null;
   const timeOff = timeOffResult?.ok ? timeOffResult.value : [];
-  const [flaggedOnly, setFlaggedOnly] = useState(false);
+  const [filters, setFilters] = useState<ShiftFilters>(EMPTY_SHIFT_FILTERS);
 
   if (!result.ok) {
     return (
@@ -1109,9 +1284,10 @@ export default function Schedule({
 
   const memberNames = new Map(members.map((m) => [m.id, m.name]));
   const counts = countShiftStatuses(result.value);
-  const shifts = flaggedOnly
-    ? result.value.filter((shift) => isFlaggedStatus(shift.status))
+  const shifts = isAdmin
+    ? filterShifts(result.value, filters, memberNames)
     : result.value;
+  const filtering = isAdmin && activeFilterCount(filters) > 0;
   const upcoming = shifts.filter(isCurrentOrUpcoming);
   const past = shifts.filter((shift) => !isCurrentOrUpcoming(shift)).reverse();
 
@@ -1158,9 +1334,20 @@ export default function Schedule({
         {isAdmin && (
           <div className="mb-6 grid grid-cols-3 gap-3">
             {(["late", "not_clocked_in", "no_show"] as const).map((status) => (
-              <div
-                className={`rounded-xl p-3 text-center ${STATUS_STYLES[status]}`}
+              <button
+                aria-pressed={filters.status === status}
+                className={`rounded-xl p-3 text-center transition-shadow hover:opacity-90 ${STATUS_STYLES[status]} ${
+                  filters.status === status ? "ring-2 ring-current" : ""
+                }`}
                 key={status}
+                onClick={() =>
+                  setFilters({
+                    ...filters,
+                    status: filters.status === status ? "" : status,
+                  })
+                }
+                title={`Show only ${SHIFT_STATUS_LABELS[status].toLowerCase()} shifts`}
+                type="button"
               >
                 <div className="font-black text-2xl tabular-nums">
                   {counts[status]}
@@ -1168,7 +1355,7 @@ export default function Schedule({
                 <div className="font-semibold text-xs">
                   {SHIFT_STATUS_LABELS[status]}
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         )}
@@ -1183,21 +1370,31 @@ export default function Schedule({
         )}
       </Card>
 
+      {isAdmin && (
+        <ShiftFilterBar
+          filters={filters}
+          members={members}
+          onChange={setFilters}
+          shown={shifts.length}
+          total={result.value.length}
+        />
+      )}
+
       <Card className="p-6 sm:p-8">
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="mb-2 flex items-baseline gap-2">
           <h4 className="font-bold text-lg">Upcoming &amp; in progress</h4>
-          {isAdmin && (
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                checked={flaggedOnly}
-                onChange={(e) => setFlaggedOnly(e.target.checked)}
-                type="checkbox"
-              />
-              Flagged only
-            </label>
+          {filtering && (
+            <span className="font-medium text-muted-foreground text-sm">
+              {upcoming.length} matching
+            </span>
           )}
         </div>
-        {renderList(upcoming, "No upcoming shifts.")}
+        {renderList(
+          upcoming,
+          filtering
+            ? "No upcoming shifts match these filters."
+            : "No upcoming shifts.",
+        )}
       </Card>
 
       <ScheduleCalendar
@@ -1207,8 +1404,20 @@ export default function Schedule({
       />
 
       <Card className="p-6 sm:p-8">
-        <h4 className="mb-2 font-bold text-lg">Past two weeks</h4>
-        {renderList(past, "No shifts in the past two weeks.")}
+        <div className="mb-2 flex items-baseline gap-2">
+          <h4 className="font-bold text-lg">Past two weeks</h4>
+          {filtering && (
+            <span className="font-medium text-muted-foreground text-sm">
+              {past.length} matching
+            </span>
+          )}
+        </div>
+        {renderList(
+          past,
+          filtering
+            ? "No past shifts match these filters."
+            : "No shifts in the past two weeks.",
+        )}
       </Card>
     </div>
   );

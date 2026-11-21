@@ -1,15 +1,24 @@
 import { describe, expect, it } from "vitest";
 import {
+  activeFilterCount,
   countShiftStatuses,
+  EMPTY_SHIFT_FILTERS,
   evaluateShifts,
+  filterShifts,
   findOverlappingShift,
   invalidShiftReason,
   isFlaggedStatus,
   LATE_GRACE_MINUTES,
   MAX_REPEAT_WEEKS,
+  type ShiftFilters,
+  timeOfDayFor,
   weeklyOccurrences,
 } from "@/lib/schedule-utils";
-import type { ScheduledShift } from "@/lib/types";
+import type {
+  ScheduledShift,
+  ScheduledShiftWithStatus,
+  ShiftStatus,
+} from "@/lib/types";
 import { makeEntry } from "../utils";
 
 const at = (iso: string) => new Date(`2026-01-05T${iso}:00Z`);
@@ -264,5 +273,111 @@ describe("weeklyOccurrences", () => {
     expect(weeklyOccurrences(start, end, 500)).toHaveLength(MAX_REPEAT_WEEKS);
     expect(weeklyOccurrences(start, end, -2)).toEqual([]);
     expect(weeklyOccurrences(start, end, 2.7)).toHaveLength(2);
+  });
+});
+
+describe("timeOfDayFor", () => {
+  it.each([
+    ["04:59", "overnight"],
+    ["05:00", "morning"],
+    ["11:59", "morning"],
+    ["12:00", "afternoon"],
+    ["16:59", "afternoon"],
+    ["17:00", "evening"],
+    ["21:59", "evening"],
+    ["22:00", "overnight"],
+  ])("puts a %s start in the %s", (time, expected) => {
+    expect(timeOfDayFor(at(time))).toBe(expected);
+  });
+});
+
+describe("activeFilterCount", () => {
+  it("counts only the filters that are set", () => {
+    expect(activeFilterCount(EMPTY_SHIFT_FILTERS)).toBe(0);
+    expect(
+      activeFilterCount({
+        ...EMPTY_SHIFT_FILTERS,
+        query: "  ",
+        memberId: "user_1",
+        status: "flagged",
+      }),
+    ).toBe(2);
+  });
+});
+
+describe("filterShifts", () => {
+  let id = 100;
+  const withStatus = (
+    status: ShiftStatus,
+    overrides: Partial<ScheduledShiftWithStatus> = {},
+  ): ScheduledShiftWithStatus => ({
+    ...shift({ id: id++ }),
+    status,
+    actual_clock_in: null,
+    actual_clock_out: null,
+    minutes_late: null,
+    ...overrides,
+  });
+  const names = new Map([
+    ["user_1", "Sam Lee"],
+    ["user_2", "Alex Kim"],
+  ]);
+  // 2026-01-05 is a Monday.
+  const samMorning = withStatus("scheduled", { note: "Front desk" });
+  const alexOvernight = withStatus("late", {
+    user_id: "user_2",
+    shift_start: new Date("2026-01-05T22:00:00Z"),
+    shift_end: new Date("2026-01-06T06:00:00Z"),
+    location: "Warehouse",
+    location_address: "1 King St",
+  });
+  const samTuesdayToMidnight = withStatus("no_show", {
+    shift_start: new Date("2026-01-06T16:00:00Z"),
+    shift_end: new Date("2026-01-07T00:00:00Z"),
+  });
+  const ghost = withStatus("on_time", { user_id: "ghost" });
+  const all = [samMorning, alexOvernight, samTuesdayToMidnight, ghost];
+  const run = (filters: Partial<ShiftFilters>) =>
+    filterShifts(all, { ...EMPTY_SHIFT_FILTERS, ...filters }, names);
+
+  it("keeps everything with no filters", () => {
+    expect(run({})).toEqual(all);
+  });
+
+  it("filters by member", () => {
+    expect(run({ memberId: "user_2" })).toEqual([alexOvernight]);
+  });
+
+  it("filters by a single status or every flagged one", () => {
+    expect(run({ status: "late" })).toEqual([alexOvernight]);
+    expect(run({ status: "flagged" })).toEqual([
+      alexOvernight,
+      samTuesdayToMidnight,
+    ]);
+  });
+
+  it("filters by weekday and time of day of the start", () => {
+    expect(run({ weekday: "2" })).toEqual([samTuesdayToMidnight]);
+    expect(run({ timeOfDay: "overnight" })).toEqual([alexOvernight]);
+    expect(run({ weekday: "1", timeOfDay: "morning" })).toEqual([
+      samMorning,
+      ghost,
+    ]);
+  });
+
+  it("matches every day a shift touches, but not past an exact midnight end", () => {
+    expect(run({ date: "2026-01-06" })).toEqual([
+      alexOvernight,
+      samTuesdayToMidnight,
+    ]);
+    expect(run({ date: "2026-01-07" })).toEqual([]);
+    expect(run({ date: "2026-01-04" })).toEqual([]);
+  });
+
+  it("searches names, notes and locations, needing every word", () => {
+    expect(run({ query: "sam" })).toEqual([samMorning, samTuesdayToMidnight]);
+    expect(run({ query: "  FRONT  sam " })).toEqual([samMorning]);
+    expect(run({ query: "king" })).toEqual([alexOvernight]);
+    expect(run({ query: "warehouse sam" })).toEqual([]);
   });
 });
