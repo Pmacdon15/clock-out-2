@@ -282,11 +282,95 @@ describe("Schedule", () => {
     expect(summary).toHaveLength(3);
   });
 
-  it("filters to flagged shifts and shows empty states", () => {
-    renderSchedule([shift("scheduled"), shift("on_time")]);
-    fireEvent.click(screen.getByLabelText("Flagged only"));
+  it("shows empty states with no shifts", () => {
+    renderSchedule([]);
     expect(screen.getByText("No upcoming shifts.")).toBeVisible();
     expect(screen.getByText("No shifts in the past two weeks.")).toBeVisible();
+    expect(screen.getByText("0 shifts")).toBeVisible();
+  });
+
+  it("filters to flagged shifts and says when nothing matches", () => {
+    renderSchedule([shift("scheduled"), shift("on_time")]);
+    fireEvent.change(screen.getByLabelText("Filter by status"), {
+      target: { value: "flagged" },
+    });
+    expect(
+      screen.getByText("No upcoming shifts match these filters."),
+    ).toBeVisible();
+    expect(
+      screen.getByText("No past shifts match these filters."),
+    ).toBeVisible();
+    expect(screen.getByText("Showing 0 of 2 shifts")).toBeVisible();
+  });
+
+  it("filters by member, search, day, weekday and time, then clears", () => {
+    renderSchedule([
+      shift("scheduled", { note: "Front desk" }),
+      shift("scheduled", {
+        user_id: "user_2",
+        shift_start: new Date("2026-01-06T22:00:00Z"),
+        shift_end: new Date("2026-01-07T06:00:00Z"),
+      }),
+    ]);
+    const upcoming = () => section("Upcoming & in progress");
+    expect(screen.getByText("2 shifts")).toBeVisible();
+
+    fireEvent.change(screen.getByLabelText("Filter by member"), {
+      target: { value: "user_2" },
+    });
+    expect(within(upcoming()).getByText("Alex")).toBeVisible();
+    expect(within(upcoming()).queryByText("Sam")).toBeNull();
+    expect(within(upcoming()).getByText("1 matching")).toBeVisible();
+
+    fireEvent.change(screen.getByLabelText("Filter by time of day"), {
+      target: { value: "overnight" },
+    });
+    fireEvent.change(screen.getByLabelText("Filter by weekday"), {
+      target: { value: "2" },
+    });
+    fireEvent.change(screen.getByLabelText("Filter by day"), {
+      target: { value: "2026-01-07" },
+    });
+    expect(screen.getByText("Showing 1 of 2 shifts")).toBeVisible();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /Clear filters \(4\)/ }),
+    );
+    expect(screen.getByText("2 shifts")).toBeVisible();
+    expect(screen.getByLabelText("Filter by member")).toHaveValue("");
+
+    fireEvent.change(screen.getByLabelText("Search shifts"), {
+      target: { value: "front" },
+    });
+    expect(within(upcoming()).getByText("Sam")).toBeVisible();
+    expect(within(upcoming()).queryByText("Alex")).toBeNull();
+    expect(screen.getByText("Showing 1 of 2 shifts")).toBeVisible();
+  });
+
+  it("toggles a status filter from the summary cards", () => {
+    renderSchedule([shift("late", { minutes_late: 10 }), shift("scheduled")]);
+    const late = screen.getByRole("button", { name: /Late/ });
+    fireEvent.click(late);
+    expect(late).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText("Filter by status")).toHaveValue("late");
+    expect(screen.getByText("Showing 1 of 2 shifts")).toBeVisible();
+    fireEvent.click(late);
+    expect(late).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByText("2 shifts")).toBeVisible();
+  });
+
+  it("words the count for a single shift", () => {
+    renderSchedule([shift("scheduled")]);
+    expect(screen.getByText("1 shift")).toBeVisible();
+    fireEvent.change(screen.getByLabelText("Filter by status"), {
+      target: { value: "scheduled" },
+    });
+    expect(screen.getByText("Showing 1 of 1 shift")).toBeVisible();
+  });
+
+  it("hides the filters from members", () => {
+    renderSchedule([shift("scheduled")], false);
+    expect(screen.queryByLabelText("Search shifts")).toBeNull();
   });
 
   it("publishes a shift from the form", async () => {

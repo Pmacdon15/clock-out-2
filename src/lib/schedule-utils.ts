@@ -200,3 +200,104 @@ export function countShiftStatuses(shifts: { status: ShiftStatus }[]) {
   for (const shift of shifts) counts[shift.status] += 1;
   return counts;
 }
+
+/** Parts of the day a manager can narrow the schedule to, by local start time. */
+export type TimeOfDay = "morning" | "afternoon" | "evening" | "overnight";
+
+export const TIME_OF_DAY_LABELS: Record<TimeOfDay, string> = {
+  morning: "Morning (5 AM – noon)",
+  afternoon: "Afternoon (noon – 5 PM)",
+  evening: "Evening (5 PM – 10 PM)",
+  overnight: "Overnight (10 PM – 5 AM)",
+};
+
+/** Which part of the day a local start time falls in. */
+export function timeOfDayFor(start: Date): TimeOfDay {
+  const hour = start.getHours();
+  if (hour >= 5 && hour < 12) return "morning";
+  if (hour >= 12 && hour < 17) return "afternoon";
+  if (hour >= 17 && hour < 22) return "evening";
+  return "overnight";
+}
+
+/** What the schedule's filter bar holds. An empty string means "any". */
+export interface ShiftFilters {
+  /** Free text matched against the member's name, the note and location. */
+  query: string;
+  memberId: string;
+  /** A local calendar day ("yyyy-MM-dd") the shift touches. */
+  date: string;
+  /** Local weekday of the start, "0" (Sunday) to "6" (Saturday). */
+  weekday: string;
+  timeOfDay: TimeOfDay | "";
+  /** A single status, or "flagged" for every status worth a look. */
+  status: ShiftStatus | "flagged" | "";
+}
+
+export const EMPTY_SHIFT_FILTERS: ShiftFilters = {
+  query: "",
+  memberId: "",
+  date: "",
+  weekday: "",
+  timeOfDay: "",
+  status: "",
+};
+
+/** How many filters are set, for the "Clear filters" badge. */
+export function activeFilterCount(filters: ShiftFilters) {
+  return Object.values(filters).filter((value) => value.trim() !== "").length;
+}
+
+/** The local "yyyy-MM-dd" of a date, without pulling in a formatter. */
+function localDay(date: Date) {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+/**
+ * The shifts that match every filter that's set. Dates and times are read in
+ * the viewer's local zone, like the rest of the schedule. A shift ending
+ * exactly at midnight doesn't count as touching the next day.
+ */
+export function filterShifts<
+  T extends Pick<
+    ScheduledShiftWithStatus,
+    "user_id" | "shift_start" | "shift_end" | "status" | "note"
+  > & { location?: string | null; location_address?: string | null },
+>(shifts: T[], filters: ShiftFilters, memberNames: Map<string, string>): T[] {
+  const words = filters.query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  return shifts.filter((shift) => {
+    if (filters.memberId && shift.user_id !== filters.memberId) return false;
+    if (filters.status === "flagged") {
+      if (!isFlaggedStatus(shift.status)) return false;
+    } else if (filters.status && shift.status !== filters.status) {
+      return false;
+    }
+    const start = new Date(shift.shift_start);
+    if (filters.weekday && String(start.getDay()) !== filters.weekday) {
+      return false;
+    }
+    if (filters.timeOfDay && timeOfDayFor(start) !== filters.timeOfDay) {
+      return false;
+    }
+    if (filters.date) {
+      const lastMoment = new Date(new Date(shift.shift_end).getTime() - 1);
+      if (localDay(start) > filters.date || localDay(lastMoment) < filters.date)
+        return false;
+    }
+    if (words.length > 0) {
+      const haystack = [
+        memberNames.get(shift.user_id),
+        shift.note,
+        shift.location,
+        shift.location_address,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      if (!words.every((word) => haystack.includes(word))) return false;
+    }
+    return true;
+  });
+}
