@@ -41,17 +41,24 @@ export const CSP_REPORT_PATH = "/api/csp-report";
  * are reported without blocking anything. Nonces would force every page to
  * render dynamically, which Partial Prerendering (cacheComponents) doesn't
  * allow, so scripts are limited by origin: this app, Clerk's Frontend API,
- * Cloudflare Turnstile (Clerk's bot check) and Vercel Analytics; inline
- * scripts stay allowed for the React Server Components payload.
+ * Cloudflare Turnstile (Clerk's bot check), Stripe (Clerk Billing's card
+ * form) and Vercel Analytics; inline scripts stay allowed for the React
+ * Server Components payload.
  */
 export function reportOnlyPolicy(clerkOrigin: string | null) {
   const clerk = clerkOrigin ? [clerkOrigin] : [];
+  // Clerk Billing's checkout embeds Stripe Elements: its script and card
+  // iframe come from js.stripe.com, 3D Secure and redirect-based payment
+  // methods frame hooks.stripe.com, and Elements calls api.stripe.com.
+  // Without these the card form never loads and checkout hangs (#172).
+  const stripeScripts = ["https://js.stripe.com", "https://*.js.stripe.com"];
   return [
     "default-src 'self'",
     [
       "script-src 'self' 'unsafe-inline'",
       ...clerk,
       "https://challenges.cloudflare.com",
+      ...stripeScripts,
       "https://va.vercel-scripts.com",
     ].join(" "),
     "style-src 'self' 'unsafe-inline'",
@@ -62,10 +69,15 @@ export function reportOnlyPolicy(clerkOrigin: string | null) {
       ...clerk,
       "https://firebaseinstallations.googleapis.com",
       "https://fcmregistrations.googleapis.com",
+      "https://api.stripe.com",
     ].join(" "),
-    ["frame-src 'self'", ...clerk, "https://challenges.cloudflare.com"].join(
-      " ",
-    ),
+    [
+      "frame-src 'self'",
+      ...clerk,
+      "https://challenges.cloudflare.com",
+      ...stripeScripts,
+      "https://hooks.stripe.com",
+    ].join(" "),
     "worker-src 'self' blob:",
     "manifest-src 'self'",
     "object-src 'none'",

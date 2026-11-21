@@ -73,10 +73,33 @@ describe("securityHeaders", () => {
   it("leaves Clerk out when no publishable key is configured", () => {
     const policy = reportOnlyPolicy(null);
     expect(policy).toContain(
-      "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://va.vercel-scripts.com;",
+      "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://js.stripe.com https://*.js.stripe.com https://va.vercel-scripts.com;",
     );
     expect(policy).toContain(
-      "frame-src 'self' https://challenges.cloudflare.com;",
+      "frame-src 'self' https://challenges.cloudflare.com https://js.stripe.com https://*.js.stripe.com https://hooks.stripe.com;",
+    );
+  });
+
+  it("allows Stripe's card form for Clerk Billing checkout (#172)", () => {
+    const policy = reportOnlyPolicy("https://clerk.clockout.patmac.ca");
+    const directive = (name: string) =>
+      policy.split("; ").find((d) => d.startsWith(`${name} `)) ?? "";
+    for (const origin of [
+      "https://js.stripe.com",
+      "https://*.js.stripe.com",
+      "https://hooks.stripe.com",
+    ]) {
+      expect(directive("frame-src").split(" ")).toContain(origin);
+    }
+    expect(directive("script-src").split(" ")).toContain(
+      "https://js.stripe.com",
+    );
+    expect(directive("connect-src").split(" ")).toContain(
+      "https://api.stripe.com",
+    );
+    // Promoting frame-src to enforced carries the Stripe origins with it.
+    expect(enforcedPolicy(policy, ["frame-src"])).toContain(
+      "https://js.stripe.com",
     );
   });
 });
