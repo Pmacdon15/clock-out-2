@@ -1287,7 +1287,27 @@ describe("scheduled shifts", () => {
       null,
       null,
       null,
+      null,
     ]);
+  });
+
+  it("dbCreateScheduledShift links a week of a repeating shift", async () => {
+    sql.mockResolvedValue([]);
+    await db.ensureScheduledShiftsTable();
+    sql.mockReset();
+    sql.mockResolvedValue([{ id: 5 }]);
+    await db.dbCreateScheduledShift(
+      "o1",
+      "u1",
+      shiftStart,
+      shiftEnd,
+      null,
+      "a1",
+      undefined,
+      9,
+    );
+    expect(textOf(0)).toContain("series_id");
+    expect(valuesOf(0).at(-1)).toBe(9);
   });
 
   it("dbCreateScheduledShift stores the shift's location", async () => {
@@ -1305,7 +1325,7 @@ describe("scheduled shifts", () => {
       { site_id: 7, location: "Warehouse", location_address: "1 King St" },
     );
     expect(textOf(0)).toContain("site_id, location, location_address");
-    expect(valuesOf(0).slice(-3)).toEqual([7, "Warehouse", "1 King St"]);
+    expect(valuesOf(0).slice(-4)).toEqual([7, "Warehouse", "1 King St", null]);
   });
 
   it("dbGetOverlappingScheduledShift finds the member's clashing shift", async () => {
@@ -1663,5 +1683,121 @@ describe("time off requests", () => {
     ).resolves.toBeUndefined();
     expect(textOf(0)).toContain("SET status = 'cancelled'");
     expect(valuesOf(0)).toEqual([5, "o1", "u1", false]);
+  });
+});
+
+describe("repeating shifts", () => {
+  const shiftStart = new Date("2026-11-23T15:00:00Z");
+  const shiftEnd = new Date("2026-11-23T23:30:00Z");
+
+  /** Runs the table checks once, then forgets their SQL calls. */
+  async function ready() {
+    sql.mockResolvedValue([]);
+    await db.ensureShiftSeriesTable();
+    sql.mockReset();
+  }
+
+  beforeEach(() => {
+    db.resetScheduledShiftsTableCheck();
+    db.resetShiftSeriesTableCheck();
+  });
+
+  it("creates the table and its index once, after scheduled_shifts", async () => {
+    sql.mockResolvedValue([]);
+    await db.ensureShiftSeriesTable();
+    const texts = sql.mock.calls.map((_, i) => textOf(i));
+    expect(texts.some((t) => t.includes("series_id INTEGER"))).toBe(true);
+    expect(
+      texts.some((t) => t.includes("CREATE TABLE IF NOT EXISTS shift_series")),
+    ).toBe(true);
+    expect(texts.at(-1)).toContain("idx_shift_series_active");
+    const calls = sql.mock.calls.length;
+    await db.ensureShiftSeriesTable();
+    expect(sql.mock.calls.length).toBe(calls);
+  });
+
+  it("dbCreateShiftSeries saves the rule and links its first shift", async () => {
+    await ready();
+    sql.mockResolvedValueOnce([{ id: 4 }]).mockResolvedValueOnce([]);
+    const first = {
+      id: 3,
+      org_id: "o1",
+      user_id: "u1",
+      shift_start: shiftStart,
+      shift_end: shiftEnd,
+      note: "Desk",
+      site_id: 7,
+      location: "Shop",
+      location_address: "1 King St",
+      created_by: "a0",
+    };
+    await expect(
+      db.dbCreateShiftSeries(first, "America/Edmonton", "a1"),
+    ).resolves.toEqual({ id: 4 });
+    expect(textOf(0)).toContain("INSERT INTO shift_series");
+    expect(valuesOf(0)).toEqual([
+      "o1",
+      "u1",
+      shiftStart,
+      shiftEnd,
+      "America/Edmonton",
+      "Desk",
+      7,
+      "Shop",
+      "1 King St",
+      "a1",
+    ]);
+    expect(textOf(1)).toContain("UPDATE scheduled_shifts SET series_id");
+    expect(valuesOf(1)).toEqual([4, 3, "o1"]);
+  });
+
+  it("dbCreateShiftSeries stores missing location fields as null", async () => {
+    await ready();
+    sql.mockResolvedValueOnce([{ id: 4 }]).mockResolvedValueOnce([]);
+    await db.dbCreateShiftSeries(
+      {
+        id: 3,
+        org_id: "o1",
+        user_id: "u1",
+        shift_start: shiftStart,
+        shift_end: shiftEnd,
+        note: null,
+        created_by: "a0",
+      },
+      "UTC",
+      "a1",
+    );
+    expect(valuesOf(0).slice(6, 9)).toEqual([null, null, null]);
+  });
+
+  it("dbGetShiftSeriesById and dbGetActiveShiftSeries scope their reads", async () => {
+    await ready();
+    sql.mockResolvedValueOnce([{ id: 4 }]).mockResolvedValueOnce([{ id: 5 }]);
+    await expect(db.dbGetShiftSeriesById(4, "o1")).resolves.toEqual({ id: 4 });
+    expect(valuesOf(0)).toEqual([4, "o1"]);
+    await expect(db.dbGetActiveShiftSeries()).resolves.toEqual([{ id: 5 }]);
+    expect(textOf(1)).toContain("WHERE ended_at IS NULL");
+  });
+
+  it("dbClaimShiftSeriesWeeks only moves on from the expected week", async () => {
+    await ready();
+    sql.mockResolvedValueOnce([{ id: 4 }]).mockResolvedValueOnce([]);
+    await expect(db.dbClaimShiftSeriesWeeks(4, 1, 5)).resolves.toBe(true);
+    expect(textOf(0)).toContain("WHERE id = ? AND next_index = ?");
+    expect(valuesOf(0)).toEqual([5, 4, 1]);
+    await expect(db.dbClaimShiftSeriesWeeks(4, 1, 5)).resolves.toBe(false);
+  });
+
+  it("dbEndShiftSeries and dbDeleteShiftSeriesShiftsAfter stop a series", async () => {
+    await ready();
+    sql.mockResolvedValueOnce([{ id: 4 }]).mockResolvedValueOnce([{ id: 8 }]);
+    await expect(db.dbEndShiftSeries(4, "o1")).resolves.toEqual({ id: 4 });
+    expect(textOf(0)).toContain("SET ended_at = NOW()");
+    expect(valuesOf(0)).toEqual([4, "o1"]);
+    await expect(
+      db.dbDeleteShiftSeriesShiftsAfter(4, "o1", shiftStart),
+    ).resolves.toEqual([{ id: 8 }]);
+    expect(textOf(1)).toContain("DELETE FROM scheduled_shifts");
+    expect(valuesOf(1)).toEqual([4, "o1", shiftStart]);
   });
 });

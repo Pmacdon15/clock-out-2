@@ -11,6 +11,9 @@ import { renderWithClient, resolved } from "../utils";
 const mocks = vi.hoisted(() => ({
   createScheduledShiftAction: vi.fn(),
   createWeeklyScheduledShiftsAction: vi.fn(),
+  createRepeatingShiftAction: vi.fn(),
+  repeatShiftWeeklyAction: vi.fn(),
+  stopRepeatingShiftAction: vi.fn(),
   deleteScheduledShiftAction: vi.fn(),
   updateScheduledShiftAction: vi.fn(),
   toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
@@ -20,6 +23,9 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/lib/actions", () => ({
   createScheduledShiftAction: mocks.createScheduledShiftAction,
   createWeeklyScheduledShiftsAction: mocks.createWeeklyScheduledShiftsAction,
+  createRepeatingShiftAction: mocks.createRepeatingShiftAction,
+  repeatShiftWeeklyAction: mocks.repeatShiftWeeklyAction,
+  stopRepeatingShiftAction: mocks.stopRepeatingShiftAction,
   deleteScheduledShiftAction: mocks.deleteScheduledShiftAction,
   updateScheduledShiftAction: mocks.updateScheduledShiftAction,
 }));
@@ -758,10 +764,15 @@ describe("Schedule weekly shifts", () => {
     });
   }
 
-  it("publishes a shift every week from the form", async () => {
-    mocks.createWeeklyScheduledShiftsAction.mockResolvedValue({
+  const repeatButton = () => screen.getByRole("button", { name: "Repeat…" });
+
+  it("publishes a shift that repeats until stopped by default", async () => {
+    mocks.createRepeatingShiftAction.mockResolvedValue({
       success: true,
-      data: [{}, {}, {}],
+      data: [
+        { shift_start: "2026-01-07T09:00:00.000Z" },
+        { shift_start: "2026-02-04T09:00:00.000Z" },
+      ],
       skipped: [],
     });
     renderSchedule([]);
@@ -773,12 +784,47 @@ describe("Schedule weekly shifts", () => {
     expect(weekly).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(weekly);
     expect(weekly).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByLabelText("Every Wednesday for")).toHaveValue(4);
-    expect(screen.getByText(/Through Wed, Jan 28/)).toBeVisible();
+    expect(
+      screen.getByLabelText("Every Wednesday, until I stop it"),
+    ).toBeChecked();
+    expect(screen.getByLabelText("Number of weeks")).toBeDisabled();
+    expect(screen.getByText(/added automatically/)).toBeVisible();
 
-    fireEvent.change(screen.getByLabelText("Every Wednesday for"), {
-      target: { value: "3" },
+    fireEvent.click(
+      screen.getByRole("button", { name: "Publish repeating shift" }),
+    );
+    await waitFor(() =>
+      expect(mocks.toast.success).toHaveBeenCalledWith(
+        "Repeats every Wednesday. Scheduled through Feb 4; new weeks are added automatically.",
+      ),
+    );
+    const [memberId, start, , note, timezone, localDays, location] =
+      mocks.createRepeatingShiftAction.mock.calls[0];
+    expect(memberId).toBe("user_2");
+    expect(start).toBe("2026-01-07T09:00:00.000Z");
+    expect(note).toBe("Desk");
+    expect(timezone).toEqual(expect.any(String));
+    expect(localDays).toEqual({ start: "2026-01-07", end: "2026-01-07" });
+    expect(location).toEqual({});
+    expect(mocks.createWeeklyScheduledShiftsAction).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Note (optional)")).toHaveValue("");
+  });
+
+  it("publishes a set number of weeks from the form", async () => {
+    mocks.createWeeklyScheduledShiftsAction.mockResolvedValue({
+      success: true,
+      data: [{}, {}, {}],
+      skipped: [],
     });
+    renderSchedule([]);
+    fillForm();
+    fireEvent.click(screen.getByRole("button", { name: "Weekly" }));
+    fireEvent.click(screen.getByLabelText("For the next"));
+    const weeks = screen.getByLabelText("Number of weeks");
+    expect(weeks).toHaveValue(4);
+    expect(screen.getByText("weeks (4 shifts in total)")).toBeVisible();
+    expect(screen.getByText(/Through Wed, Jan 28/)).toBeVisible();
+    fireEvent.change(weeks, { target: { value: "3" } });
     fireEvent.click(
       screen.getByRole("button", { name: "Publish 3 weekly shifts" }),
     );
@@ -788,29 +834,31 @@ describe("Schedule weekly shifts", () => {
         "3 weekly shifts published",
       ),
     );
-    const [memberId, weeks, note, , location] =
+    const [memberId, occurrences] =
       mocks.createWeeklyScheduledShiftsAction.mock.calls[0];
     expect(memberId).toBe("user_2");
-    expect(weeks.map((w: { shiftStart: string }) => w.shiftStart)).toEqual([
+    expect(
+      occurrences.map((w: { shiftStart: string }) => w.shiftStart),
+    ).toEqual([
       "2026-01-07T09:00:00.000Z",
       "2026-01-14T09:00:00.000Z",
       "2026-01-21T09:00:00.000Z",
     ]);
-    expect(note).toBe("Desk");
-    expect(location).toEqual({});
-    expect(screen.getByLabelText("Note (optional)")).toHaveValue("");
-    expect(mocks.createScheduledShiftAction).not.toHaveBeenCalled();
+    expect(mocks.createRepeatingShiftAction).not.toHaveBeenCalled();
   });
 
   it("keeps the week count in range and words a single week", () => {
     renderSchedule([]);
     fireEvent.click(screen.getByRole("button", { name: "Weekly" }));
     // No date yet: no weekday to name.
-    const weeks = screen.getByLabelText("Every week for");
+    expect(screen.getByLabelText("Every week, until I stop it")).toBeChecked();
+    fireEvent.click(screen.getByLabelText("For the next"));
+    const weeks = screen.getByLabelText("Number of weeks");
     fireEvent.change(weeks, { target: { value: "99" } });
     expect(weeks).toHaveValue(26);
     fireEvent.change(weeks, { target: { value: "" } });
     expect(weeks).toHaveValue(1);
+    expect(screen.getByText("weeks (1 shift in total)")).toBeVisible();
     expect(
       screen.getByRole("button", { name: "Publish 1 weekly shift" }),
     ).toBeVisible();
@@ -819,6 +867,35 @@ describe("Schedule weekly shifts", () => {
   });
 
   it("warns about skipped weeks and shows errors", async () => {
+    mocks.createRepeatingShiftAction
+      .mockResolvedValueOnce({
+        success: true,
+        data: [{ shift_start: "2026-01-07T09:00:00.000Z" }],
+        skipped: [
+          { shiftStart: "2026-01-14T09:00:00.000Z", reason: "Time off" },
+        ],
+      })
+      .mockResolvedValueOnce({ success: false, error: "Nope" });
+    renderSchedule([]);
+    fillForm();
+    fireEvent.click(screen.getByRole("button", { name: "Weekly" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Publish repeating shift" }),
+    );
+    await waitFor(() =>
+      expect(mocks.toast.warning).toHaveBeenCalledWith(
+        "Repeats every Wednesday. Scheduled through Jan 7; new weeks are added automatically. Skipped Jan 14: Time off.",
+      ),
+    );
+
+    fillForm();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Publish repeating shift" }),
+    );
+    await waitFor(() => expect(mocks.toast.error).toHaveBeenCalledWith("Nope"));
+  });
+
+  it("warns about skipped weeks and errors for a set number of weeks", async () => {
     mocks.createWeeklyScheduledShiftsAction
       .mockResolvedValueOnce({
         success: true,
@@ -831,6 +908,7 @@ describe("Schedule weekly shifts", () => {
     renderSchedule([]);
     fillForm();
     fireEvent.click(screen.getByRole("button", { name: "Weekly" }));
+    fireEvent.click(screen.getByLabelText("For the next"));
     fireEvent.click(
       screen.getByRole("button", { name: "Publish 4 weekly shifts" }),
     );
@@ -845,9 +923,44 @@ describe("Schedule weekly shifts", () => {
       screen.getByRole("button", { name: "Publish 4 weekly shifts" }),
     );
     await waitFor(() => expect(mocks.toast.error).toHaveBeenCalledWith("Nope"));
+
+    // Back to repeating until stopped.
+    fireEvent.click(screen.getByLabelText("Every Wednesday, until I stop it"));
+    expect(screen.getByLabelText("Number of weeks")).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Publish repeating shift" }),
+    ).toBeVisible();
   });
 
-  it("repeats a published shift in the weeks after it", async () => {
+  it("makes a published shift repeat until stopped", async () => {
+    mocks.repeatShiftWeeklyAction.mockResolvedValue({
+      success: true,
+      data: [{ shift_start: "2026-02-09T09:00:00.000Z" }],
+      skipped: [],
+    });
+    const s = shift("scheduled", { user_id: "user_2" });
+    renderSchedule([s]);
+    fireEvent.click(repeatButton());
+    expect(repeatButton()).toHaveAttribute("aria-expanded", "true");
+    expect(
+      screen.getByLabelText("Every Monday, until I stop it"),
+    ).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Repeat weekly" }));
+
+    await waitFor(() =>
+      expect(mocks.toast.success).toHaveBeenCalledWith(
+        "Repeats every Monday. Scheduled through Feb 9; new weeks are added automatically.",
+      ),
+    );
+    expect(mocks.repeatShiftWeeklyAction).toHaveBeenCalledWith(
+      s.id,
+      expect.any(String),
+    );
+    expect(mocks.createWeeklyScheduledShiftsAction).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Repeat weekly" })).toBeNull();
+  });
+
+  it("repeats a published shift for a set number of weeks", async () => {
     mocks.createWeeklyScheduledShiftsAction.mockResolvedValue({
       success: true,
       data: [{}, {}],
@@ -860,13 +973,13 @@ describe("Schedule weekly shifts", () => {
       location: "Warehouse",
     });
     renderSchedule([s], true, true, [], sites);
-    const repeat = screen.getByLabelText("Repeat shift weekly");
-    fireEvent.click(repeat);
-    expect(repeat).toHaveAttribute("aria-pressed", "true");
-    const weeks = screen.getByLabelText("Repeat every Monday for the next");
+    fireEvent.click(repeatButton());
+    fireEvent.click(screen.getByLabelText("For the next"));
+    const weeks = screen.getByLabelText("Number of weeks");
     expect(weeks).toHaveValue(4);
     expect(screen.getByText(/through Mon, Feb 2/)).toBeVisible();
     fireEvent.change(weeks, { target: { value: "2" } });
+    expect(screen.getByText("weeks (2 more shifts)")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Repeat weekly" }));
 
     await waitFor(() =>
@@ -882,16 +995,114 @@ describe("Schedule weekly shifts", () => {
     ).toEqual(["2026-01-12T09:00:00.000Z", "2026-01-19T09:00:00.000Z"]);
     expect(note).toBe("Desk");
     expect(location).toEqual({ siteId: 7 });
-    expect(screen.queryByRole("button", { name: "Repeat weekly" })).toBeNull();
+    expect(mocks.repeatShiftWeeklyAction).not.toHaveBeenCalled();
   });
 
-  it("keeps the repeat form open on errors, and swaps with the edit form", async () => {
+  it("marks repeating shifts and stops them after a chosen week", async () => {
+    mocks.stopRepeatingShiftAction
+      .mockResolvedValueOnce({ success: false, error: "Nope" })
+      .mockResolvedValueOnce({ success: true, removed: 3 });
+    const s = shift("scheduled", { series_id: 4 });
+    renderSchedule([s]);
+    expect(screen.getByText("Repeats weekly")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Repeating…" }));
+    expect(screen.getByText(/This shift repeats every Monday/)).toBeVisible();
+    expect(screen.queryByLabelText("For the next")).toBeNull();
+
+    const stop = screen.getByRole("button", {
+      name: "Stop repeating after this shift",
+    });
+    fireEvent.click(stop);
+    await waitFor(() => expect(mocks.toast.error).toHaveBeenCalledWith("Nope"));
+    fireEvent.click(stop);
+    await waitFor(() =>
+      expect(mocks.toast.success).toHaveBeenCalledWith(
+        "Stopped repeating. Removed 3 later shifts.",
+      ),
+    );
+    expect(mocks.stopRepeatingShiftAction).toHaveBeenCalledWith(s.id);
+    expect(
+      screen.queryByRole("button", { name: "Stop repeating after this shift" }),
+    ).toBeNull();
+  });
+
+  it("words a repeat that made no new weeks yet, and a single extra week", async () => {
+    mocks.repeatShiftWeeklyAction.mockResolvedValue({
+      success: true,
+      data: [],
+      skipped: [],
+    });
+    renderSchedule([shift("scheduled")]);
+    fireEvent.click(repeatButton());
+    fireEvent.click(screen.getByLabelText("For the next"));
+    fireEvent.change(screen.getByLabelText("Number of weeks"), {
+      target: { value: "1" },
+    });
+    expect(screen.getByText("weeks (1 more shift)")).toBeVisible();
+    fireEvent.click(screen.getByLabelText("Every Monday, until I stop it"));
+    fireEvent.click(screen.getByRole("button", { name: "Repeat weekly" }));
+    await waitFor(() =>
+      expect(mocks.toast.success).toHaveBeenCalledWith(
+        "Repeats every Monday. New weeks are added automatically.",
+      ),
+    );
+  });
+
+  it("keeps the repeat form open when a set number of weeks fails", async () => {
     mocks.createWeeklyScheduledShiftsAction.mockResolvedValue({
       success: false,
       error: "Nope",
     });
     renderSchedule([shift("scheduled")]);
-    fireEvent.click(screen.getByLabelText("Repeat shift weekly"));
+    fireEvent.click(repeatButton());
+    fireEvent.click(screen.getByLabelText("For the next"));
+    fireEvent.click(screen.getByRole("button", { name: "Repeat weekly" }));
+    await waitFor(() => expect(mocks.toast.error).toHaveBeenCalledWith("Nope"));
+    expect(mocks.toast.success).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Repeat weekly" })).toBeVisible();
+  });
+
+  it("words stopping with one or no later weeks, and shows progress", async () => {
+    mocks.stopRepeatingShiftAction
+      .mockResolvedValueOnce({ success: true, removed: 1 })
+      .mockResolvedValueOnce({ success: true, removed: 0 })
+      .mockReturnValueOnce(new Promise(() => {}));
+    renderSchedule([shift("scheduled", { series_id: 4 })]);
+    const open = () =>
+      fireEvent.click(screen.getByRole("button", { name: "Repeating…" }));
+    const stop = () =>
+      fireEvent.click(
+        screen.getByRole("button", { name: "Stop repeating after this shift" }),
+      );
+    open();
+    stop();
+    await waitFor(() =>
+      expect(mocks.toast.success).toHaveBeenCalledWith(
+        "Stopped repeating. Removed 1 later shift.",
+      ),
+    );
+    open();
+    stop();
+    await waitFor(() =>
+      expect(mocks.toast.success).toHaveBeenCalledWith("Stopped repeating"),
+    );
+    open();
+    stop();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Stop repeating after this shift" }),
+      ).toBeDisabled(),
+    );
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+  });
+
+  it("keeps the repeat form open on errors, and swaps with the edit form", async () => {
+    mocks.repeatShiftWeeklyAction.mockResolvedValue({
+      success: false,
+      error: "Nope",
+    });
+    renderSchedule([shift("scheduled")]);
+    fireEvent.click(repeatButton());
     fireEvent.click(screen.getByRole("button", { name: "Repeat weekly" }));
     await waitFor(() => expect(mocks.toast.error).toHaveBeenCalledWith("Nope"));
     expect(screen.getByRole("button", { name: "Repeat weekly" })).toBeVisible();
@@ -899,18 +1110,16 @@ describe("Schedule weekly shifts", () => {
     // Editing closes the repeat form, and repeating closes the edit form.
     fireEvent.click(screen.getByLabelText("Edit shift"));
     expect(screen.queryByRole("button", { name: "Repeat weekly" })).toBeNull();
-    fireEvent.click(screen.getByLabelText("Repeat shift weekly"));
+    fireEvent.click(repeatButton());
     expect(screen.queryByRole("button", { name: "Save shift" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("button", { name: "Repeat weekly" })).toBeNull();
   });
 
   it("disables the repeat form while it publishes", async () => {
-    mocks.createWeeklyScheduledShiftsAction.mockReturnValue(
-      new Promise(() => {}),
-    );
+    mocks.repeatShiftWeeklyAction.mockReturnValue(new Promise(() => {}));
     renderSchedule([shift("scheduled")]);
-    fireEvent.click(screen.getByLabelText("Repeat shift weekly"));
+    fireEvent.click(repeatButton());
     fireEvent.click(screen.getByRole("button", { name: "Repeat weekly" }));
     await waitFor(() =>
       expect(
@@ -922,6 +1131,6 @@ describe("Schedule weekly shifts", () => {
 
   it("only offers to repeat shifts still to come", () => {
     renderSchedule([shift("no_show")]);
-    expect(screen.queryByLabelText("Repeat shift weekly")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Repeat…" })).toBeNull();
   });
 });

@@ -7,6 +7,10 @@ const mocks = vi.hoisted(() => ({
   runUpcomingShiftReminders: vi.fn(),
   scheduleAllAlertJobs: vi.fn(),
   dbPruneStaleFcmTokens: vi.fn(),
+  runShiftSeries: vi.fn(),
+}));
+vi.mock("@/lib/shift-series-runner", () => ({
+  runShiftSeries: mocks.runShiftSeries,
 }));
 vi.mock("@/lib/alert-jobs", () => ({
   scheduleAllAlertJobs: mocks.scheduleAllAlertJobs,
@@ -41,9 +45,39 @@ beforeEach(() => {
   mocks.runUpcomingShiftReminders.mockResolvedValue(reminders);
   mocks.scheduleAllAlertJobs.mockResolvedValue(jobs);
   mocks.dbPruneStaleFcmTokens.mockResolvedValue(4);
+  mocks.runShiftSeries.mockResolvedValue({ series: 1, created: 1, ended: 0 });
 });
 
 describe("/api/cron/shift-alerts", () => {
+  it("tops up repeating shifts before the reminders and digests run", async () => {
+    const order: string[] = [];
+    mocks.runShiftSeries.mockImplementation(async () => {
+      order.push("series");
+      return { series: 2, created: 3, ended: 0 };
+    });
+    mocks.runUpcomingShiftReminders.mockImplementation(async () => {
+      order.push("reminders");
+      return reminders;
+    });
+    const res = await GET(request("Bearer cron-secret"));
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      repeatingShifts: { series: 2, created: 3, ended: 0 },
+    });
+    expect(order).toEqual(["series", "reminders"]);
+  });
+
+  it("still runs the other jobs when repeating shifts fail", async () => {
+    mocks.runShiftSeries.mockRejectedValue(new Error("db down"));
+    const res = await GET(request("Bearer cron-secret"));
+    expect(res.status).toBe(500);
+    await expect(res.json()).resolves.toMatchObject({
+      success: false,
+      repeatingShifts: null,
+      reminders,
+    });
+  });
+
   it("rejects requests without the cron secret", async () => {
     const res = await GET(request("Bearer wrong"));
     expect(res.status).toBe(401);

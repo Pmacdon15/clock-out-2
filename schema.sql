@@ -233,6 +233,35 @@ CREATE INDEX IF NOT EXISTS idx_scheduled_shifts_org_start
 ALTER TABLE scheduled_shifts ADD COLUMN IF NOT EXISTS site_id INTEGER;
 ALTER TABLE scheduled_shifts ADD COLUMN IF NOT EXISTS location TEXT;
 ALTER TABLE scheduled_shifts ADD COLUMN IF NOT EXISTS location_address TEXT;
+-- The repeating shift (shift_series) a shift was made from, if any.
+ALTER TABLE scheduled_shifts ADD COLUMN IF NOT EXISTS series_id INTEGER;
+
+-- A shift that repeats every week until an admin stops it. The daily cron
+-- (/api/cron/shift-alerts) makes its coming weeks into scheduled_shifts, about
+-- five weeks ahead. Later weeks keep the first shift's local times in
+-- `timezone`; `next_index` is the week it makes next (week 0 is the first
+-- shift), so a week that was skipped or removed is never made again. Also
+-- created on first use by the app (ensureShiftSeriesTable in src/lib/db.ts).
+CREATE TABLE IF NOT EXISTS shift_series (
+    id SERIAL PRIMARY KEY,
+    org_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    first_start TIMESTAMP WITH TIME ZONE NOT NULL,
+    first_end TIMESTAMP WITH TIME ZONE NOT NULL,
+    timezone TEXT NOT NULL,
+    note TEXT,
+    site_id INTEGER,
+    location TEXT,
+    location_address TEXT,
+    next_index INTEGER NOT NULL DEFAULT 1,
+    created_by TEXT NOT NULL,
+    ended_at TIMESTAMP WITH TIME ZONE,
+    CHECK (first_end > first_start),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_shift_series_active
+    ON shift_series (org_id) WHERE ended_at IS NULL;
 
 -- Paid time off requested by members and approved by admins. Dates are
 -- whole calendar days (inclusive). Approved time off is shown alongside

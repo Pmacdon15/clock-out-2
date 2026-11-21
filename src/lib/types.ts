@@ -315,7 +315,32 @@ export type ScheduledShift = {
   location?: string | null;
   /** The picked site's street address at the time, if it had one. */
   location_address?: string | null;
+  /** The repeating shift this was made from, if it repeats weekly. */
+  series_id?: number | null;
   created_by: string;
+  created_at?: Date;
+  updated_at?: Date;
+};
+
+/** A shift that repeats every week until an admin stops it. */
+export type ShiftSeries = {
+  id: number;
+  org_id: string;
+  user_id: string;
+  /** The first week's shift; later weeks keep its local times. */
+  first_start: Date;
+  first_end: Date;
+  /** IANA zone the times were set in, e.g. "America/Edmonton". */
+  timezone: string;
+  note: string | null;
+  site_id: number | null;
+  location: string | null;
+  location_address: string | null;
+  /** The week the daily job makes next (week 0 is the first shift). */
+  next_index: number;
+  created_by: string;
+  /** When it was stopped; null while it keeps repeating. */
+  ended_at: Date | null;
   created_at?: Date;
   updated_at?: Date;
 };
