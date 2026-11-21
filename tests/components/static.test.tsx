@@ -65,10 +65,7 @@ describe("MainPageHeader", () => {
     expect(
       screen.getByRole("heading", { name: "Clock Out" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Plans" })).toHaveAttribute(
-      "href",
-      "/plans",
-    );
+    expect(screen.queryByRole("link", { name: "Plans" })).toBeNull();
     expect(screen.getByTestId("show-signed-in")).toContainElement(
       screen.getByTestId("org-switcher"),
     );
