@@ -7,6 +7,7 @@ const SIGNED_IN = [
   "/schedule",
   "/time-off",
   "/settings",
+  "/admin",
 ];
 
 /** @type {import('next-sitemap').IConfig} */

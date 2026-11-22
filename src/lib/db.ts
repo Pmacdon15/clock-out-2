@@ -101,6 +101,21 @@ export async function dbGetOrgTimeEntries(
   return await attachBreaks(rows as unknown as TimeEntry[]);
 }
 
+/**
+ * Every shift still open in an org, plus anything that started since
+ * `since`, with breaks attached. Not cached: the live dashboard must see
+ * a clock-in the moment it happens.
+ */
+export async function dbGetLiveOrgEntries(orgId: string, since: Date) {
+  const rows = await sql`
+        SELECT * FROM time_entries
+        WHERE org_id = ${orgId}
+        AND (clock_out IS NULL OR clock_in >= ${since})
+        ORDER BY clock_in ASC
+    `;
+  return await attachBreaks(rows as unknown as TimeEntry[]);
+}
+
 export async function dbCheckActiveEntry(userId: string, orgId: string) {
   const activeEntry = await sql`
         SELECT id FROM time_entries 

@@ -42,6 +42,7 @@ const mocks = vi.hoisted(() => {
     getOrgAlertSettings: vi.fn(() => "alert_settings"),
     getJobsHours: vi.fn(async (...args: unknown[]) => ({ jobs: args })),
     getMyNotificationSettings: vi.fn(() => "notification_settings"),
+    getLiveDashboard: vi.fn(() => "live_dashboard"),
   };
 });
 
@@ -110,10 +111,17 @@ vi.mock("@/components/ShiftRequests", () => ({
 vi.mock("@/components/TimeOff", () => ({
   default: mocks.capture("time-off"),
 }));
+vi.mock("@/lib/live-dashboard-dal", () => ({
+  getLiveDashboard: mocks.getLiveDashboard,
+}));
+vi.mock("@/components/LiveDashboard", () => ({
+  default: mocks.capture("live-dashboard"),
+}));
 vi.mock("@/components/OrgSettings", () => ({
   default: mocks.capture("org-settings"),
 }));
 
+import AdminDashboardPage from "@/app/(dashboard)/admin/page";
 import HoursPage from "@/app/(dashboard)/hours/page";
 import JobsPage from "@/app/(dashboard)/jobs/page";
 import DashboardLayout from "@/app/(dashboard)/layout";
@@ -424,5 +432,16 @@ describe("WelcomePage", () => {
       screen.getByRole("button", { name: "Get Started Now" }),
     ).toBeVisible();
     expect(screen.getByTestId("mcp-card")).toBeInTheDocument();
+  });
+});
+
+describe("AdminDashboardPage", () => {
+  it("starts the live read and shows the dashboard", () => {
+    render(<AdminDashboardPage />);
+    expect(screen.getByTestId("live-dashboard")).toBeInTheDocument();
+    expect(latest("live-dashboard")?.dataPromise).toBe("live_dashboard");
+    expect(
+      screen.getByRole("heading", { name: "Live dashboard" }),
+    ).toBeInTheDocument();
   });
 });

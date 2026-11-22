@@ -18,6 +18,7 @@ describe("dashboard routes", () => {
       schedule: "/schedule",
       "time-off": "/time-off",
       settings: "/settings",
+      admin: "/admin",
     });
   });
 
@@ -29,6 +30,7 @@ describe("dashboard routes", () => {
       "/schedule",
       "/time-off",
       "/settings",
+      "/admin",
     ]);
   });
 });

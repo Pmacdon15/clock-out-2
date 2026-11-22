@@ -111,6 +111,11 @@ CREATE INDEX idx_time_entries_user_org ON time_entries (user_id, org_id);
 -- Org-wide reads by date range (an admin's Hours and the Jobs page, which
 -- reads every selected organization's entries for the chosen range).
 CREATE INDEX IF NOT EXISTS idx_time_entries_org_clock_in ON time_entries (org_id, clock_in);
+-- Open shifts per org: the admin live dashboard reads every shift still on
+-- the clock (however old) on each refresh.
+CREATE INDEX IF NOT EXISTS idx_time_entries_org_open
+    ON time_entries (org_id, clock_in)
+    WHERE clock_out IS NULL;
 
 -- Break / meal-period records for a single shift. `break_type` distinguishes
 -- paid breaks (recorded only) from unpaid ones (subtracted from worked hours);
