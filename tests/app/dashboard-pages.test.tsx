@@ -31,6 +31,13 @@ const mocks = vi.hoisted(() => {
       getTimeOffRequests: vi.fn(() => "time_off"),
     },
     getShiftRequestsView: vi.fn(() => "shift_requests"),
+    availabilityView: {
+      ok: true,
+      value: { windows: ["window"] },
+    } as
+      | { ok: true; value: { windows: string[] } }
+      | { ok: false; error: { reason: string } },
+    getAvailabilityView: vi.fn(),
     getOrgPayroll: vi.fn(),
     getOrgAlertSettings: vi.fn(() => "alert_settings"),
     getJobsHours: vi.fn(async (...args: unknown[]) => ({ jobs: args })),
@@ -49,6 +56,12 @@ vi.mock("@/lib/google-calendar-actions", () => ({
 }));
 vi.mock("@/lib/shift-requests-dal", () => ({
   getShiftRequestsView: mocks.getShiftRequestsView,
+}));
+vi.mock("@/lib/availability-dal", () => ({
+  getAvailabilityView: mocks.getAvailabilityView,
+}));
+vi.mock("@/components/Availability", () => ({
+  default: mocks.capture("availability"),
 }));
 vi.mock("@/lib/payroll-dal", () => ({ getOrgPayroll: mocks.getOrgPayroll }));
 vi.mock("@/lib/alerts-dal", () => ({
@@ -128,6 +141,13 @@ const latest = (name: string) => {
 };
 
 beforeEach(() => {
+  mocks.availabilityView = {
+    ok: true,
+    value: { windows: ["window"] },
+  };
+  mocks.getAvailabilityView.mockImplementation(() =>
+    Promise.resolve(mocks.availabilityView),
+  );
   for (const key of Object.keys(mocks.props)) delete mocks.props[key];
   mocks.admin = true;
   mocks.features = new Set();
@@ -270,7 +290,8 @@ describe("SchedulePage", () => {
     mocks.features.add("scheduling");
     await renderOnce(SchedulePage);
     expect(await screen.findByTestId("schedule")).toBeVisible();
-    expect(latest("schedule")).toEqual({
+    const { availabilityPromise, ...props } = latest("schedule");
+    expect(props).toEqual({
       calendarFeedPromise: "calendar_feed",
       googleConnectedPromise: "google_connected",
       isAdmin: true,
@@ -284,6 +305,22 @@ describe("SchedulePage", () => {
     expect(latest("shift-requests")).toEqual({
       viewPromise: "shift_requests",
     });
+    // One availability read feeds the schedule's warnings and its own card.
+    expect(mocks.getAvailabilityView).toHaveBeenCalledTimes(1);
+    await expect(availabilityPromise).resolves.toEqual(["window"]);
+    expect(await screen.findByTestId("availability")).toBeVisible();
+    expect(latest("availability").membersPromise).toBe("members");
+    await expect(latest("availability").viewPromise).resolves.toBe(
+      mocks.availabilityView,
+    );
+  });
+
+  it("passes no availability windows when they can't be read", async () => {
+    mocks.features.add("scheduling");
+    mocks.availabilityView = { ok: false, error: { reason: "down" } };
+    await renderOnce(SchedulePage);
+    expect(await screen.findByTestId("schedule")).toBeVisible();
+    await expect(latest("schedule").availabilityPromise).resolves.toEqual([]);
   });
 
   it("only loads the saved sites (shift locations) for admins", async () => {
@@ -294,6 +331,9 @@ describe("SchedulePage", () => {
     expect(latest("schedule")).toMatchObject({ isAdmin: false });
     expect(latest("schedule").sitesPromise).toBeUndefined();
     expect(mocks.dal.getOrgSites).not.toHaveBeenCalled();
+    // Members manage their own availability but aren't warned about others'.
+    expect(latest("schedule").availabilityPromise).toBeUndefined();
+    expect(latest("availability").membersPromise).toBeUndefined();
   });
 
   it("offers an upgrade on plans without it", async () => {

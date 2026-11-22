@@ -1,6 +1,7 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type {
+  AvailabilityWindow,
   ScheduledShiftWithStatus,
   ShiftStatus,
   SiteData,
@@ -1216,5 +1217,149 @@ describe("Schedule weekly shifts", () => {
   it("only offers to repeat shifts still to come", () => {
     renderSchedule([shift("no_show")]);
     expect(screen.queryByRole("button", { name: "Repeat…" })).toBeNull();
+  });
+});
+
+describe("availability warnings", () => {
+  // 2026-01-05 is a Monday; tests run in UTC.
+  const window = (
+    over: Partial<AvailabilityWindow> = {},
+  ): AvailabilityWindow => ({
+    id: 1,
+    org_id: "org_1",
+    user_id: "user_1",
+    kind: "unavailable",
+    weekday: 1,
+    start_minute: 8 * 60,
+    end_minute: 12 * 60,
+    timezone: "UTC",
+    note: "Class",
+    created_at: "2026-01-01T00:00:00Z",
+    ...over,
+  });
+
+  function renderWith(
+    shifts: ScheduledShiftWithStatus[],
+    availability: AvailabilityWindow[],
+    isAdmin = true,
+  ) {
+    renderWithClient(
+      <Schedule
+        availabilityPromise={resolved(availability)}
+        isAdmin={isAdmin}
+        membersPromise={resolved(members)}
+        schedulePromise={resolved({ ok: true as const, value: shifts })}
+        timeOffPromise={resolved({ ok: true as const, value: [] })}
+      />,
+    );
+  }
+
+  it("warns, without blocking, when a new shift clashes", async () => {
+    renderWith(
+      [],
+      [window(), window({ id: 2, user_id: "user_2", kind: "available" })],
+    );
+    fireEvent.change(await screen.findByLabelText("Member"), {
+      target: { value: "user_1" },
+    });
+    fireEvent.change(screen.getByLabelText("Date"), {
+      target: { value: "2026-01-05" },
+    });
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Sam is unavailable Mondays, 8:00 AM – 12:00 PM (Class). You can still publish it.",
+    );
+    expect(screen.getByRole("button", { name: "Publish shift" })).toBeEnabled();
+
+    // Alex has only said they're free on Mondays 8–12, so 9–5 is outside it.
+    fireEvent.change(screen.getByLabelText("Member"), {
+      target: { value: "user_2" },
+    });
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "This shift is outside the times Alex said they're available.",
+    );
+
+    // A day with nothing set for Sam is fine.
+    fireEvent.change(screen.getByLabelText("Member"), {
+      target: { value: "user_1" },
+    });
+    fireEvent.change(screen.getByLabelText("Date"), {
+      target: { value: "2026-01-06" },
+    });
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("names an unknown member generically", async () => {
+    renderWithClient(
+      <Schedule
+        availabilityPromise={resolved([window({ user_id: "ghost" })])}
+        isAdmin
+        membersPromise={resolved([{ id: "ghost", name: "" }])}
+        schedulePromise={resolved({ ok: true as const, value: [] })}
+      />,
+    );
+    fireEvent.change(await screen.findByLabelText("Member"), {
+      target: { value: "ghost" },
+    });
+    fireEvent.change(screen.getByLabelText("Date"), {
+      target: { value: "2026-01-05" },
+    });
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "This member is unavailable Mondays",
+    );
+  });
+
+  it("flags upcoming shifts that clash and warns while editing", async () => {
+    renderWith(
+      [
+        shift("scheduled"),
+        shift("scheduled", {
+          user_id: "user_2",
+          shift_start: new Date("2026-01-05T13:00:00Z"),
+          shift_end: new Date("2026-01-05T17:00:00Z"),
+        }),
+        shift("scheduled", {
+          user_id: "user_2",
+          shift_start: new Date("2026-01-06T13:00:00Z"),
+          shift_end: new Date("2026-01-06T17:00:00Z"),
+        }),
+        shift("no_show"),
+      ],
+      [
+        window(),
+        window({
+          id: 2,
+          user_id: "user_2",
+          kind: "available",
+          start_minute: 0,
+          end_minute: 1440,
+        }),
+      ],
+    );
+    const badge = await screen.findByText("Unavailable");
+    expect(badge).toHaveAttribute(
+      "title",
+      "Sam is unavailable Mondays, 8:00 AM – 12:00 PM (Class).",
+    );
+    // The past no-show isn't flagged; Alex is free all Monday, not Tuesday.
+    expect(screen.getAllByText("Unavailable")).toHaveLength(1);
+    expect(screen.getAllByText("Outside availability")).toHaveLength(1);
+
+    fireEvent.click(screen.getAllByLabelText("Edit shift")[0]);
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Sam is unavailable Mondays",
+    );
+    const editStart = document.querySelector(
+      '[id^="editShift"][id$="Start"]',
+    ) as HTMLInputElement;
+    fireEvent.change(editStart, { target: { value: "13:00" } });
+    expect(screen.queryByRole("status")).toBeNull();
+    fireEvent.change(editStart, { target: { value: "" } });
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("shows members no availability badges", async () => {
+    renderWith([shift("scheduled")], [window()], false);
+    expect(await screen.findByText("My schedule")).toBeVisible();
+    expect(screen.queryByText("Unavailable")).toBeNull();
   });
 });
