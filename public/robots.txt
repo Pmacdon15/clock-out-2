@@ -9,6 +9,7 @@ Disallow: /notifications
 Disallow: /schedule
 Disallow: /time-off
 Disallow: /settings
+Disallow: /admin
 
 # Host
 Host: https://clockout.patmac.ca

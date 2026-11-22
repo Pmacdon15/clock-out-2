@@ -11,6 +11,7 @@ export const DASHBOARD_ROUTES = {
   schedule: "/schedule",
   "time-off": "/time-off",
   settings: "/settings",
+  admin: "/admin",
 } as const;
 
 export type DashboardTab = keyof typeof DASHBOARD_ROUTES;
