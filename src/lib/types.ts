@@ -456,3 +456,25 @@ export type TimeOffAllowance = {
   pto_days: number;
   updated_at?: Date;
 };
+
+/** Whether a weekly availability window is time a member can or can't work. */
+export type AvailabilityKind = "available" | "unavailable";
+
+/**
+ * A weekly window a member set (`member_availability` in schema.sql). Minutes
+ * are after local midnight in `timezone`; an end at or before the start runs
+ * into the next day.
+ */
+export type AvailabilityWindow = {
+  id: number;
+  org_id: string;
+  user_id: string;
+  kind: AvailabilityKind;
+  /** 0 = Sunday … 6 = Saturday. */
+  weekday: number;
+  start_minute: number;
+  end_minute: number;
+  timezone: string;
+  note: string | null;
+  created_at: Date | string;
+};

@@ -373,6 +373,29 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_shift_requests_one_active
     ON shift_requests (shift_id)
     WHERE status IN ('open', 'pending_approval');
 
+-- When a member says they can or can't work, every week. Times are minutes
+-- after local midnight in `timezone` (the member's zone when saved); an
+-- end_minute at or before start_minute runs past midnight into the next day.
+-- Once a member has any 'available' window, shifts outside all of them are
+-- flagged; 'unavailable' windows flag shifts that overlap them. The Schedule
+-- page only warns, it never refuses a shift. Also created on first use by the
+-- app (ensureAvailabilityTable in src/lib/availability-db.ts).
+CREATE TABLE IF NOT EXISTS member_availability (
+    id SERIAL PRIMARY KEY,
+    org_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('available', 'unavailable')),
+    weekday SMALLINT NOT NULL CHECK (weekday BETWEEN 0 AND 6),
+    start_minute SMALLINT NOT NULL CHECK (start_minute BETWEEN 0 AND 1439),
+    end_minute SMALLINT NOT NULL CHECK (end_minute BETWEEN 1 AND 1440),
+    timezone TEXT NOT NULL,
+    note TEXT,
+    CHECK (start_minute <> end_minute),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_member_availability_org_user
+    ON member_availability (org_id, user_id);
+
 -- Fixed-window rate limits for actions that spend third-party quota
 -- (src/lib/rate-limit.ts creates it on first use too).
 CREATE TABLE IF NOT EXISTS rate_limits (
