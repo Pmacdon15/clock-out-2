@@ -355,8 +355,13 @@ export async function updateBreakAction(
 export async function updateLocationSettingsAction(
   captureMode: string,
   restrictClockIn: boolean,
+  arrivalPrompts?: boolean,
 ) {
-  const result = await updateLocationSettingsDal(captureMode, restrictClockIn);
+  const result = await updateLocationSettingsDal(
+    captureMode,
+    restrictClockIn,
+    arrivalPrompts,
+  );
 
   return result.match(
     (entry) => {

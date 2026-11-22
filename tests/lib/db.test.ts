@@ -754,7 +754,7 @@ describe("location settings and sites", () => {
   it("ensureLocationTables creates the tables and the entry columns", async () => {
     sql.mockResolvedValue([]);
     await db.ensureLocationTables();
-    expect(sql).toHaveBeenCalledTimes(5);
+    expect(sql).toHaveBeenCalledTimes(6);
     expect(textOf(0)).toContain("CREATE TABLE IF NOT EXISTS settings");
     expect(textOf(1)).toContain("CREATE TABLE IF NOT EXISTS location_settings");
     expect(textOf(1)).toContain("capture_mode TEXT NOT NULL DEFAULT 'off'");
@@ -765,10 +765,14 @@ describe("location settings and sites", () => {
     expect(textOf(2)).toContain("radius_meters DOUBLE PRECISION");
     expect(textOf(3)).toContain("ALTER TABLE sites");
     expect(textOf(3)).toContain("ADD COLUMN IF NOT EXISTS address TEXT");
-    expect(textOf(4)).toContain("ALTER TABLE time_entries");
-    expect(textOf(4)).toContain("clock_in_latitude DOUBLE PRECISION");
-    expect(textOf(4)).toContain("clock_out_site_name TEXT");
-    expect(textOf(4)).toContain("clock_out_address TEXT");
+    expect(textOf(4)).toContain("ALTER TABLE location_settings");
+    expect(textOf(4)).toContain(
+      "ADD COLUMN IF NOT EXISTS arrival_prompts BOOLEAN NOT NULL DEFAULT FALSE",
+    );
+    expect(textOf(5)).toContain("ALTER TABLE time_entries");
+    expect(textOf(5)).toContain("clock_in_latitude DOUBLE PRECISION");
+    expect(textOf(5)).toContain("clock_out_site_name TEXT");
+    expect(textOf(5)).toContain("clock_out_address TEXT");
   });
 
   it("ensureLocationTables only runs once per instance", async () => {
@@ -776,7 +780,7 @@ describe("location settings and sites", () => {
     await db.ensureLocationTables();
     await db.ensureLocationTables();
     await db.ensureLocationTables();
-    expect(sql).toHaveBeenCalledTimes(5);
+    expect(sql).toHaveBeenCalledTimes(6);
   });
 
   it("ensureLocationTables retries after a failure", async () => {
@@ -785,7 +789,7 @@ describe("location settings and sites", () => {
     sql.mockReset();
     sql.mockResolvedValue([]);
     await db.ensureLocationTables();
-    expect(sql).toHaveBeenCalledTimes(5);
+    expect(sql).toHaveBeenCalledTimes(6);
   });
 
   it("dbGetLocationSettings creates the tables first, then reads and tags the cache", async () => {
@@ -796,13 +800,14 @@ describe("location settings and sites", () => {
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ org_id: "o1", capture_mode: "required" }]);
     await expect(db.dbGetLocationSettings("o1")).resolves.toEqual({
       org_id: "o1",
       capture_mode: "required",
     });
-    expect(textOf(5)).toContain("SELECT * FROM location_settings");
-    expect(valuesOf(5)).toEqual(["o1"]);
+    expect(textOf(6)).toContain("SELECT * FROM location_settings");
+    expect(valuesOf(6)).toEqual(["o1"]);
     expect(cacheTag).toHaveBeenCalledWith("location-settings-o1");
   });
 
@@ -830,7 +835,26 @@ describe("location settings and sites", () => {
     ).resolves.toEqual({ org_id: "o1", capture_mode: "optional" });
     expect(textOf(0)).toContain("INSERT INTO settings");
     expect(textOf(1)).toContain("INSERT INTO location_settings");
-    expect(valuesOf(1)).toEqual(["o1", "optional", true, "optional", true]);
+    // Prompts left unset start off on a new row and keep their stored value.
+    expect(textOf(1)).toContain("COALESCE(");
+    expect(valuesOf(1)).toEqual([
+      "o1",
+      "optional",
+      true,
+      false,
+      "optional",
+      true,
+      null,
+    ]);
+  });
+
+  it("dbUpdateLocationSettings saves arrival prompts when given", async () => {
+    sql.mockResolvedValue([]);
+    await db.ensureLocationTables();
+    sql.mockReset();
+    sql.mockResolvedValueOnce([]).mockResolvedValueOnce([{ org_id: "o1" }]);
+    await db.dbUpdateLocationSettings("o1", "off", false, true);
+    expect(valuesOf(1)).toEqual(["o1", "off", false, true, "off", false, true]);
   });
 
   it("dbGetSites reads the org's sites in name order and tags the cache", async () => {

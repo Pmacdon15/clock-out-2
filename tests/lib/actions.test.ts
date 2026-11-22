@@ -561,6 +561,13 @@ describe("updateLocationSettingsAction", () => {
     expect(mocks.updateLocationSettingsDal).toHaveBeenCalledWith(
       "required",
       true,
+      undefined,
+    );
+    await updateLocationSettingsAction("off", false, true);
+    expect(mocks.updateLocationSettingsDal).toHaveBeenLastCalledWith(
+      "off",
+      false,
+      true,
     );
     expect(mocks.updateTag).toHaveBeenCalledWith("location-settings-org_1");
   });

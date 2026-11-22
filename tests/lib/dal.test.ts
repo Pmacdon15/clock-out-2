@@ -1898,9 +1898,38 @@ describe("updateLocationSettingsDal", () => {
         "org_1",
         mode,
         true,
+        undefined,
       );
     },
   );
+
+  it.each([true, false])("saves arrival prompts set to %s", async (on) => {
+    mocks.protect.mockResolvedValue(withFeatures(admin, "geofencing"));
+    mocks.dbUpdateLocationSettings.mockResolvedValue({ org_id: "org_1" });
+    expect(
+      (await updateLocationSettingsDal("optional", false, on)).isOk(),
+    ).toBe(true);
+    expect(mocks.dbUpdateLocationSettings).toHaveBeenCalledWith(
+      "org_1",
+      "optional",
+      false,
+      on,
+    );
+  });
+
+  it("rejects an arrival prompt value that isn't a boolean", async () => {
+    mocks.protect.mockResolvedValue(withFeatures(admin, "geofencing"));
+    expect(
+      (
+        await updateLocationSettingsDal(
+          "optional",
+          false,
+          "yes" as unknown as boolean,
+        )
+      )._unsafeUnwrapErr(),
+    ).toEqual({ reason: "Invalid location settings" });
+    expect(mocks.dbUpdateLocationSettings).not.toHaveBeenCalled();
+  });
 
   it("returns an error when the save fails", async () => {
     mocks.protect.mockResolvedValue(withFeatures(admin, "geofencing"));
