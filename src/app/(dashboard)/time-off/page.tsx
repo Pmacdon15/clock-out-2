@@ -12,7 +12,10 @@ import {
 import { TIME_OFF_FEATURE } from "@/lib/plan-features";
 import { getSession, hasFeature, isAdmin } from "@/lib/session";
 
-export const metadata: Metadata = { title: "Time Off | Clock Out" };
+export const metadata: Metadata = {
+  title: "Time Off",
+  robots: { index: false, follow: false },
+};
 
 export default function TimeOffPage() {
   return (

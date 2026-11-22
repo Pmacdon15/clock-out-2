@@ -6,7 +6,10 @@ import { getMyNotificationSettings } from "@/lib/alerts-dal";
 import { NOTIFICATIONS_FEATURE } from "@/lib/billing";
 import { hasFeature, isAdmin } from "@/lib/session";
 
-export const metadata: Metadata = { title: "Notifications | Clock Out" };
+export const metadata: Metadata = {
+  title: "Notifications",
+  robots: { index: false, follow: false },
+};
 
 export default function NotificationsPage() {
   return (

@@ -5,7 +5,10 @@ import JobsPanel from "@/components/JobsPanel";
 import { getJobsHours } from "@/lib/jobs-dal";
 import { parseParams } from "@/lib/utils";
 
-export const metadata: Metadata = { title: "Jobs | Clock Out" };
+export const metadata: Metadata = {
+  title: "Jobs",
+  robots: { index: false, follow: false },
+};
 
 /**
  * Hours across all (or a chosen few) of the signed-in user's organizations
