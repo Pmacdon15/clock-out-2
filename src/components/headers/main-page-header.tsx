@@ -5,8 +5,6 @@ import {
   UserButton,
 } from "@clerk/nextjs";
 import { dark } from "@clerk/ui/themes";
-import Link from "next/link";
-
 import { Suspense } from "react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
@@ -20,12 +18,6 @@ export default function MainPageHeader() {
         </p>
       </div>
       <div className="flex items-center gap-6">
-        <Link
-          className="font-medium text-sm text-zinc-500 transition-colors hover:text-zinc-900 dark:hover:text-zinc-100"
-          href="/plans"
-        >
-          Plans
-        </Link>
         <ThemeToggle />
         <Suspense>
           <Show when="signed-in">
