@@ -70,6 +70,7 @@ describe.skipIf(!built && !process.env.REQUIRE_BUILD)(
         "/schedule",
         "/time-off",
         "/settings",
+        "/admin",
         "/welcome",
         "/plans",
         "/privacy",
@@ -119,6 +120,7 @@ describe.skipIf(!built && !process.env.REQUIRE_BUILD)(
         "/schedule",
         "/time-off",
         "/settings",
+        "/admin",
       ]) {
         const html = htmlFor(route) ?? "";
         expect(html, route).toContain('aria-label="Dashboard"');

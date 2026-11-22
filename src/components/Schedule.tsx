@@ -25,6 +25,12 @@ import {
   updateScheduledShiftAction,
 } from "@/lib/actions";
 import {
+  type AvailabilityConflict,
+  availabilityConflictMessage,
+  findAvailabilityConflict,
+  windowsFor,
+} from "@/lib/availability";
+import {
   activeFilterCount,
   countShiftStatuses,
   DEFAULT_REPEAT_WEEKS,
@@ -50,6 +56,7 @@ import {
   TIME_OFF_TYPE_LABELS,
 } from "@/lib/time-off-utils";
 import type {
+  AvailabilityWindow,
   ScheduledShiftWithStatus,
   SerializableResult,
   ShiftStatus,
@@ -78,6 +85,8 @@ interface ScheduleProps {
   googleConnectedPromise?: Promise<boolean>;
   /** The org's saved work sites, offered as shift locations (admins). */
   sitesPromise?: Promise<SerializableResult<SiteData[], { reason: string }>>;
+  /** Everyone's weekly availability, so admins are warned about clashes. */
+  availabilityPromise?: Promise<AvailabilityWindow[]>;
   isAdmin: boolean;
 }
 
@@ -203,6 +212,24 @@ function toastRepeatingResult(
     .map((week) => format(new Date(week.shiftStart), "MMM d"))
     .join(", ");
   toast.warning(`${message} Skipped ${days}: ${res.skipped[0].reason}.`);
+}
+
+/** Amber notice that a shift clashes with the member's availability. */
+function AvailabilityWarning({
+  name,
+  conflict,
+}: {
+  name: string | undefined;
+  conflict: AvailabilityConflict;
+}) {
+  return (
+    <p
+      className="mb-3 rounded-xl bg-amber-100 p-3 font-medium text-amber-800 text-sm dark:bg-amber-950 dark:text-amber-200"
+      role="status"
+    >
+      {availabilityConflictMessage(name, conflict)} You can still publish it.
+    </p>
+  );
 }
 
 /** How a shift repeats: until stopped, or for a set number of weeks. */
@@ -363,10 +390,15 @@ function EditShiftForm({
   shift,
   sites,
   onDone,
+  availability = [],
+  memberName,
 }: {
   shift: ScheduledShiftWithStatus;
   sites: Site[];
   onDone: () => void;
+  /** The shift's member's weekly availability. */
+  availability?: AvailabilityWindow[];
+  memberName?: string;
 }) {
   const start = new Date(shift.shift_start);
   const end = new Date(shift.shift_end);
@@ -406,6 +438,14 @@ function EditShiftForm({
   });
 
   const id = `editShift${shift.id}`;
+  const times =
+    date && startTime && endTime
+      ? buildShiftTimes(date, startTime, endTime)
+      : undefined;
+  const clash =
+    times && !Number.isNaN(times.shiftStart.getTime())
+      ? findAvailabilityConflict(availability, times.shiftStart, times.shiftEnd)
+      : null;
   return (
     <form
       className="grid grid-cols-1 gap-3 pt-2 sm:grid-cols-2 lg:grid-cols-4"
@@ -471,6 +511,11 @@ function EditShiftForm({
           value={location}
         />
       </div>
+      {clash && (
+        <div className="sm:col-span-2 lg:col-span-4">
+          <AvailabilityWarning conflict={clash} name={memberName} />
+        </div>
+      )}
       <div className="flex gap-2 sm:col-span-2 lg:col-span-4">
         <Button
           disabled={!date || !startTime || !endTime || isPending}
@@ -634,11 +679,14 @@ function ShiftRow({
   memberName,
   isAdmin,
   sites,
+  availability = [],
 }: {
   shift: ScheduledShiftWithStatus;
   memberName?: string;
   isAdmin: boolean;
   sites: Site[];
+  /** The shift's member's weekly availability (admins). */
+  availability?: AvailabilityWindow[];
 }) {
   const [confirming, setConfirming] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -661,6 +709,10 @@ function ShiftRow({
   const actualIn = shift.actual_clock_in;
   const actualOut = shift.actual_clock_out;
   const mapUrl = shiftLocationMapUrl(shift);
+  const clash =
+    isAdmin && isCurrentOrUpcoming(shift)
+      ? findAvailabilityConflict(availability, start, end)
+      : null;
 
   return (
     <li className="flex flex-col gap-1.5 border-zinc-100 border-b py-4 last:border-0 dark:border-zinc-800">
@@ -676,6 +728,16 @@ function ShiftRow({
           </span>
         </div>
         <div className="flex items-center gap-2">
+          {clash && (
+            <span
+              className="rounded-full bg-amber-100 px-2.5 py-0.5 font-semibold text-amber-700 text-xs dark:bg-amber-950 dark:text-amber-300"
+              title={availabilityConflictMessage(memberName, clash)}
+            >
+              {clash.type === "unavailable"
+                ? "Unavailable"
+                : "Outside availability"}
+            </span>
+          )}
           {shift.series_id != null && (
             <span className="flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 font-semibold text-blue-700 text-xs dark:bg-blue-950 dark:text-blue-300">
               <Repeat aria-hidden="true" className="h-3 w-3" />
@@ -780,6 +842,8 @@ function ShiftRow({
       )}
       {isAdmin && editing && (
         <EditShiftForm
+          availability={availability}
+          memberName={memberName}
           onDone={() => setEditing(false)}
           shift={shift}
           sites={sites}
@@ -801,10 +865,13 @@ function ShiftForm({
   sites,
   timeOff,
   shifts,
+  availability,
 }: {
   members: Member[];
   sites: Site[];
   timeOff: TimeOffRequest[];
+  /** Everyone's weekly availability, for warning (never blocking). */
+  availability: AvailabilityWindow[];
   /** Shifts already published, so the same slot isn't booked twice. */
   shifts: ScheduledShiftWithStatus[];
 }) {
@@ -908,6 +975,13 @@ function ShiftForm({
   const overlap = times
     ? findOverlappingShift(shifts, memberId, times.shiftStart, times.shiftEnd)
     : undefined;
+  const clash = times
+    ? findAvailabilityConflict(
+        windowsFor(availability, memberId),
+        times.shiftStart,
+        times.shiftEnd,
+      )
+    : null;
   const canSubmit = filled && !conflict && !overlap && !isPending;
   const lastWeek =
     weekly && repeatMode === "weeks" && times
@@ -1065,6 +1139,12 @@ function ShiftForm({
             {format(new Date(overlap.shift_end), "h:mm a")}. Edit that shift or
             pick a time that doesn't overlap it.
           </p>
+        )}
+        {!conflict && !overlap && clash && (
+          <AvailabilityWarning
+            conflict={clash}
+            name={new Map(members.map((m) => [m.id, m.name])).get(memberId)}
+          />
         )}
         <Button
           className="w-full sm:w-auto"
@@ -1263,6 +1343,7 @@ export default function Schedule({
   calendarFeedPromise,
   googleConnectedPromise,
   sitesPromise,
+  availabilityPromise,
   isAdmin,
 }: ScheduleProps) {
   const result = use(schedulePromise);
@@ -1271,6 +1352,7 @@ export default function Schedule({
   const members = membersPromise ? use(membersPromise) : [];
   const timeOffResult = timeOffPromise ? use(timeOffPromise) : null;
   const timeOff = timeOffResult?.ok ? timeOffResult.value : [];
+  const availability = availabilityPromise ? use(availabilityPromise) : [];
   const [filters, setFilters] = useState<ShiftFilters>(EMPTY_SHIFT_FILTERS);
 
   if (!result.ok) {
@@ -1301,6 +1383,7 @@ export default function Schedule({
       <ul>
         {list.map((shift) => (
           <ShiftRow
+            availability={windowsFor(availability, shift.user_id)}
             isAdmin={isAdmin}
             key={shift.id}
             memberName={nameFor(shift)}
@@ -1362,6 +1445,7 @@ export default function Schedule({
 
         {isAdmin && (
           <ShiftForm
+            availability={availability}
             members={members}
             shifts={result.value}
             sites={sites}

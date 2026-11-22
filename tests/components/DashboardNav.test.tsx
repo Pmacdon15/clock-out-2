@@ -41,11 +41,13 @@ describe("DashboardNav", () => {
     expect(link("Schedule")).toHaveAttribute("href", "/schedule");
     expect(link("Time Off")).toHaveAttribute("href", "/time-off");
     expect(screen.queryByRole("link", { name: "Settings" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Live" })).toBeNull();
   });
 
-  it("adds Settings for admins", () => {
+  it("adds the live dashboard and Settings for admins", () => {
     mocks.isAdmin = true;
     render(<DashboardNav />);
+    expect(link("Live")).toHaveAttribute("href", "/admin");
     expect(link("Settings")).toHaveAttribute("href", "/settings");
   });
 

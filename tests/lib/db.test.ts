@@ -77,6 +77,18 @@ describe("dbGetTimeEntries", () => {
   });
 });
 
+describe("dbGetLiveOrgEntries", () => {
+  it("reads open shifts and recent ones for the org, uncached", async () => {
+    sql.mockResolvedValue([{ id: 3 }]);
+    await expect(db.dbGetLiveOrgEntries("o1", start)).resolves.toEqual([
+      { id: 3, breaks: [] },
+    ]);
+    expect(valuesOf()).toEqual(["o1", start]);
+    expect(textOf()).toContain("clock_out IS NULL OR clock_in >=");
+    expect(cacheTag).not.toHaveBeenCalled();
+  });
+});
+
 describe("dbGetOrgTimeEntries", () => {
   it("filters by date range when both dates are given", async () => {
     sql.mockResolvedValue([{ id: 2 }]);

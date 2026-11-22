@@ -5,7 +5,7 @@ import DashboardNavLink from "./DashboardNavLink";
 
 /**
  * The dashboard's page links. Every member's links are in the static shell;
- * only the admin-only Settings link waits on the session, in its own hole.
+ * only the admin-only Live and Settings links wait on the session, in its own hole.
  */
 export default function DashboardNav() {
   return (
@@ -31,6 +31,9 @@ export default function DashboardNav() {
       </DashboardNavLink>
       <Suspense fallback={null}>
         <Show when={{ role: "org:admin" }}>
+          <DashboardNavLink href={DASHBOARD_ROUTES.admin}>
+            Live
+          </DashboardNavLink>
           <DashboardNavLink href={DASHBOARD_ROUTES.settings}>
             Settings
           </DashboardNavLink>

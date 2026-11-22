@@ -39,6 +39,7 @@ describe("proxy", () => {
       "/schedule",
       "/time-off",
       "/settings",
+      "/admin",
     ]) {
       const { protect, response } = await run(path);
       expect(protect, path).toHaveBeenCalledTimes(1);
