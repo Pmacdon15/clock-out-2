@@ -23,7 +23,10 @@ import {
 } from "@/lib/plan-features";
 import { hasFeature, isAdmin } from "@/lib/session";
 
-export const metadata: Metadata = { title: "Settings | Clock Out" };
+export const metadata: Metadata = {
+  title: "Settings",
+  robots: { index: false, follow: false },
+};
 
 export default function SettingsPage() {
   return (

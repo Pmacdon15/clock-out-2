@@ -5,6 +5,7 @@ import { Analytics } from "@vercel/analytics/next";
 import Footer from "@/components/Footer";
 import { Providers } from "@/components/Providers";
 import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
+import { SITE_DESCRIPTION, SITE_NAME, SITE_TITLE, SITE_URL } from "@/lib/site";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
 
 const geistSans = Geist({
@@ -25,8 +26,31 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "Clock Out | Simple Time Tracking",
-  description: "Clean and efficient time tracking for your organization.",
+  metadataBase: new URL(SITE_URL),
+  title: { default: SITE_TITLE, template: `%s | ${SITE_NAME}` },
+  description: SITE_DESCRIPTION,
+  applicationName: SITE_NAME,
+  keywords: [
+    "time tracking",
+    "time clock",
+    "employee timesheet",
+    "clock in clock out",
+    "shift scheduling",
+    "overtime tracking",
+    "time off",
+  ],
+  openGraph: {
+    type: "website",
+    siteName: SITE_NAME,
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+    locale: "en_CA",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+  },
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,

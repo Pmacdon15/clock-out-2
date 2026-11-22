@@ -1,6 +1,14 @@
 # *
 User-agent: *
 Allow: /
+Disallow: /api/
+Disallow: /welcome
+Disallow: /hours
+Disallow: /jobs
+Disallow: /notifications
+Disallow: /schedule
+Disallow: /time-off
+Disallow: /settings
 
 # Host
 Host: https://clockout.patmac.ca

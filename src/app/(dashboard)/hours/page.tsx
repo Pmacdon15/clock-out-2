@@ -16,7 +16,10 @@ import { getOrgPayroll } from "@/lib/payroll-dal";
 import { getSession, isAdmin } from "@/lib/session";
 import { parseParams } from "@/lib/utils";
 
-export const metadata: Metadata = { title: "Hours | Clock Out" };
+export const metadata: Metadata = {
+  title: "Hours",
+  robots: { index: false, follow: false },
+};
 
 export default function HoursPage({ searchParams }: PageProps<"/hours">) {
   // Not awaited: the page stays in the static shell, and each read below

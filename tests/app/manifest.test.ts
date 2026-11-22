@@ -4,7 +4,7 @@ import manifest from "@/app/manifest";
 describe("Web App Manifest", () => {
   it("provides full PWA manifest configuration", () => {
     const data = manifest();
-    expect(data.name).toBe("Clock Out | Simple Time Tracking");
+    expect(data.name).toBe("Clock Out | Simple Time Tracking for Teams");
     expect(data.short_name).toBe("Clock Out");
     expect(data.display).toBe("standalone");
     expect(data.start_url).toBe("/");

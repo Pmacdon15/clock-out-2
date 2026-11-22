@@ -1,7 +1,25 @@
 import { SignInButton } from "@clerk/nextjs";
+import type { Metadata } from "next";
 import MainPageHeader from "@/components/headers/main-page-header";
 import InstallPrompt from "@/components/InstallPrompt";
 import McpConnectCard from "@/components/McpConnectCard";
+import { SITE_DESCRIPTION, SITE_NAME, SITE_URL } from "@/lib/site";
+
+// Served at `/` (the proxy rewrites signed-out visitors here), so `/` is the
+// canonical URL and `/welcome` itself stays out of the sitemap.
+export const metadata: Metadata = {
+  alternates: { canonical: "/" },
+};
+
+const JSON_LD = JSON.stringify({
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  name: SITE_NAME,
+  url: SITE_URL,
+  description: SITE_DESCRIPTION,
+  applicationCategory: "BusinessApplication",
+  operatingSystem: "Web, iOS, Android",
+}).replace(/</g, "\\u003c");
 
 /**
  * The signed-out home page. The proxy rewrites `/` here for visitors without
@@ -30,6 +48,11 @@ export default function WelcomePage() {
         </SignInButton>
       </div>
       <McpConnectCard />
+      <script
+        // biome-ignore lint/security/noDangerouslySetInnerHtml: static JSON-LD built from constants
+        dangerouslySetInnerHTML={{ __html: JSON_LD }}
+        type="application/ld+json"
+      />
     </main>
   );
 }

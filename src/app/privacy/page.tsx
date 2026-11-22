@@ -1,5 +1,13 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { MailIcon, ShieldIcon } from "@/components/ui/Icons";
+
+export const metadata: Metadata = {
+  title: "Privacy Policy",
+  description:
+    "How Clock Out collects, uses and protects your time-tracking data. We never sell your data or use it for AI training.",
+  alternates: { canonical: "/privacy" },
+};
 
 export default function PrivacyPage() {
   return (

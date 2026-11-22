@@ -1,10 +1,11 @@
 import type { MetadataRoute } from "next";
+import { SITE_DESCRIPTION, SITE_TITLE } from "@/lib/site";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Clock Out | Simple Time Tracking",
+    name: SITE_TITLE,
     short_name: "Clock Out",
-    description: "Clean and efficient time tracking for your organization.",
+    description: SITE_DESCRIPTION,
     start_url: "/",
     display: "standalone",
     background_color: "#09090b",

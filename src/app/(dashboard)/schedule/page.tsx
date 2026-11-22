@@ -17,7 +17,10 @@ import { SCHEDULING_FEATURE } from "@/lib/plan-features";
 import { hasFeature, isAdmin } from "@/lib/session";
 import { getShiftRequestsView } from "@/lib/shift-requests-dal";
 
-export const metadata: Metadata = { title: "Schedule | Clock Out" };
+export const metadata: Metadata = {
+  title: "Schedule",
+  robots: { index: false, follow: false },
+};
 
 export default function SchedulePage() {
   return (

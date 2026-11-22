@@ -48,9 +48,15 @@ describe("RootLayout", () => {
   });
 
   it("describes the app in its metadata and viewport", () => {
-    expect(metadata).toEqual({
-      title: "Clock Out | Simple Time Tracking",
-      description: "Clean and efficient time tracking for your organization.",
+    expect(metadata).toMatchObject({
+      metadataBase: new URL("https://clockout.patmac.ca"),
+      title: {
+        default: "Clock Out | Simple Time Tracking for Teams",
+        template: "%s | Clock Out",
+      },
+      description: expect.stringContaining("simple time clock for teams"),
+      openGraph: expect.objectContaining({ siteName: "Clock Out" }),
+      twitter: expect.objectContaining({ card: "summary_large_image" }),
       manifest: "/manifest.webmanifest",
       appleWebApp: {
         capable: true,

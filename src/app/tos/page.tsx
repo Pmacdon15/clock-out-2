@@ -1,5 +1,12 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { FileTextIcon, MailIcon } from "@/components/ui/Icons";
+
+export const metadata: Metadata = {
+  title: "Terms of Service",
+  description: "The terms that govern your use of Clock Out time tracking.",
+  alternates: { canonical: "/tos" },
+};
 
 export default function TOSPage() {
   return (
