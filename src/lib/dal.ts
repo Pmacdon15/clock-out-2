@@ -1197,6 +1197,7 @@ export async function updateBreakDal(
 export async function updateLocationSettingsDal(
   captureMode: string,
   restrictClockIn: boolean,
+  arrivalPrompts?: boolean,
 ) {
   const authUser = await auth.protect();
   if (
@@ -1207,13 +1208,17 @@ export async function updateLocationSettingsDal(
   ) {
     return errAsync({ reason: "Unauthorized" } as const);
   }
-  if (!CAPTURE_MODES.includes(captureMode)) {
+  if (
+    !CAPTURE_MODES.includes(captureMode) ||
+    (arrivalPrompts !== undefined && typeof arrivalPrompts !== "boolean")
+  ) {
     return errAsync({ reason: "Invalid location settings" } as const);
   }
   return await dbUpdateLocationSettings(
     authUser.orgId,
     captureMode,
     restrictClockIn,
+    arrivalPrompts,
   )
     .then((updated) => {
       return okAsync(updated);

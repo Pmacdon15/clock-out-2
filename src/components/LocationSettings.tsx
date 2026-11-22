@@ -101,6 +101,9 @@ export default function LocationSettings({
   const [restrictClockIn, setRestrictClockIn] = useState<boolean>(
     initialData?.restrict_clock_in ?? false,
   );
+  const [arrivalPrompts, setArrivalPrompts] = useState<boolean>(
+    initialData?.arrival_prompts ?? false,
+  );
   const [draft, setDraft] = useState<SiteDraft>(emptyDraft);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [isLocating, setIsLocating] = useState(false);
@@ -116,8 +119,15 @@ export default function LocationSettings({
   const [isSearchingAddress, setIsSearchingAddress] = useState(false);
 
   const settingsMutation = useMutation({
-    mutationFn: ({ mode, restrict }: { mode: string; restrict: boolean }) =>
-      updateLocationSettingsAction(mode, restrict),
+    mutationFn: ({
+      mode,
+      restrict,
+      arrival,
+    }: {
+      mode: string;
+      restrict: boolean;
+      arrival: boolean;
+    }) => updateLocationSettingsAction(mode, restrict, arrival),
     onSuccess: (res) => {
       if (res.success) {
         toast.success("Location settings updated");
@@ -212,7 +222,8 @@ export default function LocationSettings({
   const hasChanged =
     !initialData ||
     captureMode !== initialData.capture_mode ||
-    restrictClockIn !== initialData.restrict_clock_in;
+    restrictClockIn !== initialData.restrict_clock_in ||
+    arrivalPrompts !== (initialData.arrival_prompts ?? false);
 
   const fillFromMyLocation = async () => {
     setIsLocating(true);
@@ -387,6 +398,34 @@ export default function LocationSettings({
         </span>
       </label>
 
+      <label
+        className="mt-4 flex cursor-pointer items-start gap-3 rounded-2xl border-2 border-transparent bg-zinc-100/50 p-6 dark:bg-zinc-800/50"
+        htmlFor="arrivalPrompts"
+      >
+        <input
+          checked={arrivalPrompts}
+          className="mt-1 h-4 w-4 rounded border-zinc-300 accent-zinc-900 dark:accent-zinc-100"
+          id="arrivalPrompts"
+          onChange={(e) => setArrivalPrompts(e.target.checked)}
+          type="checkbox"
+        />
+        <span>
+          <span className="block font-bold text-lg">
+            Prompt members to clock in when they arrive
+          </span>
+          <span className="block text-muted-foreground text-sm">
+            When a member who isn't clocked in walks into a site, they get a
+            push notification: &ldquo;You&apos;ve arrived at Site A. Clock
+            in?&rdquo; At most one per site every few hours.
+          </span>
+          <span className="mt-2 block text-muted-foreground text-xs">
+            Browsers only share location while Clock Out is open, so this works
+            while the app or a tab is running, and only for members who have
+            already allowed location. Nothing is stored until they clock in.
+          </span>
+        </span>
+      </label>
+
       <div className="mt-8 flex justify-end">
         <Button
           className="h-12 px-8 font-bold"
@@ -398,12 +437,14 @@ export default function LocationSettings({
                   ...initialData,
                   capture_mode: captureMode,
                   restrict_clock_in: restrictClockIn,
+                  arrival_prompts: arrivalPrompts,
                 });
               }
 
               await settingsMutation.mutate({
                 mode: captureMode,
                 restrict: restrictClockIn,
+                arrival: arrivalPrompts,
               });
             });
           }}

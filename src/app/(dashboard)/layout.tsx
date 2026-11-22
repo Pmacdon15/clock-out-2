@@ -4,6 +4,7 @@ import DashboardSync from "@/components/DashboardSync";
 import MainPageHeader from "@/components/headers/main-page-header";
 import InstallPrompt from "@/components/InstallPrompt";
 import { getMyNotificationSettings } from "@/lib/alerts-dal";
+import { getArrivalWatchConfig } from "@/lib/arrival-dal";
 import { getSession } from "@/lib/session";
 
 /**
@@ -24,6 +25,7 @@ export default function DashboardLayout({
       <DashboardNav />
       <Suspense fallback={null}>
         <DashboardSync
+          arrivalConfigPromise={getArrivalWatchConfig()}
           orgIdPromise={getSession().then(
             (session) => session.orgId ?? undefined,
           )}

@@ -148,6 +148,8 @@ export type LocationSettingsData = {
   /** 'off' | 'optional' | 'required' */
   capture_mode: string;
   restrict_clock_in: boolean;
+  /** Push "You've arrived at <site>. Clock in?" when a member enters a site. */
+  arrival_prompts?: boolean;
   updated_at?: Date;
 };
 

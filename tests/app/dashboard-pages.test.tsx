@@ -35,6 +35,7 @@ const mocks = vi.hoisted(() => {
     getOrgAlertSettings: vi.fn(() => "alert_settings"),
     getJobsHours: vi.fn(async (...args: unknown[]) => ({ jobs: args })),
     getMyNotificationSettings: vi.fn(() => "notification_settings"),
+    getArrivalWatchConfig: vi.fn(() => "arrival_config"),
   };
 });
 
@@ -54,6 +55,9 @@ vi.mock("@/lib/payroll-dal", () => ({ getOrgPayroll: mocks.getOrgPayroll }));
 vi.mock("@/lib/alerts-dal", () => ({
   getOrgAlertSettings: mocks.getOrgAlertSettings,
   getMyNotificationSettings: mocks.getMyNotificationSettings,
+}));
+vi.mock("@/lib/arrival-dal", () => ({
+  getArrivalWatchConfig: mocks.getArrivalWatchConfig,
 }));
 vi.mock("@clerk/nextjs", () => ({
   SignInButton: ({ children }: { children: React.ReactNode }) => (
@@ -154,6 +158,7 @@ describe("DashboardLayout", () => {
     const sync = latest("sync");
     await expect(sync?.orgIdPromise).resolves.toBe("org_1");
     expect(sync?.settingsPromise).toBe("notification_settings");
+    expect(sync?.arrivalConfigPromise).toBe("arrival_config");
   });
 
   it("passes no org when the session has none", async () => {

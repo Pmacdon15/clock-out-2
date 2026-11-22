@@ -118,12 +118,14 @@ describe("LocationSettings capture mode", () => {
       expect(mocks.updateLocationSettingsAction).toHaveBeenCalledWith(
         "required",
         false,
+        false,
       ),
     );
     expect(onUpdateOptimistic).toHaveBeenCalledWith({
       ...saved,
       capture_mode: "required",
       restrict_clock_in: false,
+      arrival_prompts: false,
     });
     expect(mocks.toast.success).toHaveBeenCalledWith(
       "Location settings updated",
@@ -143,8 +145,38 @@ describe("LocationSettings capture mode", () => {
       expect(mocks.updateLocationSettingsAction).toHaveBeenCalledWith(
         "optional",
         true,
+        false,
       ),
     );
+  });
+
+  it("saves the arrival prompt toggle", async () => {
+    mocks.updateLocationSettingsAction.mockResolvedValue({ success: true });
+    renderPanel({ initialData: saved });
+
+    const toggle = screen.getByLabelText(
+      /Prompt members to clock in when they arrive/,
+    );
+    expect(toggle).not.toBeChecked();
+    fireEvent.click(toggle);
+    expect(saveSettings()).toBeEnabled();
+    fireEvent.click(saveSettings());
+
+    await waitFor(() =>
+      expect(mocks.updateLocationSettingsAction).toHaveBeenCalledWith(
+        "optional",
+        false,
+        true,
+      ),
+    );
+  });
+
+  it("shows arrival prompts as saved when they are on", () => {
+    renderPanel({ initialData: { ...saved, arrival_prompts: true } });
+    expect(
+      screen.getByLabelText(/Prompt members to clock in when they arrive/),
+    ).toBeChecked();
+    expect(saveSettings()).toBeDisabled();
   });
 
   it("skips the optimistic update when nothing is stored yet", async () => {

@@ -16,6 +16,12 @@ vi.mock("@/components/TimezoneSync", () => ({
     return <div data-testid="timezone-sync" />;
   },
 }));
+vi.mock("@/components/ArrivalPromptSync", () => ({
+  default: ({ configPromise }: { configPromise: unknown }) => {
+    mocks.synced.push(configPromise);
+    return <div data-testid="arrival-prompt-sync" />;
+  },
+}));
 vi.mock("@/components/PushTokenSync", () => ({
   default: ({ settingsPromise }: { settingsPromise: unknown }) => {
     mocks.synced.push(settingsPromise);
@@ -26,14 +32,19 @@ vi.mock("@/components/PushTokenSync", () => ({
 import DashboardSync from "@/components/DashboardSync";
 
 describe("DashboardSync", () => {
-  it("follows the active org and syncs the time zone and push token", () => {
+  it("follows the active org, syncs the time zone and push token, and watches for arrivals", () => {
     const orgIdPromise = resolved("org_1");
     const settingsPromise = resolved({
       ok: false as const,
       error: { reason: "x" },
     });
+    const arrivalConfigPromise = resolved({
+      ok: true as const,
+      value: { enabled: false, sites: [] },
+    });
     render(
       <DashboardSync
+        arrivalConfigPromise={arrivalConfigPromise}
         orgIdPromise={orgIdPromise}
         settingsPromise={settingsPromise}
       />,
@@ -41,6 +52,11 @@ describe("DashboardSync", () => {
     expect(mocks.orgSwitcher).toHaveBeenCalledWith(orgIdPromise);
     expect(screen.getByTestId("timezone-sync")).toBeInTheDocument();
     expect(screen.getByTestId("push-token-sync")).toBeInTheDocument();
-    expect(mocks.synced).toEqual([settingsPromise, settingsPromise]);
+    expect(screen.getByTestId("arrival-prompt-sync")).toBeInTheDocument();
+    expect(mocks.synced).toEqual([
+      settingsPromise,
+      settingsPromise,
+      arrivalConfigPromise,
+    ]);
   });
 });

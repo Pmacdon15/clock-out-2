@@ -91,6 +91,8 @@ CREATE TABLE IF NOT EXISTS sites (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 ALTER TABLE sites ADD COLUMN IF NOT EXISTS address TEXT;
+-- Push members "You've arrived at <site>. Clock in?" when they enter a site.
+ALTER TABLE location_settings ADD COLUMN IF NOT EXISTS arrival_prompts BOOLEAN NOT NULL DEFAULT FALSE;
 
 -- Where a punch happened, captured only when the org turns location on.
 -- `*_site_name` is a snapshot of the matched site's name at punch time, so

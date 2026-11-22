@@ -972,6 +972,10 @@ export async function ensureLocationTables(): Promise<void> {
 			ADD COLUMN IF NOT EXISTS address TEXT
 	`;
     await sql`
+		ALTER TABLE location_settings
+			ADD COLUMN IF NOT EXISTS arrival_prompts BOOLEAN NOT NULL DEFAULT FALSE
+	`;
+    await sql`
 		ALTER TABLE time_entries
 			ADD COLUMN IF NOT EXISTS clock_in_latitude DOUBLE PRECISION,
 			ADD COLUMN IF NOT EXISTS clock_in_longitude DOUBLE PRECISION,
@@ -1004,10 +1008,15 @@ export async function dbGetLocationSettings(orgId: string) {
   return settings as LocationSettingsData | undefined;
 }
 
+/**
+ * `arrivalPrompts` left undefined keeps whatever is stored (new rows start
+ * off), so callers that only manage capture can't switch prompts off.
+ */
 export async function dbUpdateLocationSettings(
   orgId: string,
   captureMode: string,
   restrictClockIn: boolean,
+  arrivalPrompts?: boolean,
 ) {
   await ensureLocationTables();
   await sql`
@@ -1017,12 +1026,13 @@ export async function dbUpdateLocationSettings(
 	`;
 
   const [updated] = await sql`
-		INSERT INTO location_settings (org_id, capture_mode, restrict_clock_in, updated_at)
-		VALUES (${orgId}, ${captureMode}, ${restrictClockIn}, NOW())
+		INSERT INTO location_settings (org_id, capture_mode, restrict_clock_in, arrival_prompts, updated_at)
+		VALUES (${orgId}, ${captureMode}, ${restrictClockIn}, ${arrivalPrompts ?? false}, NOW())
 		ON CONFLICT (org_id)
 		DO UPDATE SET
             capture_mode = ${captureMode},
             restrict_clock_in = ${restrictClockIn},
+            arrival_prompts = COALESCE(${arrivalPrompts ?? null}, location_settings.arrival_prompts),
             updated_at = NOW()
 		RETURNING *
 	`;

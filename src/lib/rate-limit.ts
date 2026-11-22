@@ -44,6 +44,16 @@ export const PUNCH_GEOCODE_LIMIT: RateLimit = {
   windowSeconds: 10 * 60,
   failClosed: true,
 };
+/**
+ * Arrival reports from a member's device (each may send a push). The
+ * per-site cooldown already caps prompts; this caps the work behind them.
+ */
+export const ARRIVAL_REPORT_LIMIT: RateLimit = {
+  name: "arrival",
+  limit: 30,
+  windowSeconds: 10 * 60,
+  failClosed: true,
+};
 /** "Send a test notification" (SES email + push). */
 export const TEST_NOTIFICATION_LIMIT: RateLimit = {
   name: "test-notification",
