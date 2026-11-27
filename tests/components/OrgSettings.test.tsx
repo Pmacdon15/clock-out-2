@@ -55,6 +55,19 @@ vi.mock("@/components/PayrollSettings", () => ({
     <div data-testid="payroll">{props.initialData?.province ?? "none"}</div>
   ),
 }));
+vi.mock("@/components/TaxClaimSettings", () => ({
+  default: (props: {
+    enabled: boolean;
+    province: string;
+    initialClaims: unknown[];
+    members: unknown[];
+  }) => (
+    <div data-testid="tax-claims">
+      {String(props.enabled)}|{props.province}|{props.initialClaims.length}|
+      {props.members.length}
+    </div>
+  ),
+}));
 vi.mock("@/components/PayRateSettings", () => ({
   default: (props: {
     members: { id: string; name: string }[];
@@ -260,6 +273,7 @@ describe("OrgSettings", () => {
     );
     expect(screen.getByTestId("pay-rates")).toHaveTextContent("0|0");
     expect(screen.getByTestId("payroll")).toHaveTextContent("none");
+    expect(screen.getByTestId("tax-claims")).toHaveTextContent("false|SK|0|0");
   });
 
   it("passes the payroll deduction settings through", () => {
@@ -267,10 +281,23 @@ describe("OrgSettings", () => {
       <OrgSettings
         hasReporting={false}
         orgSettingsPromise={resolved({ ok: true, value: null })}
-        payroll={{ enabled: true, province: "QC", rates: [] }}
+        payroll={{
+          enabled: true,
+          province: "QC",
+          rates: [],
+          claims: [
+            {
+              userId: "u1",
+              federalClaim: 1,
+              provincialClaim: null,
+              additionalTax: 0,
+            },
+          ],
+        }}
       />,
     );
     expect(screen.getByTestId("payroll")).toHaveTextContent("QC");
+    expect(screen.getByTestId("tax-claims")).toHaveTextContent("true|QC|1|0");
   });
 
   it("leaves the shift alert rules out without a promise", () => {

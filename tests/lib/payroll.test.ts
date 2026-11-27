@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { computeIncomeTax, INCOME_TAX_TABLES } from "@/lib/income-tax";
 import {
   computeDeductionsForPeriods,
   computePeriodDeductions,
@@ -121,6 +122,8 @@ describe("computePeriodDeductions", () => {
       pension: 55.5,
       pension2: 0,
       ei: 16.3,
+      federalTax: 0,
+      provincialTax: 0,
       total: 71.8,
       net: 928.2,
       employerCost: 78.32,
@@ -225,6 +228,78 @@ describe("computeDeductionsForPeriods", () => {
     expect(unratedPeriods).toBe(1);
     expect(total.pension).toBe(4230.45 * 2);
     expect(total.ei).toBe(Math.round(1123.07 * 2 * 100) / 100);
+  });
+});
+
+describe("income tax", () => {
+  const [TABLES] = INCOME_TAX_TABLES;
+
+  it("adds federal and provincial tax to the deductions", () => {
+    const { deductions } = computePeriodDeductions(1000, CA, 52, undefined, {
+      province: "SK",
+      tables: TABLES,
+    });
+    const tax = computeIncomeTax(
+      {
+        gross: 1000,
+        periodsPerYear: 52,
+        province: "SK",
+        pension: 55.5,
+        pension2: 0,
+        ei: 16.3,
+        pensionRate: CA.pension.rate,
+        pensionMax: CA.pension.maxContribution,
+        eiMax: CA.ei.maxEmployeePremium,
+      },
+      TABLES,
+    );
+    expect(deductions.federalTax).toBe(tax.federal);
+    expect(deductions.provincialTax).toBe(tax.provincial);
+    expect(deductions.federalTax).toBeGreaterThan(0);
+    expect(deductions.total).toBe(
+      Math.round((71.8 + tax.federal + tax.provincial) * 100) / 100,
+    );
+    expect(deductions.net).toBe(
+      Math.round((1000 - deductions.total) * 100) / 100,
+    );
+  });
+
+  it("uses the tables in effect per period and counts untaxed periods", () => {
+    const claims = {
+      userId: "u1",
+      federalClaim: 0,
+      provincialClaim: 0,
+      additionalTax: 0,
+    };
+    const result = computeDeductionsForPeriods(
+      [
+        { date: "2025-12-29", gross: 1000 },
+        { date: "2026-01-05", gross: 1000 },
+      ],
+      [{ ...CA, effectiveFrom: "2025-01-01" }, CA],
+      "CA",
+      52,
+      { province: "AB", claims },
+    );
+    expect(result.untaxedPeriods).toBe(1);
+    const one = computePeriodDeductions(1000, CA, 52, undefined, {
+      province: "AB",
+      claims,
+      tables: TABLES,
+    }).deductions;
+    expect(result.total.federalTax).toBe(one.federalTax);
+    expect(result.total.provincialTax).toBe(one.provincialTax);
+  });
+
+  it("leaves tax out without a province", () => {
+    const result = computeDeductionsForPeriods(
+      [{ date: "2026-01-05", gross: 1000 }],
+      [CA],
+      "CA",
+      52,
+    );
+    expect(result.untaxedPeriods).toBe(0);
+    expect(result.total.federalTax).toBe(0);
   });
 });
 

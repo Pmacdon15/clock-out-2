@@ -25,7 +25,7 @@ interface PayrollSettingsProps {
 }
 
 /**
- * Optional CPP/QPP and EI deductions on pay estimates. Free for every admin,
+ * Optional CPP/QPP, EI and income tax deductions on pay estimates. Free for every admin,
  * like pay rates. Quebec uses QPP and Quebec EI rates; every other province
  * and territory uses the federal CPP and EI rates.
  */
@@ -72,10 +72,11 @@ export default function PayrollSettings({
           Payroll Deductions (Canada)
         </h3>
         <p className="text-muted-foreground">
-          Show estimated CPP/QPP and EI deductions and net pay next to gross
-          pay. Rates come from the CRA&apos;s payroll deductions formulas and
-          update automatically when a new edition is published. Income tax is
-          not included.
+          Show estimated CPP/QPP, EI and income tax deductions and net pay next
+          to gross pay. CPP/QPP and EI rates come from the CRA&apos;s payroll
+          deductions formulas and update automatically when a new edition is
+          published. Income tax uses each member&apos;s TD1 amounts below, or
+          the basic personal amounts when none are entered.
         </p>
       </div>
 

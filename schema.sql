@@ -328,6 +328,19 @@ CREATE TABLE IF NOT EXISTS payroll_rates (
     PRIMARY KEY (jurisdiction, effective_from)
 );
 
+-- Each member's TD1 figures for income tax estimates: total claim amounts
+-- from the federal and provincial TD1 (NULL = not entered, so the basic
+-- personal amount is used) and extra tax deducted from each pay.
+CREATE TABLE IF NOT EXISTS member_tax_claims (
+    org_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    federal_claim DOUBLE PRECISION,
+    provincial_claim DOUBLE PRECISION,
+    additional_tax DOUBLE PRECISION NOT NULL DEFAULT 0,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    PRIMARY KEY (org_id, user_id)
+);
+
 -- When paydays fall: every 7 ('weekly') or 14 ('bi-weekly') days from
 -- anchor_payday (YYYY-MM-DD). Each payday pays for the 7 or 14 days ending
 -- holdback_days before it (0 = the period ends on payday). When enabled the

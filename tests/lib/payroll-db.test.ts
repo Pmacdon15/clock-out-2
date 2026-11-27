@@ -41,7 +41,8 @@ describe("ensurePayrollTables", () => {
   it("creates the tables once per instance", async () => {
     await pdb.ensurePayrollTables();
     await pdb.ensurePayrollTables();
-    expect(sql).toHaveBeenCalledTimes(3);
+    expect(sql).toHaveBeenCalledTimes(4);
+    expect(textOf(3)).toContain("CREATE TABLE IF NOT EXISTS member_tax_claims");
     expect(textOf(0)).toContain("CREATE TABLE IF NOT EXISTS settings");
     expect(textOf(1)).toContain("CREATE TABLE IF NOT EXISTS payroll_settings");
     expect(textOf(2)).toContain("CREATE TABLE IF NOT EXISTS payroll_rates");
@@ -51,7 +52,7 @@ describe("ensurePayrollTables", () => {
     sql.mockRejectedValueOnce(new Error("down"));
     await expect(pdb.ensurePayrollTables()).rejects.toThrow("down");
     await pdb.ensurePayrollTables();
-    expect(sql).toHaveBeenCalledTimes(4);
+    expect(sql).toHaveBeenCalledTimes(5);
   });
 });
 
@@ -111,5 +112,52 @@ describe("payroll rates", () => {
       json,
       "https://cra.example/jul",
     ]);
+  });
+});
+
+describe("TD1 claims", () => {
+  const claims = {
+    userId: "u1",
+    federalClaim: 16452,
+    provincialClaim: null,
+    additionalTax: 5,
+  };
+
+  it("reads one org's rows, cached per org", async () => {
+    await primeTables();
+    sql.mockResolvedValueOnce([{ org_id: "org_1", user_id: "u1" }]);
+    await expect(pdb.dbGetTaxClaims("org_1")).resolves.toEqual([
+      { org_id: "org_1", user_id: "u1" },
+    ]);
+    expect(cacheTag).toHaveBeenCalledWith("tax-claims-org_1");
+    expect(textOf(0)).toContain("FROM member_tax_claims WHERE org_id = ?");
+    expect(valuesOf(0)).toEqual(["org_1"]);
+  });
+
+  it("upserts a member's row", async () => {
+    await primeTables();
+    sql.mockResolvedValueOnce([{ user_id: "u1" }]);
+    await expect(pdb.dbUpsertTaxClaims("org_1", claims)).resolves.toEqual({
+      user_id: "u1",
+    });
+    expect(textOf(0)).toContain("INSERT INTO member_tax_claims");
+    expect(textOf(0)).toContain("ON CONFLICT (org_id, user_id)");
+    expect(valuesOf(0)).toEqual([
+      "org_1",
+      "u1",
+      16452,
+      null,
+      5,
+      16452,
+      null,
+      5,
+    ]);
+  });
+
+  it("deletes a member's row", async () => {
+    await primeTables();
+    await pdb.dbDeleteTaxClaims("org_1", "u1");
+    expect(textOf(0)).toContain("DELETE FROM member_tax_claims");
+    expect(valuesOf(0)).toEqual(["org_1", "u1"]);
   });
 });

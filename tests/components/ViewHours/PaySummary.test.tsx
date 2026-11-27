@@ -121,7 +121,14 @@ describe("PaySummary", () => {
       enabled: true,
       province: "SK",
       rates: [...SEED_PAYROLL_RATES],
+      claims: [],
       ...overrides,
+    });
+    const zeroClaims = (userId: string) => ({
+      userId,
+      federalClaim: 0,
+      provincialClaim: 0,
+      additionalTax: 0,
     });
 
     it("are hidden unless the org turned them on", () => {
@@ -144,6 +151,70 @@ describe("PaySummary", () => {
       expect(screen.getByTestId("deduction-ei")).toHaveTextContent("$10.11");
       expect(screen.getByTestId("net-pay")).toHaveTextContent("$585.00");
       expect(within(block).getByText("CPP")).toBeVisible();
+      // Weekly pay this low is under the basic personal amounts.
+      expect(screen.getByTestId("deduction-federal-tax")).toHaveTextContent(
+        "$0.00",
+      );
+      expect(screen.getByTestId("deduction-provincial-tax")).toHaveTextContent(
+        "$0.00",
+      );
+      expect(screen.getByTestId("tax-basis")).toHaveTextContent(
+        "Income tax assumes the basic personal amounts",
+      );
+    });
+
+    it("estimate income tax from TD1 amounts", () => {
+      renderSummary(
+        [ada, adaNextWeek],
+        false,
+        payroll({ claims: [zeroClaims("u1")] }),
+      );
+      expect(screen.getByTestId("deduction-federal-tax")).toHaveTextContent(
+        "$42.20",
+      );
+      expect(screen.getByTestId("deduction-provincial-tax")).toHaveTextContent(
+        "$37.72",
+      );
+      expect(screen.getByTestId("net-pay")).toHaveTextContent("$279.27");
+      expect(screen.getByTestId("tax-basis")).toHaveTextContent(
+        "Income tax uses the TD1 amounts entered in Settings.",
+      );
+    });
+
+    it("say when only some members have TD1 amounts", () => {
+      renderSummary(
+        [ada, grace],
+        true,
+        payroll({ claims: [zeroClaims("u2")] }),
+      );
+      expect(screen.getByTestId("tax-basis")).toHaveTextContent(
+        "Income tax uses TD1 amounts for 1 of 2 members and the basic personal amounts for the rest.",
+      );
+    });
+
+    it("note weeks with no income tax tables", () => {
+      const old = makeEntry({
+        user_id: "u1",
+        clock_in: new Date("2025-12-29T09:00:00Z"),
+        clock_out: new Date("2025-12-29T17:00:00Z"),
+      });
+      renderSummary(
+        [old],
+        false,
+        payroll({
+          rates: [{ ...SEED_PAYROLL_RATES[0], effectiveFrom: "2025-01-01" }],
+        }),
+      );
+      expect(screen.getByTestId("tax-basis")).toHaveTextContent(
+        "Weeks before 2026 have no income tax estimate.",
+      );
+    });
+
+    it("say no TD1 amounts apply when nobody on screen has a rate", () => {
+      renderSummary([linus], false, payroll());
+      expect(screen.getByTestId("tax-basis")).toHaveTextContent(
+        "Income tax assumes the basic personal amounts",
+      );
     });
 
     it("use QPP labels and Quebec rates in Quebec", () => {
@@ -154,6 +225,12 @@ describe("PaySummary", () => {
       expect(within(block).getByText("QPP2")).toBeVisible();
       // EI 1.30% of $240
       expect(screen.getByTestId("deduction-ei")).toHaveTextContent("$3.12");
+      expect(
+        screen.queryByTestId("deduction-provincial-tax"),
+      ).not.toBeInTheDocument();
+      expect(screen.getByTestId("tax-basis")).toHaveTextContent(
+        "Quebec provincial income tax isn't included.",
+      );
     });
   });
 });

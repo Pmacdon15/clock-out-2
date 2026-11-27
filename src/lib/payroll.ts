@@ -8,9 +8,18 @@
  * CPP and EI figures. A pay date uses the latest row that took effect on or
  * before it, so pay periods from earlier years keep their own year's rates.
  *
- * The figures are estimates for planning, not a payroll engine: income tax,
- * QPIP and other deductions are not calculated.
+ * The figures are estimates for planning, not a payroll engine. Income tax
+ * is estimated in ./income-tax from each employee's TD1 claim amounts (or
+ * the basic personal amounts when none are entered); QPIP and other
+ * deductions are not calculated.
  */
+
+import {
+  computeIncomeTax,
+  type IncomeTaxTables,
+  selectIncomeTaxTables,
+  type TaxClaims,
+} from "./income-tax";
 
 export const PROVINCES = [
   { code: "AB", name: "Alberta" },
@@ -185,9 +194,13 @@ export type PayrollDeductions = {
   /** CPP2 or QPP2 contribution, employee share. */
   pension2: number;
   ei: number;
-  /** pension + pension2 + ei */
+  /** Federal income tax withheld (plus any TD1 additional tax). */
+  federalTax: number;
+  /** Provincial or territorial income tax withheld (0 for Quebec). */
+  provincialTax: number;
+  /** pension + pension2 + ei + federalTax + provincialTax */
   total: number;
-  /** gross − total (income tax not included). */
+  /** gross − total */
   net: number;
   /** Employer matches pension and pension2, and pays its own EI premium. */
   employerCost: number;
@@ -197,16 +210,24 @@ const cents = (amount: number) => Math.round(amount * 100) / 100;
 const capped = (amount: number, remaining: number) =>
   cents(Math.max(0, Math.min(amount, remaining)));
 
+/** Who the income tax is for; without it no income tax is estimated. */
+export type IncomeTaxContext = {
+  province: ProvinceCode;
+  claims?: TaxClaims | null;
+};
+
 /**
  * Deductions for one pay period, following the CRA's T4127 formulas: the
  * basic exemption is prorated over the pay periods in a year, and each
  * contribution stops once the year-to-date amount reaches its annual maximum.
+ * Income tax is added when `tax` names the tables and province to use.
  */
 export function computePeriodDeductions(
   gross: number,
   rates: PayrollRates,
   periodsPerYear: number,
   ytd: PayrollYearToDate = EMPTY_YEAR_TO_DATE,
+  tax?: IncomeTaxContext & { tables: IncomeTaxTables },
 ): { deductions: PayrollDeductions; ytd: PayrollYearToDate } {
   const pay = Math.max(0, gross);
 
@@ -237,13 +258,35 @@ export function computePeriodDeductions(
     rates.ei.maxEmployerPremium - ytd.employerEi,
   );
 
-  const total = cents(pension + pension2 + ei);
+  const incomeTax = tax
+    ? computeIncomeTax(
+        {
+          gross: pay,
+          periodsPerYear,
+          province: tax.province,
+          pension,
+          pension2,
+          ei,
+          pensionRate: rates.pension.rate,
+          pensionMax: rates.pension.maxContribution,
+          eiMax: rates.ei.maxEmployeePremium,
+          claims: tax.claims,
+        },
+        tax.tables,
+      )
+    : { federal: 0, provincial: 0 };
+
+  const total = cents(
+    pension + pension2 + ei + incomeTax.federal + incomeTax.provincial,
+  );
   return {
     deductions: {
       gross: cents(pay),
       pension,
       pension2,
       ei,
+      federalTax: incomeTax.federal,
+      provincialTax: incomeTax.provincial,
       total,
       net: cents(pay - total),
       employerCost: cents(pension + pension2 + employerEi),
@@ -263,6 +306,8 @@ export const ZERO_DEDUCTIONS: PayrollDeductions = {
   pension: 0,
   pension2: 0,
   ei: 0,
+  federalTax: 0,
+  provincialTax: 0,
   total: 0,
   net: 0,
   employerCost: 0,
@@ -284,19 +329,29 @@ export function sumDeductions(
  * One employee's deductions over consecutive pay periods. Periods are taken
  * in date order; the year-to-date totals reset each calendar year, and each
  * period uses the rates in effect on its date. Periods with no rates in
- * effect are skipped and counted in `unratedPeriods`.
+ * effect are skipped and counted in `unratedPeriods`. With `tax`, income tax
+ * is estimated too, from the tax tables in effect on each period's date;
+ * periods before the first tables get none and are counted in
+ * `untaxedPeriods`.
  */
 export function computeDeductionsForPeriods(
   periods: readonly { date: string; gross: number }[],
   rows: readonly PayrollRates[],
   jurisdiction: PayrollJurisdiction,
   periodsPerYear: number,
-): { total: PayrollDeductions; unratedPeriods: number } {
+  tax?: IncomeTaxContext,
+  taxTables?: readonly IncomeTaxTables[],
+): {
+  total: PayrollDeductions;
+  unratedPeriods: number;
+  untaxedPeriods: number;
+} {
   const sorted = [...periods].sort((a, b) => a.date.localeCompare(b.date));
   const results: PayrollDeductions[] = [];
   let ytd = EMPTY_YEAR_TO_DATE;
   let year = "";
   let unratedPeriods = 0;
+  let untaxedPeriods = 0;
   for (const period of sorted) {
     const periodYear = period.date.slice(0, 4);
     if (periodYear !== year) {
@@ -308,16 +363,19 @@ export function computeDeductionsForPeriods(
       unratedPeriods += 1;
       continue;
     }
+    const tables = tax ? selectIncomeTaxTables(period.date, taxTables) : null;
+    if (tax && !tables) untaxedPeriods += 1;
     const next = computePeriodDeductions(
       period.gross,
       rates,
       periodsPerYear,
       ytd,
+      tax && tables ? { ...tax, tables } : undefined,
     );
     ytd = next.ytd;
     results.push(next.deductions);
   }
-  return { total: sumDeductions(results), unratedPeriods };
+  return { total: sumDeductions(results), unratedPeriods, untaxedPeriods };
 }
 
 /** "5.95%" */
@@ -339,6 +397,8 @@ export type PayrollView = {
   enabled: boolean;
   province: ProvinceCode;
   rates: PayrollRates[];
+  /** TD1 claims the caller may see: everyone's for admins, else their own. */
+  claims: TaxClaims[];
 };
 
 /** Settings with defaults filled in, and an unknown province replaced. */

@@ -2,6 +2,7 @@
 
 import { DollarSign } from "lucide-react";
 import { useMemo } from "react";
+import { hasEnteredClaims } from "@/lib/income-tax";
 import { type OvertimeSplit, weekStartOf } from "@/lib/overtime";
 import {
   computePay,
@@ -30,7 +31,10 @@ interface PaySummaryProps {
   payRates: Map<string, PayRate>;
   isViewingAll?: boolean;
   members?: { id: string; name: string }[];
-  /** When deductions are on, CPP/QPP, EI and net pay are estimated too. */
+  /**
+   * When deductions are on, CPP/QPP, EI, income tax and net pay are
+   * estimated too.
+   */
   payroll?: PayrollView | null;
 }
 
@@ -51,6 +55,23 @@ const weekLabel = (monday: string) => {
     });
   return `${fmt(start)} – ${fmt(end)}`;
 };
+
+/** Which TD1 amounts the income tax figures were worked out from. */
+function taxBasis({
+  withClaims,
+  members,
+}: {
+  withClaims: number;
+  members: number;
+}): string {
+  if (members > 0 && withClaims === members) {
+    return "Income tax uses the TD1 amounts entered in Settings.";
+  }
+  if (withClaims === 0) {
+    return "Income tax assumes the basic personal amounts (no TD1 amounts entered).";
+  }
+  return `Income tax uses TD1 amounts for ${withClaims} of ${members} members and the basic personal amounts for the rest.`;
+}
 
 /**
  * Estimated gross pay for the entries on screen: regular hours at each
@@ -90,23 +111,43 @@ export function PaySummary({
     // Deductions are worked out per member per Monday–Sunday week (52 pay
     // periods a year), so annual maximums and the prorated basic exemption
     // apply the way they would on weekly pay.
-    let deductions: (PayrollDeductions & { province: ProvinceCode }) | null =
-      null;
+    // Income tax uses each member's TD1 claim amounts when entered, else
+    // the basic personal amounts.
+    let deductions:
+      | (PayrollDeductions & {
+          province: ProvinceCode;
+          /** Members on screen with TD1 amounts entered, out of `members`. */
+          withClaims: number;
+          members: number;
+          untaxedPeriods: number;
+        })
+      | null = null;
     if (payroll?.enabled) {
       const jurisdiction = jurisdictionFor(payroll.province);
+      let withClaims = 0;
+      let untaxedPeriods = 0;
       const totals = sumDeductions(
-        Array.from(
-          byMemberWeek.values(),
-          (weeks) =>
-            computeDeductionsForPeriods(
-              Array.from(weeks, ([date, gross]) => ({ date, gross })),
-              payroll.rates,
-              jurisdiction,
-              52,
-            ).total,
-        ),
+        Array.from(byMemberWeek.entries(), ([userId, weeks]) => {
+          const claims = payroll.claims.find((row) => row.userId === userId);
+          if (hasEnteredClaims(claims)) withClaims += 1;
+          const result = computeDeductionsForPeriods(
+            Array.from(weeks, ([date, gross]) => ({ date, gross })),
+            payroll.rates,
+            jurisdiction,
+            52,
+            { province: payroll.province, claims },
+          );
+          untaxedPeriods += result.untaxedPeriods;
+          return result.total;
+        }),
       );
-      deductions = { ...totals, province: payroll.province };
+      deductions = {
+        ...totals,
+        province: payroll.province,
+        withClaims,
+        members: byMemberWeek.size,
+        untaxedPeriods,
+      };
     }
     const memberRows = Array.from(byMember.entries())
       .map(([id, pays]) => ({
@@ -194,15 +235,43 @@ export function PaySummary({
                 {formatMoney(summary.deductions.ei)}
               </span>
             </li>
+            <li className="flex items-center justify-between">
+              <span>Federal income tax</span>
+              <span
+                className="tabular-nums"
+                data-testid="deduction-federal-tax"
+              >
+                {formatMoney(summary.deductions.federalTax)}
+              </span>
+            </li>
+            {summary.deductions.province !== "QC" && (
+              <li className="flex items-center justify-between">
+                <span>Provincial income tax</span>
+                <span
+                  className="tabular-nums"
+                  data-testid="deduction-provincial-tax"
+                >
+                  {formatMoney(summary.deductions.provincialTax)}
+                </span>
+              </li>
+            )}
             <li className="flex items-center justify-between border-t pt-1 font-bold">
-              <span>Net pay before income tax</span>
+              <span>Estimated net pay</span>
               <span className="tabular-nums" data-testid="net-pay">
                 {formatMoney(summary.deductions.net)}
               </span>
             </li>
           </ul>
-          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-            Annual maximums count only the hours shown here.
+          <p
+            className="mt-1 text-xs text-zinc-500 dark:text-zinc-400"
+            data-testid="tax-basis"
+          >
+            {taxBasis(summary.deductions)} Annual maximums count only the hours
+            shown here.
+            {summary.deductions.province === "QC" &&
+              " Quebec provincial income tax isn't included."}
+            {summary.deductions.untaxedPeriods > 0 &&
+              " Weeks before 2026 have no income tax estimate."}
           </p>
         </div>
       )}
