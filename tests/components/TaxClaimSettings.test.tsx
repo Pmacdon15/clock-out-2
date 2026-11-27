@@ -24,6 +24,10 @@ const claims: TaxClaims[] = [
 
 const field = (kind: string, id: string) =>
   document.getElementById(`td1-${kind}-${id}`) as HTMLInputElement | null;
+const pick = (id: string) =>
+  fireEvent.change(screen.getByTestId("tax-claim-member"), {
+    target: { value: id },
+  });
 const saveButton = (id: string) =>
   screen
     .getByTestId(`tax-claim-row-${id}`)
@@ -54,10 +58,13 @@ describe("TaxClaimSettings", () => {
     expect(field("federal", "u1")?.value).toBe("16452");
     expect(field("provincial", "u1")?.value).toBe("0");
     expect(field("additional", "u1")?.value).toBe("25");
+    expect(saveButton("u1")).toBeDisabled();
+    expect(field("federal", "u2")).toBeNull();
+    pick("u2");
+    expect(field("federal", "u1")).toBeNull();
     expect(field("federal", "u2")?.value).toBe("");
     expect(field("provincial", "u2")?.value).toBe("");
     expect(field("additional", "u2")?.value).toBe("");
-    expect(saveButton("u1")).toBeDisabled();
     expect(screen.queryByTestId("tax-claims-disabled")).not.toBeInTheDocument();
   });
 
@@ -72,9 +79,18 @@ describe("TaxClaimSettings", () => {
     expect(screen.getByText(/Quebec provincial tax/)).toBeVisible();
   });
 
+  it("lists every member, marking those on the basic amount", () => {
+    renderSettings();
+    const options = Array.from(
+      (screen.getByTestId("tax-claim-member") as HTMLSelectElement).options,
+    ).map((o) => o.text);
+    expect(options).toEqual(["Ada", "Bo (basic amount)"]);
+  });
+
   it("saves entered amounts", async () => {
     mocks.updateMemberTaxClaimsAction.mockResolvedValue({ success: true });
     renderSettings();
+    pick("u2");
     fireEvent.change(field("federal", "u2") as HTMLInputElement, {
       target: { value: "20000" },
     });
@@ -97,6 +113,11 @@ describe("TaxClaimSettings", () => {
       10.5,
     );
     expect(saveButton("u2")).toBeDisabled();
+    // Switching away and back keeps what was saved.
+    pick("u1");
+    pick("u2");
+    expect(field("federal", "u2")?.value).toBe("20000");
+    expect(screen.getByRole("option", { name: "Bo" })).toBeInTheDocument();
   });
 
   it("clears amounts back to the defaults", async () => {
@@ -120,6 +141,7 @@ describe("TaxClaimSettings", () => {
 
   it("explains and blocks invalid amounts", () => {
     renderSettings();
+    pick("u2");
     fireEvent.change(field("federal", "u2") as HTMLInputElement, {
       target: { value: "-1" },
     });
@@ -147,6 +169,7 @@ describe("TaxClaimSettings", () => {
       error: "Member not found",
     });
     renderSettings();
+    pick("u2");
     fireEvent.change(field("federal", "u2") as HTMLInputElement, {
       target: { value: "1" },
     });

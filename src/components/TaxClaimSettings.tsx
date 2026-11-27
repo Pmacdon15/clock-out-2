@@ -1,7 +1,7 @@
 "use client";
 
 import { FileText, Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { toast } from "sonner";
 import {
   isValidAdditionalTax,
@@ -36,6 +36,10 @@ const toDraft = (saved: TaxClaims | undefined): Draft => ({
 /** "" means not entered (null); anything else is read as a number. */
 const amount = (value: string) => (value.trim() === "" ? null : Number(value));
 
+/** Whether either TD1 total was entered (otherwise the basic amount is used). */
+const hasEnteredClaims = (row: TaxClaims | undefined) =>
+  row?.federalClaim != null || row?.provincialClaim != null;
+
 const inputClass =
   "h-11 w-full rounded-xl border-2 border-zinc-200 bg-white px-3 dark:border-zinc-800 dark:bg-zinc-950";
 
@@ -43,10 +47,12 @@ function MemberTaxClaimRow({
   member,
   saved,
   showProvincial,
+  onSaved,
 }: {
   member: { id: string; name: string };
   saved: TaxClaims | undefined;
   showProvincial: boolean;
+  onSaved: (claims: TaxClaims) => void;
 }) {
   const [current, setCurrent] = useState(() => toDraft(saved));
   const [draft, setDraft] = useState<Draft>(() => toDraft(saved));
@@ -75,6 +81,12 @@ function MemberTaxClaimRow({
       );
       if (res.success) {
         setCurrent(draft);
+        onSaved({
+          userId: member.id,
+          federalClaim,
+          provincialClaim,
+          additionalTax,
+        });
         toast.success(`TD1 amounts saved for ${member.name}`);
       } else {
         toast.error(res.error);
@@ -88,7 +100,7 @@ function MemberTaxClaimRow({
     setDraft((prev) => ({ ...prev, [key]: e.target.value }));
 
   return (
-    <li
+    <div
       className="space-y-2 rounded-xl border-2 border-zinc-100 p-4 dark:border-zinc-900"
       data-testid={`tax-claim-row-${member.id}`}
     >
@@ -174,7 +186,7 @@ function MemberTaxClaimRow({
           them blank.
         </p>
       )}
-    </li>
+    </div>
   );
 }
 
@@ -190,6 +202,11 @@ export default function TaxClaimSettings({
   enabled,
 }: TaxClaimSettingsProps) {
   const showProvincial = province !== "QC";
+  const selectId = useId();
+  const [claims, setClaims] = useState(initialClaims);
+  const [selectedId, setSelectedId] = useState(members[0]?.id);
+  const selected =
+    members.find((member) => member.id === selectedId) ?? members[0];
   return (
     <Card className="p-8" data-testid="tax-claim-settings">
       <div className="mb-8">
@@ -199,9 +216,9 @@ export default function TaxClaimSettings({
         </h3>
         <p className="text-muted-foreground">
           Income tax withheld depends on what each employee claims on their TD1
-          forms. Enter the total claim amount from each form to match it; leave
-          it blank to estimate with the basic personal amount. Members only ever
-          see their own figures.
+          forms. Pick a member, then enter the total claim amount from each of
+          their forms to match it; leave it blank to estimate with the basic
+          personal amount. Members only ever see their own figures.
           {!showProvincial &&
             " Quebec provincial tax (TP-1015.3) isn't estimated."}
         </p>
@@ -214,19 +231,46 @@ export default function TaxClaimSettings({
           </p>
         )}
       </div>
-      {members.length === 0 ? (
+      {members.length === 0 || !selected ? (
         <p className="text-muted-foreground text-sm">No members to show yet.</p>
       ) : (
-        <ul className="space-y-3">
-          {members.map((member) => (
-            <MemberTaxClaimRow
-              key={member.id}
-              member={member}
-              saved={initialClaims.find((row) => row.userId === member.id)}
-              showProvincial={showProvincial}
-            />
-          ))}
-        </ul>
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <label className="text-muted-foreground text-sm" htmlFor={selectId}>
+              Member
+            </label>
+            <select
+              className={inputClass}
+              data-testid="tax-claim-member"
+              id={selectId}
+              onChange={(e) => setSelectedId(e.target.value)}
+              value={selected.id}
+            >
+              {members.map((member) => (
+                <option key={member.id} value={member.id}>
+                  {member.name}
+                  {hasEnteredClaims(
+                    claims.find((row) => row.userId === member.id),
+                  )
+                    ? ""
+                    : " (basic amount)"}
+                </option>
+              ))}
+            </select>
+          </div>
+          <MemberTaxClaimRow
+            key={selected.id}
+            member={selected}
+            onSaved={(next) =>
+              setClaims((prev) => [
+                ...prev.filter((row) => row.userId !== next.userId),
+                next,
+              ])
+            }
+            saved={claims.find((row) => row.userId === selected.id)}
+            showProvincial={showProvincial}
+          />
+        </div>
       )}
     </Card>
   );
