@@ -1,7 +1,7 @@
 "use client";
 
 import { use, useOptimistic } from "react";
-import type { PayrollView } from "@/lib/payroll";
+import { DEFAULT_PROVINCE, type PayrollView } from "@/lib/payroll";
 import type {
   AlertSettingsData,
   BreakSettingsData,
@@ -21,6 +21,7 @@ import PayPeriodSettings from "./PayPeriodSettings";
 import PayRateSettings from "./PayRateSettings";
 import PayrollSettings from "./PayrollSettings";
 import ReportingSettings from "./ReportingSettings";
+import TaxClaimSettings from "./TaxClaimSettings";
 
 interface OrgSettingsProps {
   orgSettingsPromise: Promise<
@@ -183,6 +184,12 @@ export default function OrgSettings({
       />
       <PayRateSettings initialRates={payRates} members={members} />
       <PayrollSettings initialData={payroll} />
+      <TaxClaimSettings
+        enabled={payroll?.enabled ?? false}
+        initialClaims={payroll?.claims ?? []}
+        members={members}
+        province={payroll?.province ?? DEFAULT_PROVINCE}
+      />
       <PayPeriodSettings
         initialData={optimisticPayPeriodSettings}
         onUpdateOptimistic={(next) => setOptimisticPayPeriodSettings(next)}

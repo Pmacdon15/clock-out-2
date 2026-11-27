@@ -19,6 +19,7 @@ const view: PayrollView = {
   enabled: false,
   province: "SK",
   rates: [...SEED_PAYROLL_RATES],
+  claims: [],
 };
 
 const save = () =>

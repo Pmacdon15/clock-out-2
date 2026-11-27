@@ -10,7 +10,13 @@ const mocks = vi.hoisted(() => ({
   dbUpdatePayrollSettings: vi.fn(),
   dbUpsertPayrollRates: vi.fn(),
   fetchCraPayrollRates: vi.fn(),
+  dbGetTaxClaims: vi.fn(),
+  dbUpsertTaxClaims: vi.fn(),
+  dbDeleteTaxClaims: vi.fn(),
+  getOrgMembers: vi.fn(),
 }));
+
+vi.mock("@/lib/dal", () => ({ getOrgMembers: mocks.getOrgMembers }));
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: { protect: mocks.protect } }));
 vi.mock("next/cache", () => ({ revalidateTag: mocks.revalidateTag }));
@@ -20,6 +26,9 @@ vi.mock("@/lib/payroll-db", () => ({
   dbGetPayrollSettings: mocks.dbGetPayrollSettings,
   dbUpdatePayrollSettings: mocks.dbUpdatePayrollSettings,
   dbUpsertPayrollRates: mocks.dbUpsertPayrollRates,
+  dbGetTaxClaims: mocks.dbGetTaxClaims,
+  dbUpsertTaxClaims: mocks.dbUpsertTaxClaims,
+  dbDeleteTaxClaims: mocks.dbDeleteTaxClaims,
 }));
 vi.mock("@/lib/cra-rates", () => ({
   fetchCraPayrollRates: mocks.fetchCraPayrollRates,
@@ -28,6 +37,7 @@ vi.mock("@/lib/cra-rates", () => ({
 import {
   getOrgPayroll,
   syncPayrollRatesFromCra,
+  updateMemberTaxClaimsDal,
   updatePayrollSettingsDal,
 } from "@/lib/payroll-dal";
 
@@ -41,6 +51,18 @@ beforeEach(() => {
   mocks.dbGetPayrollRates.mockResolvedValue([]);
   mocks.dbGetPayrollSettings.mockResolvedValue(undefined);
   mocks.dbUpsertPayrollRates.mockResolvedValue(undefined);
+  mocks.dbGetTaxClaims.mockResolvedValue([]);
+  mocks.dbUpsertTaxClaims.mockResolvedValue({});
+  mocks.dbDeleteTaxClaims.mockResolvedValue(undefined);
+  mocks.getOrgMembers.mockResolvedValue([{ id: "u2", name: "Bo" }]);
+});
+
+const claimRow = (user_id: string, federal_claim: number | null) => ({
+  org_id: "org_1",
+  user_id,
+  federal_claim,
+  provincial_claim: null,
+  additional_tax: 0,
 });
 
 describe("getOrgPayroll", () => {
@@ -63,7 +85,12 @@ describe("getOrgPayroll", () => {
     });
     await expect(getOrgPayroll()).resolves.toEqual({
       ok: true,
-      value: { enabled: true, province: "QC", rates: [stored, CA, QC] },
+      value: {
+        enabled: true,
+        province: "QC",
+        rates: [stored, CA, QC],
+        claims: [],
+      },
     });
     expect(mocks.dbGetPayrollSettings).toHaveBeenCalledWith("org_1");
   });
@@ -73,8 +100,49 @@ describe("getOrgPayroll", () => {
     const result = await getOrgPayroll();
     expect(result).toEqual({
       ok: true,
-      value: { enabled: false, province: "SK", rates: [CA, QC] },
+      value: { enabled: false, province: "SK", rates: [CA, QC], claims: [] },
     });
+  });
+
+  it("gives admins every member's TD1 claims and drops unusable rows", async () => {
+    mocks.dbGetTaxClaims.mockResolvedValue([
+      claimRow("u1", 16452),
+      claimRow("u2", null),
+      claimRow("u3", -5),
+    ]);
+    const result = await getOrgPayroll();
+    expect(result.ok && result.value.claims).toEqual([
+      {
+        userId: "u1",
+        federalClaim: 16452,
+        provincialClaim: null,
+        additionalTax: 0,
+      },
+      {
+        userId: "u2",
+        federalClaim: null,
+        provincialClaim: null,
+        additionalTax: 0,
+      },
+    ]);
+    expect(mocks.dbGetTaxClaims).toHaveBeenCalledWith("org_1");
+  });
+
+  it("gives members only their own TD1 claims", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetTaxClaims.mockResolvedValue([
+      claimRow("u1", 16452),
+      claimRow("u2", 20000),
+    ]);
+    const result = await getOrgPayroll();
+    expect(result.ok && result.value.claims).toEqual([
+      {
+        userId: "u2",
+        federalClaim: 20000,
+        provincialClaim: null,
+        additionalTax: 0,
+      },
+    ]);
   });
 
   it("reports a settings read failure", async () => {
@@ -121,6 +189,59 @@ describe("updatePayrollSettingsDal", () => {
     const result = await updatePayrollSettingsDal(false, "SK");
     expect(result._unsafeUnwrapErr()).toEqual({
       reason: "Failed to update payroll settings",
+    });
+  });
+});
+
+describe("updateMemberTaxClaimsDal", () => {
+  it("is admin-only", async () => {
+    mocks.protect.mockResolvedValue(member);
+    const result = await updateMemberTaxClaimsDal("u2", 1, null, 0);
+    expect(result._unsafeUnwrapErr()).toEqual({ reason: "Unauthorized" });
+  });
+
+  it.each([
+    [42, 1, null, 0],
+    ["u2", -1, null, 0],
+    ["u2", null, "x", 0],
+    ["u2", null, null, null],
+  ])("rejects %j / %j / %j / %j", async (id, fed, prov, extra) => {
+    const result = await updateMemberTaxClaimsDal(id, fed, prov, extra);
+    expect(result._unsafeUnwrapErr()).toEqual({
+      reason: "Invalid TD1 amounts",
+    });
+  });
+
+  it("only saves for members of the org", async () => {
+    const result = await updateMemberTaxClaimsDal("u9", 1, null, 0);
+    expect(result._unsafeUnwrapErr()).toEqual({ reason: "Member not found" });
+    expect(mocks.dbUpsertTaxClaims).not.toHaveBeenCalled();
+  });
+
+  it("saves entered amounts", async () => {
+    const result = await updateMemberTaxClaimsDal("u2", 16452, 20000, 5);
+    const claims = {
+      userId: "u2",
+      federalClaim: 16452,
+      provincialClaim: 20000,
+      additionalTax: 5,
+    };
+    expect(result._unsafeUnwrap()).toEqual({ org_id: "org_1", claims });
+    expect(mocks.dbUpsertTaxClaims).toHaveBeenCalledWith("org_1", claims);
+  });
+
+  it("removes the row when nothing is entered", async () => {
+    const result = await updateMemberTaxClaimsDal("u2", null, null, 0);
+    expect(result._unsafeUnwrap()).toEqual({ org_id: "org_1", claims: null });
+    expect(mocks.dbDeleteTaxClaims).toHaveBeenCalledWith("org_1", "u2");
+    expect(mocks.dbUpsertTaxClaims).not.toHaveBeenCalled();
+  });
+
+  it("reports a write failure", async () => {
+    mocks.dbUpsertTaxClaims.mockRejectedValue(new Error("down"));
+    const result = await updateMemberTaxClaimsDal("u2", 1, null, 0);
+    expect(result._unsafeUnwrapErr()).toEqual({
+      reason: "Failed to save TD1 amounts",
     });
   });
 });
