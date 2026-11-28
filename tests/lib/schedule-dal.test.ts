@@ -55,6 +55,7 @@ import {
   createScheduledShiftDal,
   deleteScheduledShiftDal,
   getCalendarFeedPath,
+  getMyCurrentShifts,
   getSchedule,
   resetCalendarFeedPath,
   updateScheduledShiftDal,
@@ -176,6 +177,54 @@ describe("getSchedule", () => {
     await expect(getSchedule()).resolves.toEqual({
       ok: false,
       error: { reason: "Error fetching schedule" },
+    });
+  });
+});
+
+describe("getMyCurrentShifts", () => {
+  it.each([
+    ["no user", noUser],
+    ["no org", noOrg],
+  ])("rejects %s", async (_label, session) => {
+    mocks.protect.mockResolvedValue(session);
+    await expect(getMyCurrentShifts()).resolves.toEqual({
+      ok: false,
+      error: { reason: "Unauthorized or no organization selected" },
+    });
+    expect(mocks.dbGetScheduledShifts).not.toHaveBeenCalled();
+  });
+
+  it("returns nothing without the scheduling feature", async () => {
+    mocks.protect.mockResolvedValue({ ...admin, has: () => false });
+    await expect(getMyCurrentShifts()).resolves.toEqual({
+      ok: true,
+      value: [],
+    });
+    expect(mocks.dbGetScheduledShifts).not.toHaveBeenCalled();
+  });
+
+  it("reads only the caller's own shifts from yesterday to tomorrow", async () => {
+    mocks.protect.mockResolvedValue(admin);
+    mocks.dbGetScheduledShifts.mockResolvedValue([shift]);
+    await expect(getMyCurrentShifts()).resolves.toEqual({
+      ok: true,
+      value: [shift],
+    });
+    expect(mocks.dbGetScheduledShifts).toHaveBeenCalledWith(
+      "org_1",
+      "admin_1",
+      new Date("2026-01-04T00:00:00Z"),
+      new Date("2026-01-07T00:00:00Z"),
+    );
+  });
+
+  it("reports a failed read", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetScheduledShifts.mockRejectedValue(new Error("db"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    await expect(getMyCurrentShifts()).resolves.toEqual({
+      ok: false,
+      error: { reason: "Error fetching shifts" },
     });
   });
 });

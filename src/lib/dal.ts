@@ -1532,6 +1532,43 @@ export async function getSchedule(): Promise<
     });
 }
 
+/**
+ * The signed-in member's own shifts from yesterday through tomorrow, for the
+ * time clock's countdown to the end of the shift they're working. Empty
+ * without the scheduling feature.
+ */
+export async function getMyCurrentShifts(): Promise<
+  SerializableResult<ScheduledShift[], { reason: string }>
+> {
+  const { userId, orgId, has } = await auth.protect();
+  if (!userId || !orgId) {
+    return {
+      error: { reason: "Unauthorized or no organization selected" },
+      ok: false,
+    };
+  }
+  if (!has({ feature: SCHEDULING_FEATURE })) {
+    return { value: [], ok: true };
+  }
+
+  // The range depends on the clock, so this can't be part of a prerender.
+  await connection();
+  const now = new Date();
+  // Whole days keep the cache key stable across requests. A shift can last
+  // up to a day, so one that started yesterday may still be running.
+  return await dbGetScheduledShifts(
+    orgId,
+    userId,
+    startOfDay(subDays(now, 1)),
+    startOfDay(addDays(now, 2)),
+  )
+    .then((value) => ({ value, ok: true as const }))
+    .catch((e) => {
+      console.error("Error fetching current shifts: ", e);
+      return { error: { reason: "Error fetching shifts" }, ok: false };
+    });
+}
+
 /** Publishes a shift for a member of the admin's organization. */
 export async function createScheduledShiftDal(
   memberId: string,

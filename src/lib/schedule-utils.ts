@@ -127,6 +127,38 @@ function entryMatchesShift(entry: TimeEntry, shift: ScheduledShift) {
 }
 
 /**
+ * The scheduled shift a running time entry is working, for the clock's
+ * countdown. `shifts` are the member's own, so owners aren't compared: of the shifts the entry fits, the earliest one still running at
+ * `now`, or else the last one (its shift is over but the member is still on
+ * the clock). Shifts starting more than {@link EARLY_MATCH_MINUTES} after
+ * `now` are ignored. Null when the entry fits no shift.
+ */
+export function findShiftForEntry<T extends ScheduledShift>(
+  shifts: T[],
+  entry: TimeEntry,
+  now: Date,
+): T | null {
+  // An open entry fits every later shift, so skip ones that aren't close
+  // to starting yet: tomorrow's shift isn't the one being worked now.
+  const soonest = now.getTime() + EARLY_MATCH_MINUTES * MINUTE;
+  const matched = shifts
+    .filter(
+      (shift) =>
+        new Date(shift.shift_start).getTime() <= soonest &&
+        entryMatchesShift(entry, shift),
+    )
+    .sort(
+      (a, b) =>
+        new Date(a.shift_start).getTime() - new Date(b.shift_start).getTime(),
+    );
+  return (
+    matched.find((shift) => new Date(shift.shift_end) > now) ??
+    matched[matched.length - 1] ??
+    null
+  );
+}
+
+/**
  * Compares scheduled shifts with the members' time entries. Each entry is
  * matched to at most one shift (the earliest shift it fits), so one clock-in
  * can't cover a member's back-to-back shifts.

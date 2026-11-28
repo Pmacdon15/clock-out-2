@@ -9,6 +9,7 @@ import {
   MapPin,
   Play,
   Square,
+  Timer,
   Trash2,
 } from "lucide-react";
 import { startTransition, useEffect, useRef, useState } from "react";
@@ -41,10 +42,12 @@ import {
 } from "@/lib/geo";
 import { captureCurrentPosition } from "@/lib/geolocation";
 import type { EntryAction } from "@/lib/reducers/time-entries";
+import { findShiftForEntry } from "@/lib/schedule-utils";
 import type {
   BreakSettingsData,
   BreakType,
   LocationSettingsData,
+  ScheduledShift,
   TimeEntry,
   TimeEntryBreak,
 } from "@/lib/types";
@@ -83,6 +86,12 @@ const settle = async (pending: Promise<unknown>) => {
     // Reported by onError; the optimistic state rolls back on its own.
   }
 };
+
+/** One stable empty list, so the countdown's effect doesn't rerun each render. */
+const NO_SHIFTS: ScheduledShift[] = [];
+
+/** Where the member stands against the scheduled shift they're working. */
+type ShiftCountdown = { end: Date; remaining: string; over: boolean };
 
 /** What the "back to work" dialog says about the break that just ran out. */
 type ExpiredBreak = { label: string; limitMinutes: number };
@@ -126,6 +135,8 @@ interface ManageHoursProps {
   setOptimisticEntries: (action: EntryAction) => void;
   breakSettings?: BreakSettingsData | null;
   locationSettings?: LocationSettingsData | null;
+  /** The member's own shifts around now, for the end-of-shift countdown. */
+  scheduledShifts?: ScheduledShift[];
 }
 
 export default function TimeClock({
@@ -134,8 +145,12 @@ export default function TimeClock({
   setOptimisticEntries,
   breakSettings,
   locationSettings,
+  scheduledShifts = NO_SHIFTS,
 }: ManageHoursProps) {
   const [elapsedTime, setElapsedTime] = useState<string>("");
+  const [shiftCountdown, setShiftCountdown] = useState<ShiftCountdown | null>(
+    null,
+  );
   const [breakElapsed, setBreakElapsed] = useState<string>("");
   const [breakRemaining, setBreakRemaining] = useState<string>("");
   // Kept after the dialog closes so its text doesn't empty mid fade-out.
@@ -197,6 +212,36 @@ export default function TimeClock({
 
     return () => clearInterval(interval);
   }, [activeEntry]);
+
+  useEffect(() => {
+    if (!activeEntry) {
+      setShiftCountdown(null);
+      return;
+    }
+
+    const tick = () => {
+      const now = new Date();
+      const shift = findShiftForEntry(scheduledShifts, activeEntry, now);
+      if (!shift) {
+        setShiftCountdown(null);
+        return;
+      }
+      const end = new Date(shift.shift_end);
+      const leftMs = end.getTime() - now.getTime();
+      setShiftCountdown({
+        end,
+        over: leftMs <= 0,
+        // Round up so the last minute reads "1m", not "0m".
+        remaining: formatDurationMs(
+          Math.ceil(Math.abs(leftMs) / 60_000) * 60_000,
+        ),
+      });
+    };
+    const interval = setInterval(tick, 1000);
+    tick();
+
+    return () => clearInterval(interval);
+  }, [activeEntry, scheduledShifts]);
 
   useEffect(() => {
     if (!openBreak) {
@@ -497,6 +542,26 @@ export default function TimeClock({
               {() => format(new Date(activeEntry.clock_in), "h:mm a")}
             </LocalTime>
           </p>
+          {shiftCountdown && (
+            <p
+              className={`mb-4 flex items-center gap-2 rounded-full px-3 py-1 font-medium text-sm ${
+                shiftCountdown.over
+                  ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                  : "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
+              }`}
+              data-testid="shift-countdown"
+              role="timer"
+            >
+              <Timer className="h-4 w-4" />
+              {shiftCountdown.over
+                ? `Shift ended ${shiftCountdown.remaining} ago`
+                : `Shift ends in ${shiftCountdown.remaining}`}{" "}
+              ·{" "}
+              <LocalTime>
+                {() => format(shiftCountdown.end, "h:mm a")}
+              </LocalTime>
+            </p>
+          )}
 
           <div className="mb-8 flex w-full max-w-sm flex-col gap-3">
             {openBreak ? (

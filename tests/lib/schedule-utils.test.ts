@@ -6,6 +6,7 @@ import {
   evaluateShifts,
   filterShifts,
   findOverlappingShift,
+  findShiftForEntry,
   invalidShiftReason,
   isFlaggedStatus,
   LATE_GRACE_MINUTES,
@@ -379,5 +380,50 @@ describe("filterShifts", () => {
     expect(run({ query: "  FRONT  sam " })).toEqual([samMorning]);
     expect(run({ query: "king" })).toEqual([alexOvernight]);
     expect(run({ query: "warehouse sam" })).toEqual([]);
+  });
+});
+
+describe("findShiftForEntry", () => {
+  const running = makeEntry({ clock_in: at("08:55"), clock_out: null });
+  const morning = shift({
+    id: 1,
+    shift_start: at("09:00"),
+    shift_end: at("12:00"),
+  });
+  const afternoon = shift({
+    id: 2,
+    shift_start: at("13:00"),
+    shift_end: at("17:00"),
+  });
+
+  it("picks the earliest matched shift still running", () => {
+    expect(
+      findShiftForEntry([afternoon, morning], running, at("10:00"))?.id,
+    ).toBe(1);
+  });
+
+  it("moves on to the next matched shift once one ends", () => {
+    expect(
+      findShiftForEntry([morning, afternoon], running, at("12:30"))?.id,
+    ).toBe(2);
+  });
+
+  it("falls back to the last matched shift once all have ended", () => {
+    expect(
+      findShiftForEntry([afternoon, morning], running, at("18:00"))?.id,
+    ).toBe(2);
+  });
+
+  it("ignores shifts that aren't close to starting", () => {
+    expect(findShiftForEntry([afternoon], running, at("10:00"))).toBe(null);
+    expect(findShiftForEntry([afternoon], running, at("11:00"))?.id).toBe(2);
+  });
+
+  it("returns null when the entry fits no shift", () => {
+    const later = makeEntry({ clock_in: at("18:00"), clock_out: null });
+    expect(findShiftForEntry([morning, afternoon], later, at("18:30"))).toBe(
+      null,
+    );
+    expect(findShiftForEntry([], running, at("10:00"))).toBe(null);
   });
 });

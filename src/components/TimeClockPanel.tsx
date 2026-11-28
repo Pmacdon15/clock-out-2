@@ -6,6 +6,7 @@ import { timeEntriesReducer } from "@/lib/reducers/time-entries";
 import type {
   BreakSettingsData,
   LocationSettingsData,
+  ScheduledShift,
   SerializableResult,
   TimeEntry,
 } from "@/lib/types";
@@ -23,18 +24,21 @@ export default function TimeClockPanel({
   locationSettingsPromise,
   hasGeofencingPromise,
   isAdminPromise,
+  shiftsPromise,
 }: {
   recentEntriesPromise: Result<TimeEntry[]>;
   breakSettingsPromise: Result<BreakSettingsData | null>;
   locationSettingsPromise: Result<LocationSettingsData | null>;
   hasGeofencingPromise: Promise<boolean>;
   isAdminPromise: Promise<boolean>;
+  shiftsPromise: Result<ScheduledShift[]>;
 }) {
   const recent = use(recentEntriesPromise);
   const breakSettings = use(breakSettingsPromise);
   const locationSettings = use(locationSettingsPromise);
   const hasGeofencing = use(hasGeofencingPromise);
   const isAdmin = use(isAdminPromise);
+  const shifts = use(shiftsPromise);
 
   const [entries, setOptimisticEntries] = useOptimistic(
     recent.ok ? (recent.value ?? []) : [],
@@ -51,6 +55,7 @@ export default function TimeClockPanel({
       locationSettings={
         hasGeofencing && locationSettings.ok ? locationSettings.value : null
       }
+      scheduledShifts={shifts.ok ? shifts.value : undefined}
       setOptimisticEntries={setOptimisticEntries}
     />
   );
