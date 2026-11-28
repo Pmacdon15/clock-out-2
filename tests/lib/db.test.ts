@@ -1467,6 +1467,26 @@ describe("scheduled shifts", () => {
     expect(texts.some((t) => t.includes("UPDATE shift_series"))).toBe(true);
   });
 
+  it("dbUpdateScheduledShift leaves the rule alone without the shift's old times", async () => {
+    sql.mockResolvedValue([]);
+    await db.ensureScheduledShiftsTable();
+    sql.mockReset();
+    sql.mockResolvedValueOnce([]);
+    sql.mockResolvedValueOnce([
+      {
+        id: 3,
+        org_id: "o1",
+        series_id: 9,
+        shift_start: shiftStart,
+        shift_end: shiftEnd,
+      },
+    ]);
+    sql.mockResolvedValue([]);
+    await db.dbUpdateScheduledShift(3, "o1", shiftStart, shiftEnd, null);
+    const texts = sql.mock.calls.map((_, i) => textOf(i));
+    expect(texts.some((t) => t.includes("UPDATE shift_series"))).toBe(false);
+  });
+
   it("dbUpdateScheduledShift leaves the rule alone when the times don't change", async () => {
     sql.mockResolvedValue([]);
     await db.ensureScheduledShiftsTable();
