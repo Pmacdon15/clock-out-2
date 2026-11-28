@@ -1300,9 +1300,9 @@ export async function dbUpdateScheduledShift(
 
 /**
  * Moving the newest week of a repeating shift moves the weeks still to be
- * made too: the series' first shift is reset so that week lands on the new
- * times. Moving an earlier week is a one-off change and leaves the series as
- * it is. Plain UTC arithmetic, like the series itself.
+ * made too: the series restarts from that week's new times (with `next_index`
+ * counted from it), so later weeks keep its local start and end. Moving an
+ * earlier week is a one-off change and leaves the series as it is.
  */
 async function dbFollowSeriesShiftEdit(
   shift: ScheduledShift,
@@ -1318,13 +1318,15 @@ async function dbFollowSeriesShiftEdit(
     return;
   }
   await ensureShiftSeriesTable();
+  // Which week of the series the shift was (to the nearest week, so a
+  // daylight saving hour doesn't matter).
   await sql`
 		UPDATE shift_series s
-		SET first_start = ${start}::TIMESTAMPTZ - w.weeks * INTERVAL '7 days',
-			first_end = ${end}::TIMESTAMPTZ - w.weeks * INTERVAL '7 days',
+		SET first_start = ${start}, first_end = ${end},
+			next_index = GREATEST(1, s.next_index - w.weeks),
 			updated_at = NOW()
 		FROM (
-			SELECT id, ROUND(EXTRACT(EPOCH FROM (${previous.shift_start}::TIMESTAMPTZ - first_start)) / 604800) AS weeks
+			SELECT id, ROUND(EXTRACT(EPOCH FROM (${previous.shift_start}::TIMESTAMPTZ - first_start)) / 604800)::INTEGER AS weeks
 			FROM shift_series WHERE id = ${shift.series_id} AND org_id = ${shift.org_id}
 		) w
 		WHERE s.id = w.id AND s.ended_at IS NULL
@@ -1350,9 +1352,9 @@ export async function dbDeleteScheduledShift(id: number, orgId: string) {
 let shiftSeriesTableReady = false;
 
 /**
- * A shift that repeats every week with no end date. Later weeks are the first
- * shift's times exactly a week apart, in UTC (the zone is kept only to name
- * the shift's days). `next_index` is the
+ * A shift that repeats every week with no end date. The rule keeps its first
+ * shift's times and the zone they were set in, so later weeks keep the same
+ * local start and end across daylight saving changes. `next_index` is the
  * week the daily job makes next (week 0 is the first shift); weeks it has
  * passed are never made again, so a removed or skipped week stays removed.
  */

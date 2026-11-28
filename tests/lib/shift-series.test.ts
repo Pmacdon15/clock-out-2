@@ -84,17 +84,16 @@ describe("seriesOccurrence", () => {
     });
   });
 
-  it("keeps the same UTC time every week, without time zone rules", () => {
-    // Saved by the browser as 13:00 UTC; week 16 is after a daylight saving
-    // date, and the server doesn't re-read it through its own zone rules.
+  it("keeps the local time across a daylight saving change", () => {
+    // 8 AM in Toronto: EST (UTC-5) in November, EDT (UTC-4) from Mar 14 2027.
     const toronto = {
       first_start: new Date("2026-11-23T13:00:00Z"),
       first_end: new Date("2026-11-23T21:30:00Z"),
       timezone: "America/Toronto",
     };
     const week = seriesOccurrence(toronto, 16);
-    expect(week.shiftStart).toEqual(new Date("2027-03-15T13:00:00Z"));
-    expect(week.shiftEnd).toEqual(new Date("2027-03-15T21:30:00Z"));
+    expect(week.shiftStart).toEqual(new Date("2027-03-15T12:00:00Z"));
+    expect(week.shiftEnd).toEqual(new Date("2027-03-15T20:30:00Z"));
   });
 
   it("keeps overnight shifts on their local days", () => {
