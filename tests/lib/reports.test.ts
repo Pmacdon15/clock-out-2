@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => {
     dbGetOvertimeSettings: vi.fn(),
     dbGetTimeEntriesForPeriod: vi.fn(),
     dbGetApprovedTimeOffForPeriod: vi.fn(),
+    dbGetNotificationPreferencesFor: vi.fn(),
   };
 });
 
@@ -56,7 +57,15 @@ vi.mock("@/lib/db", () => ({
   dbGetApprovedTimeOffForPeriod: mocks.dbGetApprovedTimeOffForPeriod,
 }));
 
-import { orgHasReportingFeature, sendWeeklyReports } from "@/lib/reports";
+vi.mock("@/lib/alerts-db", () => ({
+  dbGetNotificationPreferencesFor: mocks.dbGetNotificationPreferencesFor,
+}));
+
+import {
+  orgHasReportingFeature,
+  resolveReportTimezone,
+  sendWeeklyReports,
+} from "@/lib/reports";
 
 // Snapshot the constructor call now: call history is cleared before every test.
 const initialSesConfig = mocks.sesConfig.mock.calls[0]?.[0];
@@ -121,6 +130,7 @@ beforeEach(() => {
   mocks.dbGetOvertimeSettings.mockResolvedValue(undefined);
   mocks.dbGetTimeEntriesForPeriod.mockResolvedValue([]);
   mocks.dbGetApprovedTimeOffForPeriod.mockResolvedValue([]);
+  mocks.dbGetNotificationPreferencesFor.mockResolvedValue([]);
   mocks.send.mockResolvedValue({ MessageId: "m1" });
 });
 
@@ -749,5 +759,130 @@ describe("time off in reports", () => {
       "[Reports] Error fetching time off for Ada Lovelace:",
       expect.any(Error),
     );
+  });
+});
+
+describe("time zones", () => {
+  const evening = [
+    // 3:00 PM - 11:30 PM UTC is 9:00 AM - 5:30 PM in Regina (UTC-6 all year).
+    shift("2026-11-16T15:00:00Z", "2026-11-16T23:30:00Z"),
+    // Late shift that crosses UTC midnight but not local midnight.
+    shift("2026-11-18T01:00:00Z", "2026-11-18T05:00:00Z"),
+  ];
+  const novStart = new Date("2026-11-15T00:00:00Z");
+  const novEnd = new Date("2026-11-22T00:00:00Z");
+
+  beforeEach(() => {
+    mocks.getOrganizationMembershipList.mockResolvedValue({
+      data: [admin, worker],
+    });
+    mocks.dbGetTimeEntriesForPeriod.mockImplementation(async (userId) =>
+      userId === "worker_1" ? evening : [],
+    );
+  });
+
+  it("shows shift times and days in the member's own zone", async () => {
+    mocks.dbGetNotificationPreferencesFor.mockResolvedValue([
+      { user_id: "worker_1", timezone: "America/Regina" },
+    ]);
+
+    await sendWeeklyReports(novStart, novEnd, "org_1");
+
+    expect(mocks.dbGetNotificationPreferencesFor).toHaveBeenCalledWith([
+      "admin_1",
+      "worker_1",
+    ]);
+    expect(emailProps(0)).toMatchObject({
+      timezone: "America/Regina (CST)",
+      timezoneKnown: true,
+      breakdown: [
+        {
+          date: "Nov 16, 2026",
+          shifts: [{ start: "9:00 AM", end: "5:30 PM", duration: "8h 30m" }],
+        },
+        {
+          // 01:00 UTC on the 18th is still the evening of the 17th locally.
+          date: "Nov 17, 2026",
+          shifts: [{ start: "7:00 PM", end: "11:00 PM", duration: "4h 0m" }],
+        },
+      ],
+    });
+  });
+
+  it("shows break times in the member's zone", async () => {
+    mocks.dbGetNotificationPreferencesFor.mockResolvedValue([
+      { user_id: "worker_1", timezone: "America/Regina" },
+    ]);
+    mocks.dbGetTimeEntriesForPeriod.mockImplementation(async (userId) =>
+      userId === "worker_1"
+        ? [
+            {
+              ...evening[0],
+              breaks: [
+                {
+                  break_type: "lunch",
+                  break_start: "2026-11-16T17:00:00Z",
+                  break_end: "2026-11-16T17:30:00Z",
+                },
+              ],
+            },
+          ]
+        : [],
+    );
+
+    await sendWeeklyReports(novStart, novEnd, "org_1");
+
+    const [day] = emailProps(0).breakdown as {
+      shifts: { start: string; breaks?: string }[];
+    }[];
+    expect(day.shifts[0].start).toBe("9:00 AM");
+    expect(day.shifts[0].breaks).toContain("11:00 AM - 11:30 AM");
+  });
+
+  it("falls back to an admin's zone when the member has none", async () => {
+    mocks.dbGetNotificationPreferencesFor.mockResolvedValue([
+      { user_id: "admin_1", timezone: "America/Regina" },
+      { user_id: "worker_1", timezone: null },
+    ]);
+
+    await sendWeeklyReports(novStart, novEnd, "org_1");
+
+    expect(emailProps(0)).toMatchObject({
+      timezone: "America/Regina (CST)",
+      timezoneKnown: true,
+    });
+  });
+
+  it("uses UTC and says so when no zone is known", async () => {
+    mocks.dbGetNotificationPreferencesFor.mockResolvedValue([
+      { user_id: "worker_1", timezone: "Not/AZone" },
+    ]);
+
+    await sendWeeklyReports(novStart, novEnd, "org_1");
+
+    const props = emailProps(0);
+    expect(props).toMatchObject({ timezone: "UTC", timezoneKnown: false });
+    const [day] = props.breakdown as { shifts: { start: string }[] }[];
+    expect(day.shifts[0].start).toBe("3:00 PM");
+  });
+
+  it("still sends the report when the zone lookup fails", async () => {
+    mocks.dbGetNotificationPreferencesFor.mockRejectedValue(new Error("db"));
+
+    await sendWeeklyReports(novStart, novEnd, "org_1");
+
+    expect(mocks.send).toHaveBeenCalledTimes(1);
+    expect(emailProps(0)).toMatchObject({ timezoneKnown: false });
+  });
+
+  it("resolves the first valid zone", () => {
+    expect(resolveReportTimezone(null, "Europe/Paris")).toEqual({
+      tz: "Europe/Paris",
+      known: true,
+    });
+    expect(resolveReportTimezone(undefined, "bogus")).toEqual({
+      tz: "UTC",
+      known: false,
+    });
   });
 });

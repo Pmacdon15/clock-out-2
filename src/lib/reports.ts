@@ -2,7 +2,10 @@ import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
 import { clerkClient } from "@clerk/nextjs/server";
 import { render } from "@react-email/render";
 import { format, subDays } from "date-fns";
+import { formatInTimeZone } from "date-fns-tz";
 import { WeeklyReportEmail } from "@/components/emails/WeeklyReportEmail";
+import { isValidTimeZone } from "./alerts";
+import { dbGetNotificationPreferencesFor } from "./alerts-db";
 import {
   breakTypeLabel,
   getBreakDurationMs,
@@ -60,6 +63,41 @@ export async function orgHasReportingFeature(orgId: string): Promise<boolean> {
   } catch (_error) {
     console.log(`[Reports] No billing/subscription for org ${orgId}`);
     return false;
+  }
+}
+
+/** Zone used for a member when neither they nor an admin has one saved. */
+export const REPORT_FALLBACK_TIMEZONE = "UTC";
+
+/**
+ * The zone a member's shift times are shown in: their own saved browser zone,
+ * else the first admin's (usually the same region), else UTC. `known` is
+ * false only for the UTC fallback, so the email can say which zone it used.
+ */
+export function resolveReportTimezone(
+  ...candidates: (string | null | undefined)[]
+): { tz: string; known: boolean } {
+  const tz = candidates.find(isValidTimeZone);
+  return tz
+    ? { tz, known: true }
+    : { tz: REPORT_FALLBACK_TIMEZONE, known: false };
+}
+
+/**
+ * Saved time zones by user id. A failed lookup returns none, so the report
+ * still goes out (in UTC) rather than not at all.
+ */
+async function loadTimezones(userIds: string[]): Promise<Map<string, string>> {
+  try {
+    const prefs = await dbGetNotificationPreferencesFor(userIds);
+    return new Map(
+      prefs
+        .filter((p) => isValidTimeZone(p.timezone))
+        .map((p) => [p.user_id, p.timezone as string]),
+    );
+  } catch (error) {
+    console.error("[Reports] Error fetching member time zones:", error);
+    return new Map();
   }
 }
 
@@ -131,13 +169,14 @@ export async function sendWeeklyReports(
     );
 
     // Find admins to send emails to
-    const adminEmails = members
-      .filter((m) => {
-        const isAdmin = m.role === "org:admin";
-        const hasEmail = !!m.publicUserData?.identifier;
-        return isAdmin && hasEmail;
-      })
-      .map((m) => m.publicUserData?.identifier as string);
+    const admins = members.filter((m) => {
+      const isAdmin = m.role === "org:admin";
+      const hasEmail = !!m.publicUserData?.identifier;
+      return isAdmin && hasEmail;
+    });
+    const adminEmails = admins.map(
+      (m) => m.publicUserData?.identifier as string,
+    );
 
     console.log(
       `[Reports] Found ${adminEmails.length} admin email recipients.`,
@@ -163,6 +202,17 @@ export async function sendWeeklyReports(
       });
     const overtimeEnabled = isOvertimeEnabled(overtimeSettings);
 
+    // The server runs in UTC, so shift times are shown in each member's own
+    // time zone (saved from their browser when they use the app).
+    const timezones = await loadTimezones(
+      members
+        .map((m) => m.publicUserData?.userId)
+        .filter((id): id is string => !!id),
+    );
+    const adminTimezone = admins
+      .map((m) => timezones.get(m.publicUserData?.userId as string))
+      .find(Boolean);
+
     // Generate report for each member, even non-admins
     for (const member of members) {
       const publicUserData = member.publicUserData;
@@ -177,6 +227,10 @@ export async function sendWeeklyReports(
       console.log(
         `[Reports] Fetching entries for member: ${userName} (${userId})`,
       );
+
+      const zone = resolveReportTimezone(timezones.get(userId), adminTimezone);
+      const fmt = (date: Date, pattern: string) =>
+        formatInTimeZone(date, zone.tz, pattern);
 
       const entries = await dbGetTimeEntriesForPeriod(
         userId,
@@ -224,7 +278,7 @@ export async function sendWeeklyReports(
         totalMs += durationMs;
         overtimeMs += shiftOvertimeMs;
 
-        const dateKey = format(inDate, "MMM d, yyyy");
+        const dateKey = fmt(inDate, "MMM d, yyyy");
         let dayData = dailyBreakdownMap.get(dateKey);
         if (!dayData) {
           dayData = { date: dateKey, rawMs: 0, overtimeMs: 0, shifts: [] };
@@ -236,19 +290,19 @@ export async function sendWeeklyReports(
         const breakLines = (entry.breaks ?? []).map((brk) => {
           const minutes = Math.round(getBreakDurationMs(brk) / 60_000);
           const paid = isPaidBreakType(brk.break_type) ? "paid" : "unpaid";
-          return `${breakTypeLabel(brk.break_type)} ${format(
+          return `${breakTypeLabel(brk.break_type)} ${fmt(
             new Date(brk.break_start),
             "h:mm a",
           )} - ${
-            brk.break_end ? format(new Date(brk.break_end), "h:mm a") : "..."
+            brk.break_end ? fmt(new Date(brk.break_end), "h:mm a") : "..."
           } (${minutes}m, ${paid})`;
         });
 
         dayData.rawMs += durationMs;
         dayData.overtimeMs += shiftOvertimeMs;
         dayData.shifts.push({
-          start: format(inDate, "h:mm a"),
-          end: format(outDate, "h:mm a"),
+          start: fmt(inDate, "h:mm a"),
+          end: fmt(outDate, "h:mm a"),
           duration: formatDuration(durationMs),
           ...(breakLines.length > 0 ? { breaks: breakLines.join("; ") } : {}),
           ...(shiftOvertimeMs > 0
@@ -376,6 +430,10 @@ export async function sendWeeklyReports(
                     overtimePolicy: describeOvertime(overtimeSettings),
                   }
                 : {}),
+              timezone: zone.known
+                ? `${zone.tz.replaceAll("_", " ")} (${fmt(startDate, "zzz")})`
+                : zone.tz,
+              timezoneKnown: zone.known,
               periodStart: periodStartStr,
               periodEnd: periodEndStr,
               chartUrl,

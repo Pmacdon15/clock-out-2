@@ -26,6 +26,10 @@ interface WeeklyReportEmailProps {
   overtimeHours?: string;
   /** e.g. "over 8h/day or 40h/week". */
   overtimePolicy?: string;
+  /** Zone the shift times are shown in, e.g. "America/Edmonton (MST)". */
+  timezone?: string;
+  /** False when the member has no saved zone and UTC was used instead. */
+  timezoneKnown?: boolean;
   periodStart: string;
   periodEnd: string;
   chartUrl: string;
@@ -68,6 +72,8 @@ export const WeeklyReportEmail = ({
   regularHours,
   overtimeHours,
   overtimePolicy,
+  timezone,
+  timezoneKnown = true,
   periodStart = "Jan 1, 2024",
   periodEnd = "Jan 7, 2024",
   chartUrl = "",
@@ -184,6 +190,13 @@ export const WeeklyReportEmail = ({
               <Heading className="m-0 mb-4 font-bold text-[18px] text-black">
                 Detailed Breakdown
               </Heading>
+              {timezone && (
+                <Text className="m-0 mb-4 text-[12px] text-gray-500">
+                  Times shown in {timezone}
+                  {!timezoneKnown &&
+                    ". This member's time zone isn't known yet; it is saved the next time they open Clock Out."}
+                </Text>
+              )}
               {breakdown.length === 0 ? (
                 <Text className="text-[14px] text-gray-500">
                   No hours logged in this period.
