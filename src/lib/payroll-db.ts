@@ -2,6 +2,7 @@ import { cacheLife, cacheTag } from "next/cache";
 import { sql } from "./db";
 import type { TaxClaims } from "./income-tax";
 import {
+  type CustomDeduction,
   type PayrollRates,
   type PayrollSettingsData,
   validatePayrollRates,
@@ -16,6 +17,22 @@ export type TaxClaimRow = {
   additional_tax: number;
   updated_at?: Date;
 };
+
+/** A payroll_custom_deductions row as stored. */
+export type CustomDeductionRow = {
+  id: number;
+  org_id: string;
+  user_id: string | null;
+  name: string;
+  kind: string;
+  amount: number;
+  pre_tax: boolean;
+  created_at?: Date;
+};
+
+/** Cache tag for one org's custom deductions. */
+export const customDeductionsTag = (orgId: string) =>
+  `custom-deductions-${orgId}`;
 
 /** Cache tag for the shared rate table (one for every org). */
 export const PAYROLL_RATES_TAG = "payroll-rates";
@@ -65,6 +82,22 @@ export async function ensurePayrollTables(): Promise<void> {
 			updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
 			PRIMARY KEY (org_id, user_id)
 		)
+	`;
+    await sql`
+		CREATE TABLE IF NOT EXISTS payroll_custom_deductions (
+			id SERIAL PRIMARY KEY,
+			org_id TEXT NOT NULL,
+			user_id TEXT,
+			name TEXT NOT NULL,
+			kind TEXT NOT NULL CHECK (kind IN ('fixed', 'percent')),
+			amount DOUBLE PRECISION NOT NULL CHECK (amount > 0),
+			pre_tax BOOLEAN NOT NULL DEFAULT FALSE,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+		)
+	`;
+    await sql`
+		CREATE INDEX IF NOT EXISTS payroll_custom_deductions_org_idx
+		ON payroll_custom_deductions (org_id)
 	`;
   })();
   payrollTablesReady = true;
@@ -151,6 +184,51 @@ export async function dbDeleteTaxClaims(orgId: string, userId: string) {
 		DELETE FROM member_tax_claims
 		WHERE org_id = ${orgId} AND user_id = ${userId}
 	`;
+}
+
+/** Every custom deduction in one org, oldest first, cached per org. */
+export async function dbGetCustomDeductions(orgId: string) {
+  "use cache";
+  cacheTag(customDeductionsTag(orgId));
+  cacheLife("hours");
+  await ensurePayrollTables();
+  return (await sql`
+		SELECT * FROM payroll_custom_deductions
+		WHERE org_id = ${orgId}
+		ORDER BY id
+	`) as CustomDeductionRow[];
+}
+
+export async function dbInsertCustomDeduction(
+  orgId: string,
+  deduction: Omit<CustomDeduction, "id">,
+): Promise<CustomDeductionRow> {
+  await ensurePayrollTables();
+  const [row] = await sql`
+		INSERT INTO payroll_custom_deductions (
+			org_id, user_id, name, kind, amount, pre_tax
+		)
+		VALUES (
+			${orgId}, ${deduction.userId}, ${deduction.name}, ${deduction.kind},
+			${deduction.amount}, ${deduction.preTax}
+		)
+		RETURNING *
+	`;
+  return row as CustomDeductionRow;
+}
+
+/** Removes one deduction from one org; returns how many rows went. */
+export async function dbDeleteCustomDeduction(
+  orgId: string,
+  id: number,
+): Promise<number> {
+  await ensurePayrollTables();
+  const rows = await sql`
+		DELETE FROM payroll_custom_deductions
+		WHERE org_id = ${orgId} AND id = ${id}
+		RETURNING id
+	`;
+  return rows.length;
 }
 
 /**

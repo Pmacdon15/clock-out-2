@@ -124,6 +124,7 @@ describe("computePeriodDeductions", () => {
       ei: 16.3,
       federalTax: 0,
       provincialTax: 0,
+      other: 0,
       total: 71.8,
       net: 928.2,
       employerCost: 78.32,

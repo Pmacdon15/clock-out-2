@@ -245,6 +245,7 @@ export default function ViewHours({
           )}
           {splitsByEntry && (
             <PaySummary
+              currentUserId={currentUserId || undefined}
               entries={displayEntries}
               isViewingAll={isViewingAll}
               members={members}

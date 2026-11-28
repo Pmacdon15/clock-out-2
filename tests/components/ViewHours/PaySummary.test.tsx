@@ -1,6 +1,25 @@
-import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
-import { PaySummary } from "@/components/ViewHours/PaySummary";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  updateMemberTaxClaimsAction: vi.fn(),
+  toast: { success: vi.fn(), error: vi.fn() },
+}));
+vi.mock("@/lib/payroll-actions", () => ({
+  updateMemberTaxClaimsAction: mocks.updateMemberTaxClaimsAction,
+}));
+vi.mock("sonner", () => ({ toast: mocks.toast }));
+
+import {
+  PaySummary,
+  SHOW_DEDUCTIONS_KEY,
+} from "@/components/ViewHours/PaySummary";
 import { computeEntryOvertime } from "@/lib/overtime";
 import type { PayRate } from "@/lib/pay";
 import { type PayrollView, SEED_PAYROLL_RATES } from "@/lib/payroll";
@@ -37,13 +56,19 @@ const rates = new Map<string, PayRate>([
   ["u9", { hourlyRate: 10, overtimeMultiplier: 1.5 }],
 ]);
 
+beforeEach(() => {
+  window.localStorage.clear();
+});
+
 function renderSummary(
   entries: TimeEntry[],
   isViewingAll = true,
   payroll: PayrollView | null = null,
+  currentUserId?: string,
 ) {
   render(
     <PaySummary
+      currentUserId={currentUserId}
       entries={entries}
       isViewingAll={isViewingAll}
       members={members}
@@ -122,6 +147,7 @@ describe("PaySummary", () => {
       province: "SK",
       rates: [...SEED_PAYROLL_RATES],
       claims: [],
+      customDeductions: [],
       ...overrides,
     });
     const zeroClaims = (userId: string) => ({
@@ -215,6 +241,105 @@ describe("PaySummary", () => {
       expect(screen.getByTestId("tax-basis")).toHaveTextContent(
         "Income tax assumes the basic personal amounts",
       );
+    });
+
+    it("can be hidden and shown again, remembered in this browser", () => {
+      renderSummary([ada], true, payroll());
+      const toggle = screen.getByTestId("toggle-deductions");
+      expect(toggle).toHaveTextContent("Hide deductions");
+      fireEvent.click(toggle);
+      expect(screen.queryByTestId("pay-deductions")).not.toBeInTheDocument();
+      expect(screen.getByTestId("gross-pay")).toBeInTheDocument();
+      expect(toggle).toHaveTextContent("Show deductions");
+      expect(window.localStorage.getItem(SHOW_DEDUCTIONS_KEY)).toBe("0");
+      fireEvent.click(toggle);
+      expect(screen.getByTestId("pay-deductions")).toBeInTheDocument();
+    });
+
+    it("start hidden when this browser hid them before", () => {
+      window.localStorage.setItem(SHOW_DEDUCTIONS_KEY, "0");
+      renderSummary([ada], true, payroll());
+      expect(screen.queryByTestId("pay-deductions")).not.toBeInTheDocument();
+    });
+
+    it("offer no toggle when the org has them off", () => {
+      renderSummary([ada], true, payroll({ enabled: false }));
+      expect(screen.queryByTestId("toggle-deductions")).not.toBeInTheDocument();
+    });
+
+    it("take custom deductions off net pay, by name", () => {
+      // Grace $240: CPP 5.95% × (240 − 3500/52) = $10.27, EI $3.91.
+      renderSummary(
+        [grace, ada],
+        true,
+        payroll({
+          customDeductions: [
+            {
+              id: "1",
+              userId: null,
+              name: "Union dues",
+              kind: "fixed",
+              amount: 10,
+              preTax: true,
+            },
+            {
+              id: "2",
+              userId: "u2",
+              name: "RRSP",
+              kind: "percent",
+              amount: 5,
+              preTax: true,
+            },
+          ],
+        }),
+      );
+      const lines = screen.getAllByTestId("deduction-custom");
+      expect(lines).toHaveLength(2);
+      // Both members pay $10 dues; only Grace pays 5% of $240.
+      expect(lines[0]).toHaveTextContent("Union dues");
+      expect(lines[0]).toHaveTextContent("$20.00");
+      expect(lines[0]).toHaveTextContent("$10.00 per week, before tax");
+      expect(lines[1]).toHaveTextContent("RRSP");
+      expect(lines[1]).toHaveTextContent("$12.00");
+    });
+
+    it("let a member enter their own TD1 amounts", async () => {
+      mocks.updateMemberTaxClaimsAction.mockResolvedValue({
+        success: true,
+        data: null,
+      });
+      renderSummary([ada, adaNextWeek], false, payroll(), "u1");
+      const before = screen.getByTestId("deduction-federal-tax").textContent;
+      fireEvent.click(screen.getByTestId("edit-own-td1"));
+      expect(screen.getByText("Your TD1 amounts")).toBeInTheDocument();
+      fireEvent.change(document.getElementById("td1-federal-u1") as Element, {
+        target: { value: "0" },
+      });
+      fireEvent.change(
+        document.getElementById("td1-provincial-u1") as Element,
+        { target: { value: "0" } },
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() =>
+        expect(mocks.updateMemberTaxClaimsAction).toHaveBeenCalledWith(
+          "u1",
+          0,
+          0,
+          0,
+        ),
+      );
+      // The estimate follows the saved amounts at once.
+      await waitFor(() =>
+        expect(screen.getByTestId("deduction-federal-tax")).toHaveTextContent(
+          "$42.20",
+        ),
+      );
+      expect(before).toBe("$0.00");
+    });
+
+    it("don't offer TD1 entry on someone else's hours", () => {
+      renderSummary([ada], false, payroll(), "u2");
+      expect(screen.queryByTestId("edit-own-td1")).not.toBeInTheDocument();
     });
 
     it("use QPP labels and Quebec rates in Quebec", () => {

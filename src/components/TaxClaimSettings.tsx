@@ -43,16 +43,23 @@ const hasEnteredClaims = (row: TaxClaims | undefined) =>
 const inputClass =
   "h-11 w-full rounded-xl border-2 border-zinc-200 bg-white px-3 dark:border-zinc-800 dark:bg-zinc-950";
 
-function MemberTaxClaimRow({
+/** One member's TD1 form; also used by members for their own amounts. */
+export function MemberTaxClaimRow({
   member,
   saved,
   showProvincial,
   onSaved,
+  heading = member.name,
+  compact = false,
 }: {
   member: { id: string; name: string };
   saved: TaxClaims | undefined;
   showProvincial: boolean;
   onSaved: (claims: TaxClaims) => void;
+  /** Shown above the fields; the member's name unless given. */
+  heading?: string;
+  /** Stack the fields, for narrow cards. */
+  compact?: boolean;
 }) {
   const [current, setCurrent] = useState(() => toDraft(saved));
   const [draft, setDraft] = useState<Draft>(() => toDraft(saved));
@@ -104,8 +111,14 @@ function MemberTaxClaimRow({
       className="space-y-2 rounded-xl border-2 border-zinc-100 p-4 dark:border-zinc-900"
       data-testid={`tax-claim-row-${member.id}`}
     >
-      <div className="font-medium">{member.name}</div>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_1fr_1fr_auto] sm:items-end">
+      <div className="font-medium">{heading}</div>
+      <div
+        className={
+          compact
+            ? "grid grid-cols-1 gap-3"
+            : "grid grid-cols-1 gap-3 sm:grid-cols-[1fr_1fr_1fr_auto] sm:items-end"
+        }
+      >
         <div className="space-y-1">
           <label
             className="text-muted-foreground text-sm"
@@ -218,7 +231,8 @@ export default function TaxClaimSettings({
           Income tax withheld depends on what each employee claims on their TD1
           forms. Pick a member, then enter the total claim amount from each of
           their forms to match it; leave it blank to estimate with the basic
-          personal amount. Members only ever see their own figures.
+          personal amount. Members only ever see their own figures, and can
+          enter their own from the pay summary on the Hours page.
           {!showProvincial &&
             " Quebec provincial tax (TP-1015.3) isn't estimated."}
         </p>

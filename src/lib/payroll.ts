@@ -10,8 +10,9 @@
  *
  * The figures are estimates for planning, not a payroll engine. Income tax
  * is estimated in ./income-tax from each employee's TD1 claim amounts (or
- * the basic personal amounts when none are entered); QPIP and other
- * deductions are not calculated.
+ * the basic personal amounts when none are entered). Admins can add their
+ * own deductions (RRSP, union dues, benefits) as a fixed amount or a
+ * percentage of gross pay; QPIP is not calculated.
  */
 
 import {
@@ -198,7 +199,9 @@ export type PayrollDeductions = {
   federalTax: number;
   /** Provincial or territorial income tax withheld (0 for Quebec). */
   provincialTax: number;
-  /** pension + pension2 + ei + federalTax + provincialTax */
+  /** Custom deductions (RRSP, union dues, ...) added up. */
+  other: number;
+  /** pension + pension2 + ei + federalTax + provincialTax + other */
   total: number;
   /** gross − total */
   net: number;
@@ -221,6 +224,10 @@ export type IncomeTaxContext = {
  * basic exemption is prorated over the pay periods in a year, and each
  * contribution stops once the year-to-date amount reaches its annual maximum.
  * Income tax is added when `tax` names the tables and province to use.
+ *
+ * Custom deductions come after CPP/QPP and EI: the before-tax ones first
+ * (they lower taxable income), then the after-tax ones. None of them takes
+ * pay below zero; one that doesn't fit is cut to what is left.
  */
 export function computePeriodDeductions(
   gross: number,
@@ -228,7 +235,13 @@ export function computePeriodDeductions(
   periodsPerYear: number,
   ytd: PayrollYearToDate = EMPTY_YEAR_TO_DATE,
   tax?: IncomeTaxContext & { tables: IncomeTaxTables },
-): { deductions: PayrollDeductions; ytd: PayrollYearToDate } {
+  custom: readonly CustomDeduction[] = [],
+): {
+  deductions: PayrollDeductions;
+  ytd: PayrollYearToDate;
+  /** What each custom deduction took this period, by id. */
+  custom: Record<string, number>;
+} {
   const pay = Math.max(0, gross);
 
   const pension = capped(
@@ -258,6 +271,19 @@ export function computePeriodDeductions(
     rates.ei.maxEmployerPremium - ytd.employerEi,
   );
 
+  let room = pay - pension - pension2 - ei;
+  const taken: Record<string, number> = {};
+  const take = (deduction: CustomDeduction) => {
+    const amount = capped(customDeductionAmount(deduction, pay), room);
+    room -= amount;
+    taken[deduction.id] = cents((taken[deduction.id] ?? 0) + amount);
+    return amount;
+  };
+  let preTax = 0;
+  for (const deduction of custom) {
+    if (deduction.preTax) preTax += take(deduction);
+  }
+
   const incomeTax = tax
     ? computeIncomeTax(
         {
@@ -271,13 +297,21 @@ export function computePeriodDeductions(
           pensionMax: rates.pension.maxContribution,
           eiMax: rates.ei.maxEmployeePremium,
           claims: tax.claims,
+          preTaxDeductions: preTax,
         },
         tax.tables,
       )
     : { federal: 0, provincial: 0 };
 
+  room -= incomeTax.federal + incomeTax.provincial;
+  let postTax = 0;
+  for (const deduction of custom) {
+    if (!deduction.preTax) postTax += take(deduction);
+  }
+  const other = cents(preTax + postTax);
+
   const total = cents(
-    pension + pension2 + ei + incomeTax.federal + incomeTax.provincial,
+    pension + pension2 + ei + incomeTax.federal + incomeTax.provincial + other,
   );
   return {
     deductions: {
@@ -287,6 +321,7 @@ export function computePeriodDeductions(
       ei,
       federalTax: incomeTax.federal,
       provincialTax: incomeTax.provincial,
+      other,
       total,
       net: cents(pay - total),
       employerCost: cents(pension + pension2 + employerEi),
@@ -298,6 +333,7 @@ export function computePeriodDeductions(
       ei: ytd.ei + ei,
       employerEi: ytd.employerEi + employerEi,
     },
+    custom: taken,
   };
 }
 
@@ -308,6 +344,7 @@ export const ZERO_DEDUCTIONS: PayrollDeductions = {
   ei: 0,
   federalTax: 0,
   provincialTax: 0,
+  other: 0,
   total: 0,
   net: 0,
   employerCost: 0,
@@ -332,7 +369,8 @@ export function sumDeductions(
  * effect are skipped and counted in `unratedPeriods`. With `tax`, income tax
  * is estimated too, from the tax tables in effect on each period's date;
  * periods before the first tables get none and are counted in
- * `untaxedPeriods`.
+ * `untaxedPeriods`. `custom` deductions are taken from every period, and
+ * `customById` adds up what each one took.
  */
 export function computeDeductionsForPeriods(
   periods: readonly { date: string; gross: number }[],
@@ -341,10 +379,12 @@ export function computeDeductionsForPeriods(
   periodsPerYear: number,
   tax?: IncomeTaxContext,
   taxTables?: readonly IncomeTaxTables[],
+  custom: readonly CustomDeduction[] = [],
 ): {
   total: PayrollDeductions;
   unratedPeriods: number;
   untaxedPeriods: number;
+  customById: Record<string, number>;
 } {
   const sorted = [...periods].sort((a, b) => a.date.localeCompare(b.date));
   const results: PayrollDeductions[] = [];
@@ -352,6 +392,7 @@ export function computeDeductionsForPeriods(
   let year = "";
   let unratedPeriods = 0;
   let untaxedPeriods = 0;
+  const customById: Record<string, number> = {};
   for (const period of sorted) {
     const periodYear = period.date.slice(0, 4);
     if (periodYear !== year) {
@@ -371,11 +412,136 @@ export function computeDeductionsForPeriods(
       periodsPerYear,
       ytd,
       tax && tables ? { ...tax, tables } : undefined,
+      custom,
     );
     ytd = next.ytd;
     results.push(next.deductions);
+    for (const [id, amount] of Object.entries(next.custom)) {
+      customById[id] = cents((customById[id] ?? 0) + amount);
+    }
   }
-  return { total: sumDeductions(results), unratedPeriods, untaxedPeriods };
+  return {
+    total: sumDeductions(results),
+    unratedPeriods,
+    untaxedPeriods,
+    customById,
+  };
+}
+
+/* --------------------------------------------------- custom deductions -- */
+
+export type CustomDeductionKind = "fixed" | "percent";
+
+/** A deduction an admin added: RRSP, union dues, benefits, ... */
+export type CustomDeduction = {
+  id: string;
+  /** Whose pay it comes off; null = every member. */
+  userId: string | null;
+  name: string;
+  /** "fixed": dollars per pay week; "percent": % of gross pay. */
+  kind: CustomDeductionKind;
+  amount: number;
+  /** Taken before income tax, so it lowers taxable income (e.g. RRSP). */
+  preTax: boolean;
+};
+
+export const MAX_CUSTOM_DEDUCTIONS = 50;
+export const MAX_DEDUCTION_NAME_LENGTH = 40;
+export const MAX_FIXED_DEDUCTION = 10_000;
+export const MAX_PERCENT_DEDUCTION = 100;
+
+export function isCustomDeductionKind(
+  value: unknown,
+): value is CustomDeductionKind {
+  return value === "fixed" || value === "percent";
+}
+
+/** Why a custom deduction can't be saved, or null when it can. */
+export function validateCustomDeduction(input: {
+  name: unknown;
+  kind: unknown;
+  amount: unknown;
+  preTax: unknown;
+}): string | null {
+  const name = typeof input.name === "string" ? input.name.trim() : "";
+  if (!name || name.length > MAX_DEDUCTION_NAME_LENGTH) {
+    return `Give the deduction a name of up to ${MAX_DEDUCTION_NAME_LENGTH} characters`;
+  }
+  if (!isCustomDeductionKind(input.kind)) return "Pick a fixed amount or a %";
+  const max =
+    input.kind === "percent" ? MAX_PERCENT_DEDUCTION : MAX_FIXED_DEDUCTION;
+  if (
+    typeof input.amount !== "number" ||
+    !Number.isFinite(input.amount) ||
+    input.amount <= 0 ||
+    input.amount > max
+  ) {
+    return input.kind === "percent"
+      ? `Enter a percentage above 0 and up to ${MAX_PERCENT_DEDUCTION}`
+      : `Enter an amount above $0 and up to $${MAX_FIXED_DEDUCTION.toLocaleString("en-US")}`;
+  }
+  if (typeof input.preTax !== "boolean") return "Invalid before-tax setting";
+  return null;
+}
+
+/** What a deduction asks for from one period's gross pay (before capping). */
+export function customDeductionAmount(
+  deduction: Pick<CustomDeduction, "kind" | "amount">,
+  gross: number,
+): number {
+  return deduction.kind === "percent"
+    ? (Math.max(0, gross) * deduction.amount) / 100
+    : deduction.amount;
+}
+
+/** The deductions that come off one member's pay. */
+export function customDeductionsFor(
+  deductions: readonly CustomDeduction[],
+  userId: string,
+): CustomDeduction[] {
+  return deductions.filter(
+    (deduction) => deduction.userId === null || deduction.userId === userId,
+  );
+}
+
+/** A stored row as a deduction, or null when it's unusable. */
+export function toCustomDeduction(
+  row?: {
+    id?: number | string | null;
+    user_id?: string | null;
+    name?: string | null;
+    kind?: string | null;
+    amount?: number | string | null;
+    pre_tax?: boolean | null;
+  } | null,
+): CustomDeduction | null {
+  if (!row || row.id === undefined || row.id === null) return null;
+  const input = {
+    name: row.name,
+    kind: row.kind,
+    amount: Number(row.amount),
+    preTax: row.pre_tax === true,
+  };
+  if (validateCustomDeduction(input) !== null) return null;
+  return {
+    id: String(row.id),
+    userId: row.user_id ?? null,
+    name: String(row.name).trim(),
+    kind: row.kind as CustomDeductionKind,
+    amount: input.amount,
+    preTax: input.preTax,
+  };
+}
+
+/** "$50.00 per week" or "5% of gross", plus ", before tax" when it is. */
+export function describeCustomDeduction(
+  deduction: Pick<CustomDeduction, "kind" | "amount" | "preTax">,
+): string {
+  const amount =
+    deduction.kind === "percent"
+      ? `${Number(deduction.amount.toFixed(3))}% of gross`
+      : `$${deduction.amount.toFixed(2)} per week`;
+  return deduction.preTax ? `${amount}, before tax` : amount;
 }
 
 /** "5.95%" */
@@ -399,6 +565,11 @@ export type PayrollView = {
   rates: PayrollRates[];
   /** TD1 claims the caller may see: everyone's for admins, else their own. */
   claims: TaxClaims[];
+  /**
+   * Custom deductions the caller may see: every one for admins, else the
+   * ones that come off their own pay.
+   */
+  customDeductions: CustomDeduction[];
 };
 
 /** Settings with defaults filled in, and an unknown province replaced. */
