@@ -233,4 +233,30 @@ describe("WeeklyReportEmail", () => {
       doc.querySelector('img[alt="Company logo"]')?.getAttribute("src"),
     ).toBe("https://img.clerk.com/acme.png");
   });
+
+  it("says which time zone the shift times are in", async () => {
+    const doc = await renderEmail({
+      ...base,
+      timezone: "America/Edmonton (MST)",
+    });
+    const text = doc.body.textContent ?? "";
+    expect(text).toContain("Times shown in America/Edmonton (MST)");
+    expect(text).not.toContain("time zone isn't known yet");
+  });
+
+  it("explains the UTC fallback when the member's zone is unknown", async () => {
+    const doc = await renderEmail({
+      ...base,
+      timezone: "UTC",
+      timezoneKnown: false,
+    });
+    expect(doc.body.textContent).toContain(
+      "Times shown in UTC. This member's time zone isn't known yet",
+    );
+  });
+
+  it("leaves the time zone line out when none is given", async () => {
+    const doc = await renderEmail(base);
+    expect(doc.body.textContent).not.toContain("Times shown in");
+  });
 });
