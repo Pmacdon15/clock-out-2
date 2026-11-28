@@ -3,6 +3,7 @@ import TimeClockSkeleton from "@/components/fallbacks/time-clock-fallback";
 import McpConnectCard from "@/components/McpConnectCard";
 import TimeClockPanel from "@/components/TimeClockPanel";
 import {
+  getMyCurrentShifts,
   getOrgBreakSettings,
   getOrgLocationSettings,
   getTimeEntries,
@@ -21,6 +22,7 @@ export default function TimeClockPage() {
           isAdminPromise={isAdmin()}
           locationSettingsPromise={getOrgLocationSettings()}
           recentEntriesPromise={getTimeEntries()}
+          shiftsPromise={getMyCurrentShifts()}
         />
       </Suspense>
       <McpConnectCard />

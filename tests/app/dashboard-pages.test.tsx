@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => {
       getOrgTimeEntries: vi.fn(async (filters: unknown) => ({ org: filters })),
       getCalendarFeedPath: vi.fn(() => "calendar_feed"),
       getSchedule: vi.fn(() => "schedule"),
+      getMyCurrentShifts: vi.fn(() => "my_shifts"),
       getTimeEntries: vi.fn(async (...args: unknown[]) => ({ args })),
       getTimeOffAllowances: vi.fn(() => "allowances"),
       getTimeOffRequests: vi.fn(() => "time_off"),
@@ -208,6 +209,7 @@ describe("TimeClockPage", () => {
     await expect(props?.hasGeofencingPromise).resolves.toBe(true);
     await expect(props?.isAdminPromise).resolves.toBe(true);
     await expect(props?.recentEntriesPromise).resolves.toEqual({ args: [] });
+    expect(props?.shiftsPromise).toBe("my_shifts");
   });
 });
 

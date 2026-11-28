@@ -25,6 +25,7 @@ const latest = () => captured.props[captured.props.length - 1];
 
 const location = { org_id: "org_1", capture_location: true } as never;
 const breaks = { org_id: "org_1" } as never;
+const shift = { id: 4 } as never;
 
 type Props = Parameters<typeof TimeClockPanel>[0];
 function renderPanel(overrides: Partial<Props> = {}) {
@@ -35,6 +36,7 @@ function renderPanel(overrides: Partial<Props> = {}) {
       isAdminPromise={resolved(true)}
       locationSettingsPromise={ok(location)}
       recentEntriesPromise={ok([makeEntry({ id: 7 })])}
+      shiftsPromise={ok([shift])}
       {...overrides}
     />,
   );
@@ -53,6 +55,7 @@ describe("TimeClockPanel", () => {
     expect(props.isAdmin).toBe(true);
     expect(props.breakSettings).toBe(breaks);
     expect(props.locationSettings).toBe(location);
+    expect(props.scheduledShifts).toEqual([shift]);
   });
 
   it("captures no location without the geofencing feature", () => {
@@ -66,10 +69,12 @@ describe("TimeClockPanel", () => {
       breakSettingsPromise: failed(),
       locationSettingsPromise: failed(),
       recentEntriesPromise: failed(),
+      shiftsPromise: failed(),
     });
     expect(props.breakSettings).toBeNull();
     expect(props.locationSettings).toBeNull();
     expect(props.initialEntries).toEqual([]);
+    expect(props.scheduledShifts).toBeUndefined();
   });
 
   it("treats a missing entry list as empty", () => {
