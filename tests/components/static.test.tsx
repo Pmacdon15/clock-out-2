@@ -30,9 +30,10 @@ describe("fallbacks", () => {
     );
   });
 
-  it("renders a placeholder for each settings option", () => {
+  it("renders a placeholder for each settings section and option", () => {
     const { container } = render(<SettingsFallback />);
-    expect(container.querySelectorAll(".rounded-2xl")).toHaveLength(4);
+    expect(container.querySelectorAll(".rounded-lg.h-9")).toHaveLength(4);
+    expect(container.querySelectorAll(".rounded-2xl")).toHaveLength(3);
   });
 
   it("renders placeholders for the hours view", () => {

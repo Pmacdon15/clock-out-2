@@ -1,6 +1,6 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { startTransition } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   BreakSettingsData,
   LocationSettingsData,
@@ -515,5 +515,53 @@ describe("OrgSettings", () => {
     );
     updatePayPeriodOptimistically({ enabled: true });
     expect(latestPayPeriod().initialData).toBeNull();
+  });
+});
+
+describe("OrgSettings sections", () => {
+  const renderSettings = () =>
+    render(
+      <OrgSettings
+        alertSettingsPromise={resolved({ ok: false, error: { reason: "x" } })}
+        hasReporting
+        orgSettingsPromise={resolved({ ok: true, value: null })}
+      />,
+    );
+  /** Whether the card is in the open section (every section stays mounted). */
+  const shown = (testId: string) =>
+    screen.getByTestId(testId).closest("section")?.hidden === false;
+  const menuItem = (name: RegExp) => screen.getByRole("button", { name });
+
+  afterEach(() => {
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("opens on Time & Breaks with the other sections hidden", () => {
+    renderSettings();
+    expect(shown("breaks")).toBe(true);
+    expect(shown("overtime")).toBe(true);
+    expect(shown("pay-rates")).toBe(false);
+    expect(shown("location")).toBe(false);
+    expect(shown("alerts")).toBe(false);
+    expect(menuItem(/Time & Breaks/)).toHaveAttribute("aria-current", "true");
+  });
+
+  it("switches section from the menu and records it in the hash", () => {
+    window.scrollTo = vi.fn();
+    renderSettings();
+    fireEvent.click(menuItem(/Pay & Payroll/));
+    for (const id of ["pay-rates", "pay-period", "payroll", "tax-claims"]) {
+      expect(shown(id)).toBe(true);
+    }
+    expect(shown("breaks")).toBe(false);
+    expect(window.location.hash).toBe("#pay");
+  });
+
+  it("opens the section named in the URL hash", () => {
+    window.history.replaceState(null, "", "/#alerts");
+    renderSettings();
+    expect(shown("alerts")).toBe(true);
+    expect(shown("reporting")).toBe(true);
+    expect(shown("breaks")).toBe(false);
   });
 });
