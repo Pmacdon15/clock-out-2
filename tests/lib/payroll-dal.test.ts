@@ -13,6 +13,9 @@ const mocks = vi.hoisted(() => ({
   dbGetTaxClaims: vi.fn(),
   dbUpsertTaxClaims: vi.fn(),
   dbDeleteTaxClaims: vi.fn(),
+  dbGetCustomDeductions: vi.fn(),
+  dbInsertCustomDeduction: vi.fn(),
+  dbDeleteCustomDeduction: vi.fn(),
   getOrgMembers: vi.fn(),
 }));
 
@@ -29,12 +32,17 @@ vi.mock("@/lib/payroll-db", () => ({
   dbGetTaxClaims: mocks.dbGetTaxClaims,
   dbUpsertTaxClaims: mocks.dbUpsertTaxClaims,
   dbDeleteTaxClaims: mocks.dbDeleteTaxClaims,
+  dbGetCustomDeductions: mocks.dbGetCustomDeductions,
+  dbInsertCustomDeduction: mocks.dbInsertCustomDeduction,
+  dbDeleteCustomDeduction: mocks.dbDeleteCustomDeduction,
 }));
 vi.mock("@/lib/cra-rates", () => ({
   fetchCraPayrollRates: mocks.fetchCraPayrollRates,
 }));
 
 import {
+  addCustomDeductionDal,
+  deleteCustomDeductionDal,
   getOrgPayroll,
   syncPayrollRatesFromCra,
   updateMemberTaxClaimsDal,
@@ -55,6 +63,18 @@ beforeEach(() => {
   mocks.dbUpsertTaxClaims.mockResolvedValue({});
   mocks.dbDeleteTaxClaims.mockResolvedValue(undefined);
   mocks.getOrgMembers.mockResolvedValue([{ id: "u2", name: "Bo" }]);
+  mocks.dbGetCustomDeductions.mockResolvedValue([]);
+  mocks.dbDeleteCustomDeduction.mockResolvedValue(1);
+});
+
+const deductionRow = (id: number, user_id: string | null, name = "RRSP") => ({
+  id,
+  org_id: "org_1",
+  user_id,
+  name,
+  kind: "fixed",
+  amount: 25,
+  pre_tax: true,
 });
 
 const claimRow = (user_id: string, federal_claim: number | null) => ({
@@ -90,6 +110,7 @@ describe("getOrgPayroll", () => {
         province: "QC",
         rates: [stored, CA, QC],
         claims: [],
+        customDeductions: [],
       },
     });
     expect(mocks.dbGetPayrollSettings).toHaveBeenCalledWith("org_1");
@@ -100,7 +121,13 @@ describe("getOrgPayroll", () => {
     const result = await getOrgPayroll();
     expect(result).toEqual({
       ok: true,
-      value: { enabled: false, province: "SK", rates: [CA, QC], claims: [] },
+      value: {
+        enabled: false,
+        province: "SK",
+        rates: [CA, QC],
+        claims: [],
+        customDeductions: [],
+      },
     });
   });
 
@@ -193,11 +220,208 @@ describe("updatePayrollSettingsDal", () => {
   });
 });
 
-describe("updateMemberTaxClaimsDal", () => {
+describe("getOrgPayroll custom deductions", () => {
+  it("gives admins every deduction and drops unusable rows", async () => {
+    mocks.dbGetCustomDeductions.mockResolvedValue([
+      deductionRow(1, null),
+      deductionRow(2, "u2", "Union dues"),
+      { ...deductionRow(3, null), kind: "bogus" },
+    ]);
+    const result = await getOrgPayroll();
+    expect(result.ok && result.value.customDeductions).toEqual([
+      {
+        id: "1",
+        userId: null,
+        name: "RRSP",
+        kind: "fixed",
+        amount: 25,
+        preTax: true,
+      },
+      {
+        id: "2",
+        userId: "u2",
+        name: "Union dues",
+        kind: "fixed",
+        amount: 25,
+        preTax: true,
+      },
+    ]);
+  });
+
+  it("gives members only everyone's and their own", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.dbGetCustomDeductions.mockResolvedValue([
+      deductionRow(1, null),
+      deductionRow(2, "u2"),
+      deductionRow(3, "u3"),
+    ]);
+    const result = await getOrgPayroll();
+    expect(result.ok && result.value.customDeductions.map((d) => d.id)).toEqual(
+      ["1", "2"],
+    );
+  });
+
+  it("shows no custom deductions when they can't be read", async () => {
+    mocks.dbGetCustomDeductions.mockRejectedValue(new Error("down"));
+    const result = await getOrgPayroll();
+    expect(result.ok && result.value.customDeductions).toEqual([]);
+  });
+});
+
+describe("addCustomDeductionDal", () => {
+  const input = {
+    memberId: null,
+    name: " RRSP ",
+    kind: "percent",
+    amount: 5,
+    preTax: true,
+  };
+
   it("is admin-only", async () => {
     mocks.protect.mockResolvedValue(member);
-    const result = await updateMemberTaxClaimsDal("u2", 1, null, 0);
+    const result = await addCustomDeductionDal(input);
     expect(result._unsafeUnwrapErr()).toEqual({ reason: "Unauthorized" });
+    expect(mocks.dbInsertCustomDeduction).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [{ name: "" }],
+    [{ kind: "weekly" }],
+    [{ amount: 0 }],
+    [{ kind: "percent", amount: 101 }],
+    [{ preTax: "yes" }],
+  ])("rejects %j", async (overrides) => {
+    const result = await addCustomDeductionDal({ ...input, ...overrides });
+    expect(result.isErr()).toBe(true);
+    expect(mocks.dbInsertCustomDeduction).not.toHaveBeenCalled();
+  });
+
+  it.each([[42], [undefined]])("rejects member id %j", async (memberId) => {
+    const result = await addCustomDeductionDal({ ...input, memberId });
+    expect(result._unsafeUnwrapErr()).toEqual({ reason: "Member not found" });
+  });
+
+  it("only adds for members of the org", async () => {
+    const result = await addCustomDeductionDal({ ...input, memberId: "u9" });
+    expect(result._unsafeUnwrapErr()).toEqual({ reason: "Member not found" });
+  });
+
+  it("caps how many an org can have", async () => {
+    mocks.dbGetCustomDeductions.mockResolvedValue(
+      Array.from({ length: 50 }, (_, i) => deductionRow(i + 1, null)),
+    );
+    const result = await addCustomDeductionDal(input);
+    expect(result.isErr()).toBe(true);
+    expect(mocks.dbInsertCustomDeduction).not.toHaveBeenCalled();
+  });
+
+  it("saves a trimmed deduction for everyone or one member", async () => {
+    mocks.dbInsertCustomDeduction.mockResolvedValue({
+      ...deductionRow(9, "u2"),
+      kind: "percent",
+      amount: 5,
+    });
+    const result = await addCustomDeductionDal({ ...input, memberId: "u2" });
+    expect(mocks.dbInsertCustomDeduction).toHaveBeenCalledWith("org_1", {
+      userId: "u2",
+      name: "RRSP",
+      kind: "percent",
+      amount: 5,
+      preTax: true,
+    });
+    expect(result._unsafeUnwrap()).toEqual({
+      org_id: "org_1",
+      deduction: {
+        id: "9",
+        userId: "u2",
+        name: "RRSP",
+        kind: "percent",
+        amount: 5,
+        preTax: true,
+      },
+    });
+  });
+
+  it("reports a saved row it can't read back", async () => {
+    mocks.dbInsertCustomDeduction.mockResolvedValue({ id: null });
+    const result = await addCustomDeductionDal(input);
+    expect(result._unsafeUnwrapErr()).toEqual({
+      reason: "Failed to save the deduction",
+    });
+  });
+
+  it("reports a write failure", async () => {
+    mocks.dbInsertCustomDeduction.mockRejectedValue(new Error("down"));
+    const result = await addCustomDeductionDal(input);
+    expect(result._unsafeUnwrapErr()).toEqual({
+      reason: "Failed to save the deduction",
+    });
+  });
+});
+
+describe("deleteCustomDeductionDal", () => {
+  it("is admin-only", async () => {
+    mocks.protect.mockResolvedValue(member);
+    const result = await deleteCustomDeductionDal("1");
+    expect(result._unsafeUnwrapErr()).toEqual({ reason: "Unauthorized" });
+  });
+
+  it.each([["abc"], [-1], [1.5], [null]])("rejects id %j", async (id) => {
+    const result = await deleteCustomDeductionDal(id);
+    expect(result._unsafeUnwrapErr()).toEqual({
+      reason: "Deduction not found",
+    });
+    expect(mocks.dbDeleteCustomDeduction).not.toHaveBeenCalled();
+  });
+
+  it("removes it from the admin's org", async () => {
+    const result = await deleteCustomDeductionDal("7");
+    expect(mocks.dbDeleteCustomDeduction).toHaveBeenCalledWith("org_1", 7);
+    expect(result._unsafeUnwrap()).toEqual({ org_id: "org_1" });
+  });
+
+  it("reports a delete failure", async () => {
+    mocks.dbDeleteCustomDeduction.mockRejectedValue(new Error("down"));
+    const result = await deleteCustomDeductionDal(7);
+    expect(result._unsafeUnwrapErr()).toEqual({
+      reason: "Failed to remove the deduction",
+    });
+  });
+
+  it("reports a deduction from another org as not found", async () => {
+    mocks.dbDeleteCustomDeduction.mockResolvedValue(0);
+    const result = await deleteCustomDeductionDal("7");
+    expect(result._unsafeUnwrapErr()).toEqual({
+      reason: "Deduction not found",
+    });
+  });
+});
+
+describe("updateMemberTaxClaimsDal", () => {
+  it("requires an org", async () => {
+    mocks.protect.mockResolvedValue({ userId: "u1", orgId: null });
+    const result = await updateMemberTaxClaimsDal("u1", 1, null, 0);
+    expect(result._unsafeUnwrapErr()).toEqual({ reason: "Unauthorized" });
+  });
+
+  it("lets members change only their own amounts", async () => {
+    mocks.protect.mockResolvedValue(member);
+    const result = await updateMemberTaxClaimsDal("u1", 1, null, 0);
+    expect(result._unsafeUnwrapErr()).toEqual({ reason: "Unauthorized" });
+    expect(mocks.dbUpsertTaxClaims).not.toHaveBeenCalled();
+  });
+
+  it("lets a member save their own amounts", async () => {
+    mocks.protect.mockResolvedValue(member);
+    mocks.getOrgMembers.mockResolvedValue([]);
+    const result = await updateMemberTaxClaimsDal("u2", 1, null, 0);
+    expect(result.isOk()).toBe(true);
+    expect(mocks.dbUpsertTaxClaims).toHaveBeenCalledWith("org_1", {
+      userId: "u2",
+      federalClaim: 1,
+      provincialClaim: null,
+      additionalTax: 0,
+    });
   });
 
   it.each([

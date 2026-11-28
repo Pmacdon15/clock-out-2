@@ -344,6 +344,23 @@ CREATE TABLE IF NOT EXISTS member_tax_claims (
     PRIMARY KEY (org_id, user_id)
 );
 
+-- Deductions an admin adds to pay estimates (RRSP, union dues, benefits):
+-- a fixed amount per pay week or a percentage of gross pay. user_id NULL
+-- means every member; pre_tax ones lower taxable income.
+CREATE TABLE IF NOT EXISTS payroll_custom_deductions (
+    id SERIAL PRIMARY KEY,
+    org_id TEXT NOT NULL,
+    user_id TEXT,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('fixed', 'percent')),
+    amount DOUBLE PRECISION NOT NULL CHECK (amount > 0),
+    pre_tax BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS payroll_custom_deductions_org_idx
+    ON payroll_custom_deductions (org_id);
+
 -- When paydays fall: every 7 ('weekly') or 14 ('bi-weekly') days from
 -- anchor_payday (YYYY-MM-DD). Each payday pays for the 7 or 14 days ending
 -- holdback_days before it (0 = the period ends on payday). When enabled the

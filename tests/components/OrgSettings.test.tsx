@@ -68,6 +68,18 @@ vi.mock("@/components/TaxClaimSettings", () => ({
     </div>
   ),
 }));
+vi.mock("@/components/CustomDeductionSettings", () => ({
+  default: (props: {
+    enabled: boolean;
+    initialDeductions: unknown[];
+    members: unknown[];
+  }) => (
+    <div data-testid="custom-deductions">
+      {String(props.enabled)}|{props.initialDeductions.length}|
+      {props.members.length}
+    </div>
+  ),
+}));
 vi.mock("@/components/PayRateSettings", () => ({
   default: (props: {
     members: { id: string; name: string }[];
@@ -274,6 +286,9 @@ describe("OrgSettings", () => {
     expect(screen.getByTestId("pay-rates")).toHaveTextContent("0|0");
     expect(screen.getByTestId("payroll")).toHaveTextContent("none");
     expect(screen.getByTestId("tax-claims")).toHaveTextContent("false|SK|0|0");
+    expect(screen.getByTestId("custom-deductions")).toHaveTextContent(
+      "false|0|0",
+    );
   });
 
   it("passes the payroll deduction settings through", () => {
@@ -293,11 +308,24 @@ describe("OrgSettings", () => {
               additionalTax: 0,
             },
           ],
+          customDeductions: [
+            {
+              id: "1",
+              userId: null,
+              name: "RRSP",
+              kind: "fixed",
+              amount: 25,
+              preTax: true,
+            },
+          ],
         }}
       />,
     );
     expect(screen.getByTestId("payroll")).toHaveTextContent("QC");
     expect(screen.getByTestId("tax-claims")).toHaveTextContent("true|QC|1|0");
+    expect(screen.getByTestId("custom-deductions")).toHaveTextContent(
+      "true|1|0",
+    );
   });
 
   it("leaves the shift alert rules out without a promise", () => {

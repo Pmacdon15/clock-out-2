@@ -1,8 +1,9 @@
 "use client";
 
-import { DollarSign } from "lucide-react";
-import { useMemo } from "react";
-import { hasEnteredClaims } from "@/lib/income-tax";
+import { DollarSign, Eye, EyeOff } from "lucide-react";
+import { useMemo, useState } from "react";
+import { useStoredToggle } from "@/hooks/useStoredToggle";
+import { hasEnteredClaims, type TaxClaims } from "@/lib/income-tax";
 import { type OvertimeSplit, weekStartOf } from "@/lib/overtime";
 import {
   computePay,
@@ -14,6 +15,8 @@ import {
 } from "@/lib/pay";
 import {
   computeDeductionsForPeriods,
+  customDeductionsFor,
+  describeCustomDeduction,
   jurisdictionFor,
   type PayrollDeductions,
   type PayrollView,
@@ -22,7 +25,11 @@ import {
   sumDeductions,
 } from "@/lib/payroll";
 import type { TimeEntry } from "@/lib/types";
+import { MemberTaxClaimRow } from "../TaxClaimSettings";
 import { Card } from "../ui";
+
+/** This browser's choice to show or hide deductions on the Hours page. */
+export const SHOW_DEDUCTIONS_KEY = "clock-out:show-deductions";
 
 interface PaySummaryProps {
   entries: TimeEntry[];
@@ -36,6 +43,8 @@ interface PaySummaryProps {
    * estimated too.
    */
   payroll?: PayrollView | null;
+  /** The signed-in member, who may enter their own TD1 amounts. */
+  currentUserId?: string | null;
 }
 
 /** yyyy-MM-dd in the browser's zone, as the overtime split counts days. */
@@ -85,7 +94,24 @@ export function PaySummary({
   isViewingAll = false,
   members = [],
   payroll = null,
+  currentUserId,
 }: PaySummaryProps) {
+  const [showDeductions, setShowDeductions] = useStoredToggle(
+    SHOW_DEDUCTIONS_KEY,
+    true,
+  );
+  const [editingTd1, setEditingTd1] = useState(false);
+  // TD1 amounts the member saved here, until the page's data refreshes.
+  const [savedClaims, setSavedClaims] = useState<TaxClaims | null>(null);
+  const claimsList = useMemo(() => {
+    const list = payroll?.claims ?? [];
+    if (!savedClaims) return list;
+    return [
+      ...list.filter((row) => row.userId !== savedClaims.userId),
+      savedClaims,
+    ];
+  }, [payroll, savedClaims]);
+
   const summary = useMemo(() => {
     const byMember = new Map<string, PayBreakdown[]>();
     const byWeek = new Map<string, PayBreakdown[]>();
@@ -120,24 +146,43 @@ export function PaySummary({
           withClaims: number;
           members: number;
           untaxedPeriods: number;
+          /** Custom deductions by name, largest first. */
+          customLines: { name: string; amount: number; detail: string }[];
         })
       | null = null;
     if (payroll?.enabled) {
       const jurisdiction = jurisdictionFor(payroll.province);
+      const custom = payroll.customDeductions;
       let withClaims = 0;
       let untaxedPeriods = 0;
+      const customByName = new Map<
+        string,
+        { amount: number; details: Set<string> }
+      >();
       const totals = sumDeductions(
         Array.from(byMemberWeek.entries(), ([userId, weeks]) => {
-          const claims = payroll.claims.find((row) => row.userId === userId);
+          const claims = claimsList.find((row) => row.userId === userId);
           if (hasEnteredClaims(claims)) withClaims += 1;
+          const own = customDeductionsFor(custom, userId);
           const result = computeDeductionsForPeriods(
             Array.from(weeks, ([date, gross]) => ({ date, gross })),
             payroll.rates,
             jurisdiction,
             52,
             { province: payroll.province, claims },
+            undefined,
+            own,
           );
           untaxedPeriods += result.untaxedPeriods;
+          for (const deduction of own) {
+            const line = customByName.get(deduction.name) ?? {
+              amount: 0,
+              details: new Set<string>(),
+            };
+            line.amount += result.customById[deduction.id];
+            line.details.add(describeCustomDeduction(deduction));
+            customByName.set(deduction.name, line);
+          }
           return result.total;
         }),
       );
@@ -147,6 +192,11 @@ export function PaySummary({
         withClaims,
         members: byMemberWeek.size,
         untaxedPeriods,
+        customLines: Array.from(customByName, ([name, line]) => ({
+          name,
+          amount: Math.round(line.amount * 100) / 100,
+          detail: line.details.size === 1 ? [...line.details][0] : "varies",
+        })).sort((a, b) => b.amount - a.amount),
       };
     }
     const memberRows = Array.from(byMember.entries())
@@ -167,17 +217,42 @@ export function PaySummary({
       unratedCount: unrated.size,
       deductions,
     };
-  }, [entries, splitsByEntry, payRates, members, payroll]);
+  }, [entries, splitsByEntry, payRates, members, payroll, claimsList]);
 
   const ownRate = !isViewingAll ? summary.memberRows[0]?.rate : undefined;
+  // A member looking at their own hours can enter their own TD1 amounts.
+  const canEditOwnTd1 =
+    !isViewingAll &&
+    Boolean(currentUserId) &&
+    summary.memberRows.length === 1 &&
+    summary.memberRows[0].id === currentUserId;
+  const deductionsShown = summary.deductions && showDeductions;
 
   return (
     <Card className="p-6" data-testid="pay-summary">
       <div className="mb-4">
-        <h3 className="flex items-center gap-2 font-bold text-lg">
-          <DollarSign className="h-4 w-4" />
-          Estimated Gross Pay
-        </h3>
+        <div className="flex items-start justify-between gap-2">
+          <h3 className="flex items-center gap-2 font-bold text-lg">
+            <DollarSign className="h-4 w-4" />
+            Estimated Gross Pay
+          </h3>
+          {summary.deductions && (
+            <button
+              aria-pressed={showDeductions}
+              className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 font-bold text-xs text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
+              data-testid="toggle-deductions"
+              onClick={() => setShowDeductions(!showDeductions)}
+              type="button"
+            >
+              {showDeductions ? (
+                <EyeOff className="h-3.5 w-3.5" />
+              ) : (
+                <Eye className="h-3.5 w-3.5" />
+              )}
+              {showDeductions ? "Hide deductions" : "Show deductions"}
+            </button>
+          )}
+        </div>
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
           {ownRate
             ? `${formatMoney(ownRate.hourlyRate)}/hr · overtime at ${formatMultiplier(ownRate.overtimeMultiplier)}. `
@@ -207,7 +282,7 @@ export function PaySummary({
         </div>
       </div>
 
-      {summary.deductions && (
+      {deductionsShown && summary.deductions && (
         <div className="mt-4" data-testid="pay-deductions">
           <div className="mb-2 font-bold text-[10px] text-zinc-500 uppercase tracking-wider dark:text-zinc-400">
             Estimated deductions · {provinceName(summary.deductions.province)}
@@ -255,6 +330,21 @@ export function PaySummary({
                 </span>
               </li>
             )}
+            {summary.deductions.customLines.map((line) => (
+              <li
+                className="flex items-center justify-between gap-2"
+                data-testid="deduction-custom"
+                key={line.name}
+              >
+                <span className="min-w-0">
+                  {line.name}{" "}
+                  <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                    ({line.detail})
+                  </span>
+                </span>
+                <span className="tabular-nums">{formatMoney(line.amount)}</span>
+              </li>
+            ))}
             <li className="flex items-center justify-between border-t pt-1 font-bold">
               <span>Estimated net pay</span>
               <span className="tabular-nums" data-testid="net-pay">
@@ -273,6 +363,32 @@ export function PaySummary({
             {summary.deductions.untaxedPeriods > 0 &&
               " Weeks before 2026 have no income tax estimate."}
           </p>
+          {canEditOwnTd1 && currentUserId && (
+            <div className="mt-2">
+              <button
+                className="font-bold text-xs text-zinc-500 underline-offset-2 hover:text-zinc-900 hover:underline dark:text-zinc-400 dark:hover:text-zinc-100"
+                data-testid="edit-own-td1"
+                onClick={() => setEditingTd1(!editingTd1)}
+                type="button"
+              >
+                {editingTd1 ? "Close TD1 amounts" : "Enter my TD1 amounts"}
+              </button>
+              {editingTd1 && (
+                <div className="mt-2">
+                  <MemberTaxClaimRow
+                    compact
+                    heading="Your TD1 amounts"
+                    member={{ id: currentUserId, name: "you" }}
+                    onSaved={setSavedClaims}
+                    saved={claimsList.find(
+                      (row) => row.userId === currentUserId,
+                    )}
+                    showProvincial={summary.deductions.province !== "QC"}
+                  />
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

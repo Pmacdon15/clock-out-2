@@ -15,6 +15,7 @@ import type {
 } from "@/lib/types";
 import AlertSettings from "./AlertSettings";
 import BreakSettings from "./BreakSettings";
+import CustomDeductionSettings from "./CustomDeductionSettings";
 import LocationSettings from "./LocationSettings";
 import OvertimeSettings from "./OvertimeSettings";
 import PayPeriodSettings from "./PayPeriodSettings";
@@ -189,6 +190,11 @@ export default function OrgSettings({
         initialClaims={payroll?.claims ?? []}
         members={members}
         province={payroll?.province ?? DEFAULT_PROVINCE}
+      />
+      <CustomDeductionSettings
+        enabled={payroll?.enabled ?? false}
+        initialDeductions={payroll?.customDeductions ?? []}
+        members={members}
       />
       <PayPeriodSettings
         initialData={optimisticPayPeriodSettings}

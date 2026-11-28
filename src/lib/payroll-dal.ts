@@ -11,7 +11,10 @@ import {
   toTaxClaims,
 } from "./income-tax";
 import {
+  type CustomDeduction,
+  customDeductionsFor,
   isProvinceCode,
+  MAX_CUSTOM_DEDUCTIONS,
   mergePayrollRates,
   normalizePayrollSettings,
   type PayrollRates,
@@ -19,13 +22,18 @@ import {
   type PayrollView,
   sameFigures,
   selectPayrollRates,
+  toCustomDeduction,
+  validateCustomDeduction,
   validatePayrollRates,
 } from "./payroll";
 import {
+  dbDeleteCustomDeduction,
   dbDeleteTaxClaims,
+  dbGetCustomDeductions,
   dbGetPayrollRates,
   dbGetPayrollSettings,
   dbGetTaxClaims,
+  dbInsertCustomDeduction,
   dbUpdatePayrollSettings,
   dbUpsertPayrollRates,
   dbUpsertTaxClaims,
@@ -46,10 +54,10 @@ async function loadPayrollRates(): Promise<PayrollRates[]> {
 }
 
 /**
- * The org's payroll deduction settings, every known rate row and the TD1
- * claims the caller may see: every member's for admins, only their own for
- * everyone else. Every member may read it: members see deductions on their
- * own pay estimate.
+ * The org's payroll deduction settings, every known rate row, and the TD1
+ * claims and custom deductions the caller may see: every member's for
+ * admins, only their own for everyone else. Every member may read it:
+ * members see deductions on their own pay estimate.
  */
 export async function getOrgPayroll(): Promise<
   SerializableResult<PayrollView, Failure>
@@ -62,22 +70,44 @@ export async function getOrgPayroll(): Promise<
     };
   }
   try {
-    const [settings, rates, claimRows] = await Promise.all([
+    const isAdmin = orgRole === "org:admin";
+    const [settings, rates, claimRows, deductionRows] = await Promise.all([
       dbGetPayrollSettings(orgId),
       loadPayrollRates(),
       dbGetTaxClaims(orgId),
+      loadCustomDeductions(orgId),
     ]);
     const claims = claimRows
-      .filter((row) => orgRole === "org:admin" || row.user_id === userId)
+      .filter((row) => isAdmin || row.user_id === userId)
       .map(toTaxClaims)
       .filter((row): row is TaxClaims => row !== null);
+    const deductions = deductionRows
+      .map(toCustomDeduction)
+      .filter((row): row is CustomDeduction => row !== null);
     return {
       ok: true,
-      value: { ...normalizePayrollSettings(settings), rates, claims },
+      value: {
+        ...normalizePayrollSettings(settings),
+        rates,
+        claims,
+        customDeductions: isAdmin
+          ? deductions
+          : customDeductionsFor(deductions, userId),
+      },
     };
   } catch (e) {
     console.error("Error fetching payroll settings: ", e);
     return { ok: false, error: { reason: "Error fetching payroll settings" } };
+  }
+}
+
+/** Custom deduction rows; a failed read means none rather than no payroll. */
+async function loadCustomDeductions(orgId: string) {
+  try {
+    return await dbGetCustomDeductions(orgId);
+  } catch (e) {
+    console.error("Error fetching custom deductions: ", e);
+    return [];
   }
 }
 
@@ -103,8 +133,8 @@ export async function updatePayrollSettingsDal(
 
 /**
  * Saves one member's TD1 claim amounts; with nothing entered, the row is
- * removed so the basic personal amounts apply. Admins only, and only for
- * members of the admin's active organization.
+ * removed so the basic personal amounts apply. Admins may save them for any
+ * member of their active organization; every member may save their own.
  */
 export async function updateMemberTaxClaimsDal(
   memberId: unknown,
@@ -113,7 +143,11 @@ export async function updateMemberTaxClaimsDal(
   additionalTax: unknown,
 ): Promise<Result<{ org_id: string; claims: TaxClaims | null }, Failure>> {
   const { userId, orgId, orgRole } = await auth.protect();
-  if (!userId || !orgId || orgRole !== "org:admin") {
+  if (!userId || !orgId) {
+    return err({ reason: "Unauthorized" });
+  }
+  const isSelf = memberId === userId;
+  if (orgRole !== "org:admin" && !isSelf) {
     return err({ reason: "Unauthorized" });
   }
   if (
@@ -124,9 +158,12 @@ export async function updateMemberTaxClaimsDal(
   ) {
     return err({ reason: "Invalid TD1 amounts" });
   }
-  const members = await getOrgMembers();
-  if (!members.some((member) => member.id === memberId)) {
-    return err({ reason: "Member not found" });
+  // The caller is a member of the active org, so their own id needs no lookup.
+  if (!isSelf) {
+    const members = await getOrgMembers();
+    if (!members.some((member) => member.id === memberId)) {
+      return err({ reason: "Member not found" });
+    }
   }
   const claims: TaxClaims = {
     userId: memberId,
@@ -144,6 +181,82 @@ export async function updateMemberTaxClaimsDal(
   } catch (e) {
     console.error("Update TD1 claims error: ", e);
     return err({ reason: "Failed to save TD1 amounts" });
+  }
+}
+
+/**
+ * Adds a custom deduction (RRSP, union dues, ...) for one member, or for
+ * every member when `memberId` is null. Admins only.
+ */
+export async function addCustomDeductionDal(input: {
+  memberId: unknown;
+  name: unknown;
+  kind: unknown;
+  amount: unknown;
+  preTax: unknown;
+}): Promise<Result<{ org_id: string; deduction: CustomDeduction }, Failure>> {
+  const { userId, orgId, orgRole } = await auth.protect();
+  if (!userId || !orgId || orgRole !== "org:admin") {
+    return err({ reason: "Unauthorized" });
+  }
+  const invalid = validateCustomDeduction(input);
+  if (invalid) return err({ reason: invalid });
+  const { memberId } = input;
+  if (memberId !== null && typeof memberId !== "string") {
+    return err({ reason: "Member not found" });
+  }
+  try {
+    if (memberId !== null) {
+      const members = await getOrgMembers();
+      if (!members.some((member) => member.id === memberId)) {
+        return err({ reason: "Member not found" });
+      }
+    }
+    const existing = await dbGetCustomDeductions(orgId);
+    if (existing.length >= MAX_CUSTOM_DEDUCTIONS) {
+      return err({
+        reason: `An organization can have up to ${MAX_CUSTOM_DEDUCTIONS} custom deductions`,
+      });
+    }
+    const row = await dbInsertCustomDeduction(orgId, {
+      userId: memberId,
+      name: String(input.name).trim(),
+      kind: input.kind as CustomDeduction["kind"],
+      amount: input.amount as number,
+      preTax: input.preTax as boolean,
+    });
+    const deduction = toCustomDeduction(row);
+    if (!deduction) return err({ reason: "Failed to save the deduction" });
+    return ok({ org_id: orgId, deduction });
+  } catch (e) {
+    console.error("Add custom deduction error: ", e);
+    return err({ reason: "Failed to save the deduction" });
+  }
+}
+
+/** Removes one of the org's custom deductions. Admins only. */
+export async function deleteCustomDeductionDal(
+  id: unknown,
+): Promise<Result<{ org_id: string }, Failure>> {
+  const { userId, orgId, orgRole } = await auth.protect();
+  if (!userId || !orgId || orgRole !== "org:admin") {
+    return err({ reason: "Unauthorized" });
+  }
+  const numericId = typeof id === "string" ? Number(id) : id;
+  if (
+    typeof numericId !== "number" ||
+    !Number.isSafeInteger(numericId) ||
+    numericId <= 0
+  ) {
+    return err({ reason: "Deduction not found" });
+  }
+  try {
+    const removed = await dbDeleteCustomDeduction(orgId, numericId);
+    if (removed === 0) return err({ reason: "Deduction not found" });
+    return ok({ org_id: orgId });
+  } catch (e) {
+    console.error("Delete custom deduction error: ", e);
+    return err({ reason: "Failed to remove the deduction" });
   }
 }
 

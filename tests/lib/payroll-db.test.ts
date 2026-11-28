@@ -41,8 +41,12 @@ describe("ensurePayrollTables", () => {
   it("creates the tables once per instance", async () => {
     await pdb.ensurePayrollTables();
     await pdb.ensurePayrollTables();
-    expect(sql).toHaveBeenCalledTimes(4);
+    expect(sql).toHaveBeenCalledTimes(6);
     expect(textOf(3)).toContain("CREATE TABLE IF NOT EXISTS member_tax_claims");
+    expect(textOf(4)).toContain(
+      "CREATE TABLE IF NOT EXISTS payroll_custom_deductions",
+    );
+    expect(textOf(5)).toContain("payroll_custom_deductions_org_idx");
     expect(textOf(0)).toContain("CREATE TABLE IF NOT EXISTS settings");
     expect(textOf(1)).toContain("CREATE TABLE IF NOT EXISTS payroll_settings");
     expect(textOf(2)).toContain("CREATE TABLE IF NOT EXISTS payroll_rates");
@@ -52,7 +56,44 @@ describe("ensurePayrollTables", () => {
     sql.mockRejectedValueOnce(new Error("down"));
     await expect(pdb.ensurePayrollTables()).rejects.toThrow("down");
     await pdb.ensurePayrollTables();
-    expect(sql).toHaveBeenCalledTimes(5);
+    expect(sql).toHaveBeenCalledTimes(7);
+  });
+});
+
+describe("custom deductions", () => {
+  it("reads one org's rows, cached per org", async () => {
+    await primeTables();
+    sql.mockResolvedValueOnce([{ id: 1 }]);
+    await expect(pdb.dbGetCustomDeductions("org_1")).resolves.toEqual([
+      { id: 1 },
+    ]);
+    expect(cacheTag).toHaveBeenCalledWith("custom-deductions-org_1");
+    expect(textOf(0)).toContain("FROM payroll_custom_deductions");
+    expect(valuesOf(0)).toEqual(["org_1"]);
+  });
+
+  it("inserts a row for the org", async () => {
+    await primeTables();
+    sql.mockResolvedValueOnce([{ id: 7 }]);
+    await expect(
+      pdb.dbInsertCustomDeduction("org_1", {
+        userId: null,
+        name: "RRSP",
+        kind: "percent",
+        amount: 5,
+        preTax: true,
+      }),
+    ).resolves.toEqual({ id: 7 });
+    expect(textOf(0)).toContain("INSERT INTO payroll_custom_deductions");
+    expect(valuesOf(0)).toEqual(["org_1", null, "RRSP", "percent", 5, true]);
+  });
+
+  it("deletes only within the org and counts what went", async () => {
+    await primeTables();
+    sql.mockResolvedValueOnce([{ id: 7 }]);
+    await expect(pdb.dbDeleteCustomDeduction("org_1", 7)).resolves.toBe(1);
+    expect(textOf(0)).toContain("WHERE org_id = ? AND id = ?");
+    expect(valuesOf(0)).toEqual(["org_1", 7]);
   });
 });
 

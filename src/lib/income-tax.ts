@@ -364,6 +364,11 @@ export type IncomeTaxInput = {
   pensionMax: number;
   eiMax: number;
   claims?: TaxClaims | null;
+  /**
+   * This period's deductions taken before tax (RRSP, union dues, ...):
+   * they lower taxable income, like F and U1 in T4127.
+   */
+  preTaxDeductions?: number;
 };
 
 export type IncomeTax = { federal: number; provincial: number };
@@ -386,7 +391,13 @@ export function computeIncomeTax(
   const enhancedShare = ENHANCED_PENSION_RATE / input.pensionRate;
   // F5A: the enhanced contributions are a deduction from income.
   const enhanced = input.pension * enhancedShare + input.pension2;
-  const income = Math.max(0, periods * (Math.max(0, input.gross) - enhanced));
+  const income = Math.max(
+    0,
+    periods *
+      (Math.max(0, input.gross) -
+        enhanced -
+        Math.max(0, input.preTaxDeductions ?? 0)),
+  );
 
   // Credits on base CPP/QPP and EI, at each jurisdiction's lowest rate.
   const creditBase =

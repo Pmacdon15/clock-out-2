@@ -1,7 +1,10 @@
 "use server";
 
 import { updateTag } from "next/cache";
+import type { CustomDeductionKind } from "./payroll";
 import {
+  addCustomDeductionDal,
+  deleteCustomDeductionDal,
   updateMemberTaxClaimsDal,
   updatePayrollSettingsDal,
 } from "./payroll-dal";
@@ -36,6 +39,34 @@ export async function updateMemberTaxClaimsAction(
     (saved) => {
       updateTag(`tax-claims-${saved.org_id}`);
       return { success: true as const, data: saved.claims };
+    },
+    (e) => ({ success: false as const, error: e.reason }),
+  );
+}
+
+export async function addCustomDeductionAction(input: {
+  memberId: string | null;
+  name: string;
+  kind: CustomDeductionKind;
+  amount: number;
+  preTax: boolean;
+}) {
+  const result = await addCustomDeductionDal(input);
+  return result.match(
+    (saved) => {
+      updateTag(`custom-deductions-${saved.org_id}`);
+      return { success: true as const, data: saved.deduction };
+    },
+    (e) => ({ success: false as const, error: e.reason }),
+  );
+}
+
+export async function deleteCustomDeductionAction(id: string) {
+  const result = await deleteCustomDeductionDal(id);
+  return result.match(
+    (saved) => {
+      updateTag(`custom-deductions-${saved.org_id}`);
+      return { success: true as const };
     },
     (e) => ({ success: false as const, error: e.reason }),
   );
