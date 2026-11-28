@@ -1403,9 +1403,9 @@ describe("scheduled shifts", () => {
     await expect(
       db.dbUpdateScheduledShift(3, "o1", shiftStart, shiftEnd, null),
     ).resolves.toEqual({ id: 3 });
-    expect(textOf(0)).toContain("UPDATE scheduled_shifts");
+    expect(textOf(1)).toContain("UPDATE scheduled_shifts");
     // No location given: the flag keeps the shift's current location.
-    expect(valuesOf(0)).toEqual([
+    expect(valuesOf(1)).toEqual([
       shiftStart,
       shiftEnd,
       null,
@@ -1430,8 +1430,8 @@ describe("scheduled shifts", () => {
       location: "Client site",
       location_address: null,
     });
-    expect(textOf(0)).toContain("location = CASE WHEN");
-    expect(valuesOf(0)).toEqual([
+    expect(textOf(1)).toContain("location = CASE WHEN");
+    expect(valuesOf(1)).toEqual([
       shiftStart,
       shiftEnd,
       "Desk",
@@ -1444,6 +1444,44 @@ describe("scheduled shifts", () => {
       3,
       "o1",
     ]);
+  });
+
+  it("dbUpdateScheduledShift moves a repeating shift's rule with its newest week", async () => {
+    sql.mockResolvedValue([]);
+    await db.ensureScheduledShiftsTable();
+    sql.mockReset();
+    const previous = {
+      id: 3,
+      org_id: "o1",
+      series_id: 9,
+      shift_start: new Date("2026-12-28T15:00:00Z"),
+      shift_end: new Date("2026-12-28T23:00:00Z"),
+    };
+    sql.mockResolvedValueOnce([previous]);
+    sql.mockResolvedValueOnce([
+      { ...previous, shift_start: shiftStart, shift_end: shiftEnd },
+    ]);
+    sql.mockResolvedValue([]);
+    await db.dbUpdateScheduledShift(3, "o1", shiftStart, shiftEnd, null);
+    const texts = sql.mock.calls.map((_, i) => textOf(i));
+    expect(texts.some((t) => t.includes("UPDATE shift_series"))).toBe(true);
+  });
+
+  it("dbUpdateScheduledShift leaves the rule alone when the times don't change", async () => {
+    sql.mockResolvedValue([]);
+    await db.ensureScheduledShiftsTable();
+    sql.mockReset();
+    const same = {
+      id: 3,
+      org_id: "o1",
+      series_id: 9,
+      shift_start: shiftStart,
+      shift_end: shiftEnd,
+    };
+    sql.mockResolvedValue([same]);
+    await db.dbUpdateScheduledShift(3, "o1", shiftStart, shiftEnd, "Desk");
+    const texts = sql.mock.calls.map((_, i) => textOf(i));
+    expect(texts.some((t) => t.includes("UPDATE shift_series"))).toBe(false);
   });
 
   it("dbDeleteScheduledShift deletes within the org", async () => {

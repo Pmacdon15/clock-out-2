@@ -1271,6 +1271,9 @@ export async function dbUpdateScheduledShift(
   location?: ShiftLocation,
 ) {
   await ensureScheduledShiftsTable();
+  const [previous] = await sql`
+		SELECT * FROM scheduled_shifts WHERE id = ${id} AND org_id = ${orgId}
+	`;
   const keep = location === undefined;
   const next = location ?? NO_SHIFT_LOCATION;
   const [updated] = await sql`
@@ -1285,7 +1288,52 @@ export async function dbUpdateScheduledShift(
 		WHERE id = ${id} AND org_id = ${orgId}
 		RETURNING *
 	`;
-  return updated as unknown as ScheduledShift | undefined;
+  const shift = updated as unknown as ScheduledShift | undefined;
+  if (shift?.series_id != null) {
+    await dbFollowSeriesShiftEdit(
+      shift,
+      previous as unknown as ScheduledShift | undefined,
+    );
+  }
+  return shift;
+}
+
+/**
+ * Moving the newest week of a repeating shift moves the weeks still to be
+ * made too: the series' first shift is reset so that week lands on the new
+ * times. Moving an earlier week is a one-off change and leaves the series as
+ * it is. Plain UTC arithmetic, like the series itself.
+ */
+async function dbFollowSeriesShiftEdit(
+  shift: ScheduledShift,
+  previous: ScheduledShift | undefined,
+) {
+  if (!previous) return;
+  const start = new Date(shift.shift_start);
+  const end = new Date(shift.shift_end);
+  if (
+    start.getTime() === new Date(previous.shift_start).getTime() &&
+    end.getTime() === new Date(previous.shift_end).getTime()
+  ) {
+    return;
+  }
+  await ensureShiftSeriesTable();
+  await sql`
+		UPDATE shift_series s
+		SET first_start = ${start}::TIMESTAMPTZ - w.weeks * INTERVAL '7 days',
+			first_end = ${end}::TIMESTAMPTZ - w.weeks * INTERVAL '7 days',
+			updated_at = NOW()
+		FROM (
+			SELECT id, ROUND(EXTRACT(EPOCH FROM (${previous.shift_start}::TIMESTAMPTZ - first_start)) / 604800) AS weeks
+			FROM shift_series WHERE id = ${shift.series_id} AND org_id = ${shift.org_id}
+		) w
+		WHERE s.id = w.id AND s.ended_at IS NULL
+			AND NOT EXISTS (
+				SELECT 1 FROM scheduled_shifts o
+				WHERE o.series_id = s.id AND o.id <> ${shift.id}
+					AND o.shift_start > ${previous.shift_start}
+			)
+	`;
 }
 
 export async function dbDeleteScheduledShift(id: number, orgId: string) {
@@ -1302,9 +1350,9 @@ export async function dbDeleteScheduledShift(id: number, orgId: string) {
 let shiftSeriesTableReady = false;
 
 /**
- * A shift that repeats every week with no end date. The rule keeps its first
- * shift's times and the zone they were set in, so later weeks keep the same
- * local start and end across daylight saving changes. `next_index` is the
+ * A shift that repeats every week with no end date. Later weeks are the first
+ * shift's times exactly a week apart, in UTC (the zone is kept only to name
+ * the shift's days). `next_index` is the
  * week the daily job makes next (week 0 is the first shift); weeks it has
  * passed are never made again, so a removed or skipped week stays removed.
  */
