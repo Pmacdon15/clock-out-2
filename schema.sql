@@ -246,7 +246,7 @@ ALTER TABLE scheduled_shifts ADD COLUMN IF NOT EXISTS series_id INTEGER;
 -- A shift that repeats every week until an admin stops it. The daily cron
 -- (/api/cron/shift-alerts) makes its coming weeks into scheduled_shifts, about
 -- five weeks ahead. Later weeks keep the first shift's local times in
--- `timezone`; `next_index` is the week it makes next (week 0 is the first
+-- `timezone` (editing the newest week restarts the rule from it); `next_index` is the week it makes next (week 0 is the first
 -- shift), so a week that was skipped or removed is never made again. Also
 -- created on first use by the app (ensureShiftSeriesTable in src/lib/db.ts).
 CREATE TABLE IF NOT EXISTS shift_series (

@@ -1271,6 +1271,9 @@ export async function dbUpdateScheduledShift(
   location?: ShiftLocation,
 ) {
   await ensureScheduledShiftsTable();
+  const [previous] = await sql`
+		SELECT * FROM scheduled_shifts WHERE id = ${id} AND org_id = ${orgId}
+	`;
   const keep = location === undefined;
   const next = location ?? NO_SHIFT_LOCATION;
   const [updated] = await sql`
@@ -1285,7 +1288,54 @@ export async function dbUpdateScheduledShift(
 		WHERE id = ${id} AND org_id = ${orgId}
 		RETURNING *
 	`;
-  return updated as unknown as ScheduledShift | undefined;
+  const shift = updated as unknown as ScheduledShift | undefined;
+  if (shift?.series_id != null) {
+    await dbFollowSeriesShiftEdit(
+      shift,
+      previous as unknown as ScheduledShift | undefined,
+    );
+  }
+  return shift;
+}
+
+/**
+ * Moving the newest week of a repeating shift moves the weeks still to be
+ * made too: the series restarts from that week's new times (with `next_index`
+ * counted from it), so later weeks keep its local start and end. Moving an
+ * earlier week is a one-off change and leaves the series as it is.
+ */
+async function dbFollowSeriesShiftEdit(
+  shift: ScheduledShift,
+  previous: ScheduledShift | undefined,
+) {
+  if (!previous) return;
+  const start = new Date(shift.shift_start);
+  const end = new Date(shift.shift_end);
+  if (
+    start.getTime() === new Date(previous.shift_start).getTime() &&
+    end.getTime() === new Date(previous.shift_end).getTime()
+  ) {
+    return;
+  }
+  await ensureShiftSeriesTable();
+  // Which week of the series the shift was (to the nearest week, so a
+  // daylight saving hour doesn't matter).
+  await sql`
+		UPDATE shift_series s
+		SET first_start = ${start}, first_end = ${end},
+			next_index = GREATEST(1, s.next_index - w.weeks),
+			updated_at = NOW()
+		FROM (
+			SELECT id, ROUND(EXTRACT(EPOCH FROM (${previous.shift_start}::TIMESTAMPTZ - first_start)) / 604800)::INTEGER AS weeks
+			FROM shift_series WHERE id = ${shift.series_id} AND org_id = ${shift.org_id}
+		) w
+		WHERE s.id = w.id AND s.ended_at IS NULL
+			AND NOT EXISTS (
+				SELECT 1 FROM scheduled_shifts o
+				WHERE o.series_id = s.id AND o.id <> ${shift.id}
+					AND o.shift_start > ${previous.shift_start}
+			)
+	`;
 }
 
 export async function dbDeleteScheduledShift(id: number, orgId: string) {
