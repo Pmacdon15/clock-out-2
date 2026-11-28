@@ -175,6 +175,7 @@ export async function updateNotificationPreferencesDal(
     email_enabled: input.email_enabled,
     push_enabled: input.push_enabled,
     shift_alerts: input.shift_alerts,
+    auto_clock_alerts: input.auto_clock_alerts,
     break_alerts: input.break_alerts,
     admin_alerts: input.admin_alerts,
     schedule_alerts: input.schedule_alerts,

@@ -92,6 +92,10 @@ export async function ensureAlertTables(): Promise<void> {
 			ADD COLUMN IF NOT EXISTS timezone TEXT
 	`;
     await sql`
+		ALTER TABLE notification_preferences
+			ADD COLUMN IF NOT EXISTS auto_clock_alerts BOOLEAN NOT NULL DEFAULT TRUE
+	`;
+    await sql`
 		CREATE TABLE IF NOT EXISTS fcm_tokens (
 			token TEXT PRIMARY KEY,
 			user_id TEXT NOT NULL,
@@ -255,11 +259,13 @@ export async function dbUpdateNotificationPreferences(
   const [updated] = await sql`
 		INSERT INTO notification_preferences (
 			user_id, email_enabled, push_enabled,
-			shift_alerts, break_alerts, admin_alerts, schedule_alerts, updated_at
+			shift_alerts, auto_clock_alerts, break_alerts, admin_alerts,
+			schedule_alerts, updated_at
 		)
 		VALUES (
 			${userId}, ${input.email_enabled}, ${input.push_enabled},
-			${input.shift_alerts}, ${input.break_alerts}, ${input.admin_alerts},
+			${input.shift_alerts}, ${input.auto_clock_alerts},
+			${input.break_alerts}, ${input.admin_alerts},
 			${input.schedule_alerts}, NOW()
 		)
 		ON CONFLICT (user_id)
@@ -267,6 +273,7 @@ export async function dbUpdateNotificationPreferences(
 			email_enabled = ${input.email_enabled},
 			push_enabled = ${input.push_enabled},
 			shift_alerts = ${input.shift_alerts},
+			auto_clock_alerts = ${input.auto_clock_alerts},
 			break_alerts = ${input.break_alerts},
 			admin_alerts = ${input.admin_alerts},
 			schedule_alerts = ${input.schedule_alerts},

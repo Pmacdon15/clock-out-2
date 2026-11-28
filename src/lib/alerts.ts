@@ -38,6 +38,7 @@ export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferencesInput = {
   email_enabled: true,
   push_enabled: true,
   shift_alerts: true,
+  auto_clock_alerts: true,
   break_alerts: true,
   admin_alerts: true,
   schedule_alerts: true,
@@ -167,6 +168,7 @@ export function normalizeNotificationPreferences(
     email_enabled: data?.email_enabled ?? d.email_enabled,
     push_enabled: data?.push_enabled ?? d.push_enabled,
     shift_alerts: data?.shift_alerts ?? d.shift_alerts,
+    auto_clock_alerts: data?.auto_clock_alerts ?? d.auto_clock_alerts,
     break_alerts: data?.break_alerts ?? d.break_alerts,
     admin_alerts: data?.admin_alerts ?? d.admin_alerts,
     schedule_alerts: data?.schedule_alerts ?? d.schedule_alerts,
@@ -581,6 +583,7 @@ export function pendingAlertKeys(
 
 export type AlertCategory =
   | "shift_alerts"
+  | "auto_clock_alerts"
   | "break_alerts"
   | "admin_alerts"
   | "schedule_alerts";
@@ -622,9 +625,17 @@ export function alertUserId(alert: PlannedAlert): string {
 }
 
 export function alertCategory(alert: PlannedAlert): AlertCategory {
-  return alert.kind === "break_reminder" || alert.kind === "break_over"
-    ? "break_alerts"
-    : "shift_alerts";
+  switch (alert.kind) {
+    case "break_reminder":
+    case "break_over":
+      return "break_alerts";
+    case "auto_clock_out":
+    case "scheduled_clock_in":
+    case "scheduled_clock_out":
+      return "auto_clock_alerts";
+    default:
+      return "shift_alerts";
+  }
 }
 
 /**

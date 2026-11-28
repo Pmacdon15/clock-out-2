@@ -245,8 +245,13 @@ export type NotificationPreferencesData = {
   user_id: string;
   email_enabled: boolean;
   push_enabled: boolean;
-  /** Forgot-to-clock-out reminders and automatic clock-out notices. */
+  /** Forgot-to-clock-out reminders. */
   shift_alerts: boolean;
+  /**
+   * Being clocked in or out automatically: at a scheduled shift's start or
+   * end, or when a shift reaches the org's time limit.
+   */
+  auto_clock_alerts: boolean;
   /** Still-on-break reminders. */
   break_alerts: boolean;
   /** Admins only: alerts about other members of their org. */

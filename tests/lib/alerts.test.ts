@@ -162,6 +162,7 @@ describe("notification preferences", () => {
         email_enabled: false,
         push_enabled: false,
         shift_alerts: false,
+        auto_clock_alerts: false,
         break_alerts: false,
         admin_alerts: false,
         schedule_alerts: false,
@@ -170,6 +171,7 @@ describe("notification preferences", () => {
       email_enabled: false,
       push_enabled: false,
       shift_alerts: false,
+      auto_clock_alerts: false,
       break_alerts: false,
       admin_alerts: false,
       schedule_alerts: false,
@@ -409,7 +411,8 @@ describe("wording", () => {
   it("knows who an alert is about and its category", () => {
     expect(alertUserId(forgot)).toBe("u1");
     expect(alertUserId(breakLong)).toBe("u1");
-    expect(alertCategory(auto)).toBe("shift_alerts");
+    expect(alertCategory(forgot)).toBe("shift_alerts");
+    expect(alertCategory(auto)).toBe("auto_clock_alerts");
     expect(alertCategory(breakLong)).toBe("break_alerts");
     expect(alertUserId(breakLimit)).toBe("u1");
     expect(alertCategory(breakLimit)).toBe("break_alerts");
@@ -824,7 +827,8 @@ describe("scheduled auto clock-in/out", () => {
     const audience = { memberName: "Ada", orgId: "org_1" };
     expect(alertUserId(clockIn)).toBe("u2");
     expect(alertUserId(clockOut)).toBe("u2");
-    expect(alertCategory(clockIn)).toBe("shift_alerts");
+    expect(alertCategory(clockIn)).toBe("auto_clock_alerts");
+    expect(alertCategory(clockOut)).toBe("auto_clock_alerts");
     expect(describeAlert(clockIn, { ...audience, forAdmin: false })).toEqual({
       title: "You're clocked in",
       body: expect.stringContaining("scheduled shift has started"),
