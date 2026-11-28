@@ -24,7 +24,7 @@ const valuesOf = (call: number) => sql.mock.calls[call].slice(1);
 const allText = () => sql.mock.calls.map((_c, i) => textOf(i)).join("\n");
 
 /** Number of statements `ensureAlertTables` runs the first time. */
-const ENSURE_STATEMENTS = 13;
+const ENSURE_STATEMENTS = 14;
 
 const input = {
   forgot_clock_out_enabled: true,
@@ -43,6 +43,7 @@ const prefs = {
   email_enabled: true,
   push_enabled: false,
   shift_alerts: true,
+  auto_clock_alerts: false,
   break_alerts: true,
   admin_alerts: false,
   schedule_alerts: true,
@@ -185,11 +186,12 @@ describe("notification preferences", () => {
     sql.mockResolvedValueOnce([{ user_id: "u1" }]);
     await adb.dbUpdateNotificationPreferences("u1", prefs);
     expect(textOf(0)).toContain("INSERT INTO notification_preferences");
-    expect(valuesOf(0).slice(0, 7)).toEqual([
+    expect(valuesOf(0).slice(0, 8)).toEqual([
       "u1",
       true,
       false,
       true,
+      false,
       true,
       false,
       true,

@@ -24,6 +24,7 @@ const PREF_FIELDS = [
   "email_enabled",
   "push_enabled",
   "shift_alerts",
+  "auto_clock_alerts",
   "break_alerts",
   "admin_alerts",
   "schedule_alerts",
@@ -46,7 +47,13 @@ export const manageNotificationPreferencesInputSchema = z.object({
   shift_alerts: z
     .boolean()
     .optional()
-    .describe("Forgot-to-clock-out reminders and automatic clock-out notices."),
+    .describe("Forgot-to-clock-out reminders."),
+  auto_clock_alerts: z
+    .boolean()
+    .optional()
+    .describe(
+      "Being clocked in or out automatically: when a scheduled shift starts or ends, or a shift reaches your organization's time limit.",
+    ),
   break_alerts: z.boolean().optional().describe("Still-on-break reminders."),
   admin_alerts: z
     .boolean()

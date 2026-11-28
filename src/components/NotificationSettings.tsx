@@ -68,8 +68,13 @@ const TOPICS: Toggle[] = [
   {
     key: "shift_alerts",
     label: "Forgot to clock out",
+    description: "When you've been clocked in for a long time.",
+  },
+  {
+    key: "auto_clock_alerts",
+    label: "Automatic clock-ins and clock-outs",
     description:
-      "When you've been clocked in for a long time, or were clocked out automatically.",
+      "When you're clocked in or out for you: as a scheduled shift starts or ends, or when a shift reaches your organization's time limit.",
   },
   {
     key: "break_alerts",

@@ -167,8 +167,11 @@ CREATE TABLE IF NOT EXISTS notification_preferences (
     email_enabled BOOLEAN NOT NULL DEFAULT TRUE,
     push_enabled BOOLEAN NOT NULL DEFAULT TRUE,
     shift_alerts BOOLEAN NOT NULL DEFAULT TRUE,
+    auto_clock_alerts BOOLEAN NOT NULL DEFAULT TRUE,
     break_alerts BOOLEAN NOT NULL DEFAULT TRUE,
     admin_alerts BOOLEAN NOT NULL DEFAULT TRUE,
+    schedule_alerts BOOLEAN NOT NULL DEFAULT TRUE,
+    timezone TEXT,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 

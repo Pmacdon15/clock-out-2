@@ -175,6 +175,26 @@ describe("buildDeliveries", () => {
     ).toEqual(["u1"]);
   });
 
+  it("files automatic clock-outs under their own topic for the member", () => {
+    const auto: PlannedAlert = {
+      kind: "auto_clock_out",
+      key: "auto:1",
+      shift: {
+        id: 1,
+        user_id: "u1",
+        org_id: "org_1",
+        clock_in: ago(17 * HOUR),
+      },
+      hours: 16,
+    };
+    const deliveries = buildDeliveries(auto, members, "org_1", true);
+    expect(deliveries.map((d) => [d.recipient.userId, d.category])).toEqual([
+      ["u1", "auto_clock_alerts"],
+      ["admin", "admin_alerts"],
+      ["u2", "admin_alerts"],
+    ]);
+  });
+
   it("still tells admins about someone who left the org", () => {
     const deliveries = buildDeliveries(forgot("gone"), members, "org_1", true);
     expect(deliveries.map((d) => d.recipient.userId)).toEqual(["admin", "u2"]);

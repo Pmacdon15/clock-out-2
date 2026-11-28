@@ -17,6 +17,7 @@ const view = (timezone: string | null): NotificationSettingsView => ({
     email_enabled: true,
     push_enabled: true,
     shift_alerts: true,
+    auto_clock_alerts: true,
     break_alerts: true,
     admin_alerts: true,
     schedule_alerts: true,
