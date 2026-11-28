@@ -296,6 +296,11 @@ describe("addCustomDeductionDal", () => {
     expect(mocks.dbInsertCustomDeduction).not.toHaveBeenCalled();
   });
 
+  it.each([[42], [undefined]])("rejects member id %j", async (memberId) => {
+    const result = await addCustomDeductionDal({ ...input, memberId });
+    expect(result._unsafeUnwrapErr()).toEqual({ reason: "Member not found" });
+  });
+
   it("only adds for members of the org", async () => {
     const result = await addCustomDeductionDal({ ...input, memberId: "u9" });
     expect(result._unsafeUnwrapErr()).toEqual({ reason: "Member not found" });
@@ -337,6 +342,14 @@ describe("addCustomDeductionDal", () => {
     });
   });
 
+  it("reports a saved row it can't read back", async () => {
+    mocks.dbInsertCustomDeduction.mockResolvedValue({ id: null });
+    const result = await addCustomDeductionDal(input);
+    expect(result._unsafeUnwrapErr()).toEqual({
+      reason: "Failed to save the deduction",
+    });
+  });
+
   it("reports a write failure", async () => {
     mocks.dbInsertCustomDeduction.mockRejectedValue(new Error("down"));
     const result = await addCustomDeductionDal(input);
@@ -367,6 +380,14 @@ describe("deleteCustomDeductionDal", () => {
     expect(result._unsafeUnwrap()).toEqual({ org_id: "org_1" });
   });
 
+  it("reports a delete failure", async () => {
+    mocks.dbDeleteCustomDeduction.mockRejectedValue(new Error("down"));
+    const result = await deleteCustomDeductionDal(7);
+    expect(result._unsafeUnwrapErr()).toEqual({
+      reason: "Failed to remove the deduction",
+    });
+  });
+
   it("reports a deduction from another org as not found", async () => {
     mocks.dbDeleteCustomDeduction.mockResolvedValue(0);
     const result = await deleteCustomDeductionDal("7");
@@ -377,6 +398,12 @@ describe("deleteCustomDeductionDal", () => {
 });
 
 describe("updateMemberTaxClaimsDal", () => {
+  it("requires an org", async () => {
+    mocks.protect.mockResolvedValue({ userId: "u1", orgId: null });
+    const result = await updateMemberTaxClaimsDal("u1", 1, null, 0);
+    expect(result._unsafeUnwrapErr()).toEqual({ reason: "Unauthorized" });
+  });
+
   it("lets members change only their own amounts", async () => {
     mocks.protect.mockResolvedValue(member);
     const result = await updateMemberTaxClaimsDal("u1", 1, null, 0);

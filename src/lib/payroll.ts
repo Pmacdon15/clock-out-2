@@ -392,7 +392,9 @@ export function computeDeductionsForPeriods(
   let year = "";
   let unratedPeriods = 0;
   let untaxedPeriods = 0;
-  const customById: Record<string, number> = {};
+  const customById: Record<string, number> = Object.fromEntries(
+    custom.map((deduction) => [deduction.id, 0]),
+  );
   for (const period of sorted) {
     const periodYear = period.date.slice(0, 4);
     if (periodYear !== year) {
@@ -417,7 +419,7 @@ export function computeDeductionsForPeriods(
     ytd = next.ytd;
     results.push(next.deductions);
     for (const [id, amount] of Object.entries(next.custom)) {
-      customById[id] = cents((customById[id] ?? 0) + amount);
+      customById[id] = cents(customById[id] + amount);
     }
   }
   return {

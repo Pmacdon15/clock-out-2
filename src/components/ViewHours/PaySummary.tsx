@@ -44,7 +44,7 @@ interface PaySummaryProps {
    */
   payroll?: PayrollView | null;
   /** The signed-in member, who may enter their own TD1 amounts. */
-  currentUserId?: string;
+  currentUserId?: string | null;
 }
 
 /** yyyy-MM-dd in the browser's zone, as the overtime split counts days. */
@@ -152,7 +152,7 @@ export function PaySummary({
       | null = null;
     if (payroll?.enabled) {
       const jurisdiction = jurisdictionFor(payroll.province);
-      const custom = payroll.customDeductions ?? [];
+      const custom = payroll.customDeductions;
       let withClaims = 0;
       let untaxedPeriods = 0;
       const customByName = new Map<
@@ -179,7 +179,7 @@ export function PaySummary({
               amount: 0,
               details: new Set<string>(),
             };
-            line.amount += result.customById[deduction.id] ?? 0;
+            line.amount += result.customById[deduction.id];
             line.details.add(describeCustomDeduction(deduction));
             customByName.set(deduction.name, line);
           }

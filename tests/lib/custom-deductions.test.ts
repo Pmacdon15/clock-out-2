@@ -37,6 +37,7 @@ describe("validateCustomDeduction", () => {
 
   it.each([
     { name: "  " },
+    { name: 5 },
     { name: "x".repeat(41) },
     { kind: "weekly" },
     { amount: 0 },
@@ -178,5 +179,19 @@ describe("computePeriodDeductions with custom deductions", () => {
     );
     expect(result.customById).toEqual({ a: 50, b: 30 });
     expect(result.total.other).toBe(80);
+  });
+
+  it("counts a deduction no period could take as zero", () => {
+    const result = computeDeductionsForPeriods(
+      [{ date: "2020-01-06", gross: 1000 }],
+      [CA],
+      "CA",
+      52,
+      undefined,
+      undefined,
+      [deduction({ id: "a" })],
+    );
+    expect(result.customById).toEqual({ a: 0 });
+    expect(result.total.other).toBe(0);
   });
 });

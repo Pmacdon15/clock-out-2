@@ -100,6 +100,18 @@ describe("CustomDeductionSettings", () => {
     ).toBeInTheDocument();
   });
 
+  it("switches the amount field between % and $", () => {
+    renderSettings();
+    fireEvent.change(screen.getByLabelText("Type"), {
+      target: { value: "percent" },
+    });
+    expect(screen.getByLabelText("Percent (%)")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Type"), {
+      target: { value: "fixed" },
+    });
+    expect(screen.getByLabelText("Amount ($)")).toBeInTheDocument();
+  });
+
   it("adds a deduction for one member", async () => {
     const saved = {
       id: "9",

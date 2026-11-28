@@ -303,12 +303,47 @@ describe("PaySummary", () => {
       expect(lines[1]).toHaveTextContent("$12.00");
     });
 
+    it("say a same-named deduction varies between members", () => {
+      renderSummary(
+        [grace, ada],
+        true,
+        payroll({
+          customDeductions: [
+            {
+              id: "1",
+              userId: "u1",
+              name: "RRSP",
+              kind: "fixed",
+              amount: 10,
+              preTax: false,
+            },
+            {
+              id: "2",
+              userId: "u2",
+              name: "RRSP",
+              kind: "percent",
+              amount: 5,
+              preTax: false,
+            },
+          ],
+        }),
+      );
+      const [line] = screen.getAllByTestId("deduction-custom");
+      // $10 for Ada plus 5% of Grace's $240.
+      expect(line).toHaveTextContent("RRSP (varies)$22.00");
+    });
+
     it("let a member enter their own TD1 amounts", async () => {
       mocks.updateMemberTaxClaimsAction.mockResolvedValue({
         success: true,
         data: null,
       });
-      renderSummary([ada, adaNextWeek], false, payroll(), "u1");
+      renderSummary(
+        [ada, adaNextWeek],
+        false,
+        payroll({ claims: [zeroClaims("u2")] }),
+        "u1",
+      );
       const before = screen.getByTestId("deduction-federal-tax").textContent;
       fireEvent.click(screen.getByTestId("edit-own-td1"));
       expect(screen.getByText("Your TD1 amounts")).toBeInTheDocument();

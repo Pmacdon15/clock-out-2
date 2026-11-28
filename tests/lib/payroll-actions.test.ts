@@ -104,6 +104,15 @@ describe("custom deduction actions", () => {
     expect(mocks.updateTag).toHaveBeenCalledWith("custom-deductions-org_1");
   });
 
+  it("returns why an add failed", async () => {
+    mocks.addCustomDeductionDal.mockResolvedValueOnce(
+      err({ reason: "Member not found" }),
+    );
+    await expect(
+      addCustomDeductionAction({ ...deduction, memberId: "u9" }),
+    ).resolves.toEqual({ success: false, error: "Member not found" });
+  });
+
   it("removes and refreshes the org's deductions", async () => {
     mocks.deleteCustomDeductionDal.mockResolvedValueOnce(
       ok({ org_id: "org_1" }),
